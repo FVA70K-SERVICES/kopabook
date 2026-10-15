@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, nav } from "../lib/api";
 import { orgTypeFor, NAV_MODULES } from "../lib/businessTypes";
 import SyncStatus from "./SyncStatus.jsx";
+import ThemeToggle from "./ThemeToggle.jsx";
 import UsageMeter, { UpgradeNudge } from "./UsageMeter.jsx";
 
 const ALL_LINKS = [
@@ -62,7 +63,10 @@ export default function Layout({ session, children }) {
       <div className="main">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 0" }}>
           <button className="menu-btn" onClick={() => setOpen(!open)}>☰ Menu</button>
-          <SyncStatus />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ThemeToggle />
+            <SyncStatus />
+          </div>
         </div>
         {billing && (
           <UpgradeNudge

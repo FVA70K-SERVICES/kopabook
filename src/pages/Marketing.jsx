@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
+import ThemeToggle from "../components/ThemeToggle";
 
 function MNav() {
   return (
@@ -12,6 +13,7 @@ function MNav() {
           <a href="/hotels" className="hide-m">Hotels</a>
           <a href="/pricing" className="hide-m">Pricing</a>
           <a href="/login">Sign in</a>
+          <ThemeToggle />
           <a href="/waitlist" className="btn btn-primary btn-sm">Join waitlist</a>
         </nav>
       </div>
@@ -71,7 +73,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="section" style={{ background: "#fff", borderTop: "1px solid var(--line)" }}>
+      <section className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
         <div className="wrap">
           <h2>How it works</h2>
           <div className="steps narrow" style={{ margin: "30px auto" }}>
@@ -313,7 +315,7 @@ export function HotelsLandingPage() {
         </div>
       </section>
 
-      <section className="section" style={{ background: "#fff", borderTop: "1px solid var(--line)" }}>
+      <section className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
         <div className="wrap">
           <h2>Get running today</h2>
           <div className="steps narrow" style={{ margin: "30px auto" }}>
