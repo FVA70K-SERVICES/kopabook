@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, nav } from "../lib/api";
 import { orgTypeFor, NAV_MODULES, NAV_GROUPS, MOBILE_PRIORITY } from "../lib/businessTypes";
+import BusinessSwitcher from "./BusinessSwitcher";
 import SyncStatus from "./SyncStatus.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import UsageMeter, { UpgradeNudge } from "./UsageMeter.jsx";
@@ -19,6 +20,7 @@ const ALL_LINKS = [
   { to: "/app/messages", label: "Messages", icon: "💬" },
   { to: "/app/reports", label: "Reports", icon: "📈" },
   { to: "/app/staff", label: "Staff", icon: "🧑‍💼" },
+  { to: "/app/activity", label: "Activity", icon: "🕒" },
   { to: "/app/settings", label: "Settings", icon: "⚙️" },
 ];
 
@@ -72,7 +74,7 @@ export default function Layout({ session, children }) {
             {collapsed ? "»" : "«"}
           </button>
         </div>
-        <div className="biz">{session.business?.name || "Your business"}</div>
+        <BusinessSwitcher session={session} collapsed={collapsed} />
         <nav className="snav">
           {groups.map((g, gi) => (
             <div key={gi} className="nav-group">

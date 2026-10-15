@@ -25,9 +25,23 @@ export const api = {
   bootstrap: (payload) => request("/api/auth/bootstrap", { method: "POST", body: JSON.stringify(payload) }),
 };
 
-export function fmt(n) {
+const CURRENCY_SYMBOLS = {
+  NGN: "₦", GHS: "₵", USD: "$", EUR: "€", GBP: "£", KES: "KSh ", UGX: "USh ",
+  TZS: "TSh ", ZAR: "R ", INR: "₹", PHP: "₱", CNY: "¥", JPY: "¥", AED: "د.إ ",
+};
+
+// The active business currency, set from the session after sign-in.
+let activeCurrency = "NGN";
+export function setCurrency(code) {
+  if (/^[A-Z]{3}$/.test(String(code || ""))) activeCurrency = code;
+}
+export function getCurrency() { return activeCurrency; }
+
+export function fmt(n, currency) {
+  const code = /^[A-Z]{3}$/.test(String(currency || "")) ? currency : activeCurrency;
   const v = Number(n || 0);
-  return "₦" + v.toLocaleString("en-NG", { maximumFractionDigits: 2 });
+  const sym = CURRENCY_SYMBOLS[code] || (code + " ");
+  return sym + v.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 export function todayISO() {
