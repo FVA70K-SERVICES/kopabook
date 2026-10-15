@@ -237,7 +237,7 @@ export default function SalesPage() {
           </div>
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>Sale</th><th>Customer</th><th>Total</th><th>Paid</th><th>Balance</th><th>Time</th></tr></thead>
+              <thead><tr><th>Sale</th><th>Customer</th><th>Total</th><th>Paid</th><th>Balance</th><th>Time</th><th></th></tr></thead>
               <tbody>
                 {history.map((s) => (
                   <tr key={s.id}>
@@ -247,6 +247,7 @@ export default function SalesPage() {
                     <td className="money">{fmt(s.amount_paid)}</td>
                     <td className={Number(s.balance_due) > 0 ? "money debt-amt" : "money"}>{fmt(s.balance_due)}</td>
                     <td><small>{s.created_at?.slice(11, 16)}</small></td>
+                    <td><a className="btn btn-secondary btn-sm" href={`/app/receipt/sale/${s.id}`} target="_blank" rel="noreferrer">🧾</a></td>
                   </tr>
                 ))}
               </tbody>
