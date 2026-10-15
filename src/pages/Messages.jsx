@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, fmt } from "../lib/api";
 import { waLink } from "../lib/whatsapp";
+import { sendVia } from "../lib/channels";
+import ChannelPicker from "../components/ChannelPicker";
 import { promoCardUrl, shareCard, downloadCard } from "../lib/shareCards";
 
 // Messages: WhatsApp broadcasts to customers and quick notes to staff.
@@ -27,6 +29,7 @@ export default function MessagesPage({ session }) {
   const [staffTpl, setStaffTpl] = useState("shift");
   const [staffMsg, setStaffMsg] = useState("");
   const [staffQueue, setStaffQueue] = useState(null);
+  const [channel, setChannel] = useState("whatsapp");
 
   useEffect(() => {
     Promise.all([
@@ -84,8 +87,8 @@ export default function MessagesPage({ session }) {
     const t = queue.list[queue.idx];
     if (!t) return;
     const msg = message.replace(/\{name\}/g, t.name || "valued customer");
-    log("broadcast", { customerId: t.id, phone: t.phone, message: msg });
-    window.open(waLink(t.phone, msg), "_blank", "noopener");
+    log("broadcast", { customerId: t.id, phone: t.phone, message: `[${channel}] ${msg}` });
+    sendVia(channel, { phone: t.phone, text: msg });
     if (queue.idx + 1 < queue.list.length) setQueue({ ...queue, idx: queue.idx + 1 });
     else { setQueue(null); api.get("/api/reminders").then((d) => setLogs(d.logs || [])).catch(() => {}); }
   }
@@ -100,8 +103,8 @@ export default function MessagesPage({ session }) {
     const m = staffQueue.list[staffQueue.idx];
     if (!m) return;
     const msg = fillStaff(staffQueue.msg, m.full_name);
-    log("staff", { userId: m.id, phone: m.phone, message: msg });
-    window.open(waLink(m.phone, msg), "_blank", "noopener");
+    log("staff", { userId: m.id, phone: m.phone, message: `[${channel}] ${msg}` });
+    sendVia(channel, { phone: m.phone, text: msg });
     if (staffQueue.idx + 1 < staffQueue.list.length) setStaffQueue({ ...staffQueue, idx: staffQueue.idx + 1 });
     else { setStaffQueue(null); api.get("/api/reminders").then((d) => setLogs(d.logs || [])).catch(() => {}); }
   }
@@ -116,9 +119,13 @@ export default function MessagesPage({ session }) {
     <>
       <div className="page-head"><h1>Messages</h1></div>
       <p className="hint" style={{ marginTop: 0 }}>
-        Send updates on WhatsApp. Each tap opens WhatsApp with the message ready; you press send.
+        Send updates on WhatsApp, SMS or Telegram. Each tap opens the app with the message ready; you press send.
         Nothing goes out automatically.
       </p>
+
+      <div style={{ marginBottom: 12 }}>
+        <ChannelPicker value={channel} onChange={setChannel} />
+      </div>
 
       <div className="toolbar" style={{ marginBottom: 16 }}>
         <button className={"btn btn-sm " + (tab === "broadcast" ? "btn-primary" : "btn-secondary")} onClick={() => setTab("broadcast")}>Customer broadcast</button>

@@ -88,7 +88,7 @@ export async function onRequestPatch(context) {
     const body = await context.request.json().catch(() => ({}));
     const fields = [];
     const params = [];
-    for (const [key, col] of [["name", "name"], ["phone", "phone"], ["notes", "notes"], ["tags", "tags"]]) {
+    for (const [key, col] of [["name", "name"], ["phone", "phone"], ["notes", "notes"], ["tags", "tags"], ["telegram", "telegram"]]) {
       if (body[key] !== undefined) {
         const v = String(body[key]).trim();
         fields.push(`${col} = ?`);

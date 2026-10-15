@@ -1,5 +1,25 @@
 import { useEffect, useState } from "react";
 import { api, fmt, nav } from "../lib/api";
+import { normalizeNaijaPhone } from "../lib/whatsapp";
+
+function parseContactsCsv(text) {
+  const out = [];
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^name/i.test(line)) continue;
+    const parts = line.split(/[,;\t]/).map((p) => p.trim()).filter(Boolean);
+    if (!parts.length) continue;
+    let phone = "";
+    let nameParts = [];
+    for (const p of parts) {
+      if (!phone && /[0-9]{7,}/.test(p)) phone = p;
+      else nameParts.push(p);
+    }
+    const name = nameParts.join(" ").slice(0, 80);
+    if (name && phone) out.push({ name, phone });
+  }
+  return out;
+}
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState([]);
@@ -9,6 +29,19 @@ export default function CustomersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", notes: "" });
   const [saving, setSaving] = useState(false);
+  const [phoneContacts, setPhoneContacts] = useState([]);
+  const [contactsCount, setContactsCount] = useState(0);
+  const [showContacts, setShowContacts] = useState(false);
+  const [csvText, setCsvText] = useState("");
+  const [importing, setImporting] = useState(false);
+
+  async function loadContacts() {
+    try {
+      const d = await api.get("/api/phone-contacts");
+      setPhoneContacts(d.contacts || []);
+      setContactsCount(d.count || 0);
+    } catch { /* optional feature */ }
+  }
 
   async function load(search) {
     setLoading(true);
@@ -18,7 +51,52 @@ export default function CustomersPage() {
     } catch (e) { setError(e.message); }
     setLoading(false);
   }
-  useEffect(() => { load(""); }, []);
+  useEffect(() => { load(""); loadContacts(); }, []);
+
+  const contactDigits = new Set(phoneContacts.map((c) => normalizeNaijaPhone(c.phone)).filter(Boolean));
+  const isInContacts = (phone) => {
+    const d = normalizeNaijaPhone(phone);
+    return d && contactDigits.has(d);
+  };
+
+  async function importContacts(list) {
+    if (!list.length) { setError("No contacts found to import."); return; }
+    setImporting(true);
+    try {
+      const d = await api.post("/api/phone-contacts", { contacts: list });
+      setError("");
+      alert(`Imported ${d.imported} phone contacts.`);
+      setCsvText("");
+      loadContacts();
+    } catch (err) { setError(err.message); }
+    setImporting(false);
+  }
+
+  async function pickFromPhone() {
+    try {
+      if (!navigator.contacts || !navigator.contacts.select) {
+        setError("Your browser does not support picking contacts. Use the CSV option instead.");
+        return;
+      }
+      const picked = await navigator.contacts.select(["name", "tel"], { multiple: true });
+      const list = [];
+      for (const p of picked) {
+        const name = (p.name && p.name[0]) || "";
+        for (const t of (p.tel || [])) list.push({ name, phone: t });
+      }
+      await importContacts(list);
+    } catch (err) {
+      if (err && err.name !== "NotAllowedError") setError("Could not read contacts: " + err.message);
+    }
+  }
+
+  async function clearContacts() {
+    if (!window.confirm(`Remove all ${contactsCount} imported phone contacts?`)) return;
+    try {
+      await api.del("/api/phone-contacts?id=all");
+      loadContacts();
+    } catch (err) { setError(err.message); }
+  }
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -39,7 +117,12 @@ export default function CustomersPage() {
     <>
       <div className="page-head">
         <h1>Customers</h1>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Add customer</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowContacts(true)}>
+            📱 Contacts{contactsCount > 0 ? ` (${contactsCount})` : ""}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Add customer</button>
+        </div>
       </div>
 
       <div className="metric-grid" style={{ marginBottom: 12 }}>
@@ -63,7 +146,7 @@ export default function CustomersPage() {
                 const tags = String(c.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
                 return (
                   <tr key={c.id}>
-                    <td><strong>{c.name}</strong></td>
+                    <td><strong>{c.name}</strong>{isInContacts(c.phone) && <span title="In your phone contacts"> 📱</span>}</td>
                     <td>{c.phone || "—"}</td>
                     <td>{tags.length ? tags.map((t) => <span key={t} className="pill pill-green" style={{ marginRight: 4 }}>{t}</span>) : <small style={{ color: "var(--muted)" }}>—</small>}</td>
                     <td className={Number(c.outstanding) > 0 ? "money debt-amt" : "money"}>{fmt(c.outstanding)}</td>
@@ -74,6 +157,36 @@ export default function CustomersPage() {
             </tbody>
           </table>
           {customers.length === 0 && <p className="empty">No customers yet. Add your first one above.</p>}
+        </div>
+      )}
+
+      {showContacts && (
+        <div className="modal-back" onClick={() => setShowContacts(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>📱 Phone contacts</h2>
+            <p className="hint">
+              Import your phone's real contacts so KopaBook can match them against your customers.
+              Matching customers get a 📱 badge. Your contacts stay in your own business database.
+            </p>
+            <p><strong>{contactsCount}</strong> contacts imported.</p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <button className="btn btn-primary btn-sm" onClick={pickFromPhone} disabled={importing}>
+                {importing ? "Importing..." : "Pick from phone"}
+              </button>
+              {contactsCount > 0 && (
+                <button className="btn btn-secondary btn-sm" onClick={clearContacts}>Clear all</button>
+              )}
+            </div>
+            <div className="field"><label>Or paste CSV (name, phone per line)</label>
+              <textarea rows={4} value={csvText} onChange={(e) => setCsvText(e.target.value)}
+                placeholder={"Mama Nkechi, 08031234567\nJohn Okafor, +2348031234568"} />
+            </div>
+            <button className="btn btn-secondary btn-block" disabled={importing || !csvText.trim()}
+              onClick={() => importContacts(parseContactsCsv(csvText))}>
+              {importing ? "Importing..." : "Import pasted contacts"}
+            </button>
+            <button className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => setShowContacts(false)}>Close</button>
+          </div>
         </div>
       )}
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, fmt, nav } from "../lib/api";
 import { waLink, fillReminderTemplate } from "../lib/whatsapp";
+import { sendVia } from "../lib/channels";
+import ChannelPicker from "../components/ChannelPicker";
 
 const DUE_DAYS = 7;
 
@@ -24,6 +26,7 @@ export default function DebtsPage({ session }) {
   const [phoneInput, setPhoneInput] = useState("");
   // Remind-all queue
   const [queue, setQueue] = useState(null); // { list, idx }
+  const [channel, setChannel] = useState("whatsapp");
   const [payModes, setPayModes] = useState([]);
 
   useEffect(() => {
@@ -59,7 +62,7 @@ export default function DebtsPage({ session }) {
   function openReminder(debtor, phone) {
     const message = reminderText(debtor);
     logReminder(debtor, phone, message);
-    window.open(waLink(phone, message), "_blank", "noopener");
+    sendVia(channel, { phone, text: message });
     load();
   }
 
@@ -111,11 +114,14 @@ export default function DebtsPage({ session }) {
     <>
       <div className="page-head">
         <h1>Debts</h1>
-        {dueDebtors.length > 0 && (
-          <button className="btn btn-primary btn-sm" onClick={startQueue}>
-            Remind all due ({dueDebtors.filter((d) => d.phone).length})
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <ChannelPicker value={channel} onChange={setChannel} />
+          {dueDebtors.length > 0 && (
+            <button className="btn btn-primary btn-sm" onClick={startQueue}>
+              Remind all due ({dueDebtors.filter((d) => d.phone).length})
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -152,8 +158,8 @@ export default function DebtsPage({ session }) {
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         <button className="btn btn-primary btn-sm" onClick={() => setPaying(d)}>Record payment</button>
                         {d.phone
-                          ? <button className="btn btn-secondary btn-sm" onClick={() => openReminder(d, d.phone)}>Remind on WhatsApp</button>
-                          : <button className="btn btn-secondary btn-sm" onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind on WhatsApp</button>}
+                          ? <button className="btn btn-secondary btn-sm" onClick={() => openReminder(d, d.phone)}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>
+                          : <button className="btn btn-secondary btn-sm" onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>}
                       </div>
                       {askPhone && askPhone.id === d.id && (
                         <div style={{ marginTop: 8, display: "flex", gap: 6 }}>

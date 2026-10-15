@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, fmt, nav } from "../lib/api";
 import { waLink, fillReminderTemplate } from "../lib/whatsapp";
+import { sendVia } from "../lib/channels";
+import ChannelPicker from "../components/ChannelPicker";
 import { debtCardUrl, shareCard } from "../lib/shareCards";
 
 const TAG_SUGGESTIONS = ["VIP", "Wholesaler", "Regular", "New", "Watch"];
@@ -18,13 +20,14 @@ export default function CustomerDetailPage({ customerId }) {
   const [form, setForm] = useState({ name: "", phone: "", notes: "", tags: "" });
   const [saving, setSaving] = useState(false);
   const [biz, setBiz] = useState({ name: "", reminder_template: "", brand_color: "#166534", tagline: "" });
+  const [channel, setChannel] = useState("whatsapp");
 
   async function load() {
     setLoading(true);
     try {
       const d = await api.get(`/api/customer-profile?id=${customerId}`);
       setData(d);
-      setForm({ name: d.customer.name || "", phone: d.customer.phone || "", notes: d.customer.notes || "", tags: d.customer.tags || "" });
+      setForm({ name: d.customer.name || "", phone: d.customer.phone || "", notes: d.customer.notes || "", tags: d.customer.tags || "", telegram: d.customer.telegram || "" });
       setError("");
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -72,9 +75,9 @@ export default function CustomerDetailPage({ customerId }) {
   async function remind() {
     const message = remindText();
     try {
-      await api.post("/api/reminders", { kind: "debt", customerId: customer.id, phone: customer.phone, message });
+      await api.post("/api/reminders", { kind: "debt", customerId: customer.id, phone: customer.phone, message: `[${channel}] ${message}` });
     } catch { /* never block */ }
-    window.open(waLink(customer.phone, message), "_blank", "noopener");
+    sendVia(channel, { phone: customer.phone, text: message, telegram: customer.telegram });
     load();
   }
 
@@ -99,6 +102,7 @@ export default function CustomerDetailPage({ customerId }) {
           <form onSubmit={save}>
             <div className="field"><label>Name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
             <div className="field"><label>Phone (WhatsApp)</label><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="080..." /></div>
+            <div className="field"><label>Telegram username (optional)</label><input value={form.telegram} onChange={(e) => set("telegram", e.target.value)} placeholder="@username" /></div>
             <div className="field"><label>Tags (comma separated)</label><input value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="VIP, Wholesaler" /></div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
               {TAG_SUGGESTIONS.map((t) => (
@@ -126,9 +130,14 @@ export default function CustomerDetailPage({ customerId }) {
                 <p style={{ fontSize: 14, margin: 0, whiteSpace: "pre-wrap" }}>📝 {customer.notes}</p>
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <ChannelPicker value={channel} onChange={setChannel} />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               {customer.phone && (
-                <a className="btn btn-secondary btn-sm" target="_blank" rel="noreferrer" href={waLink(customer.phone, `Hello ${customer.name}!`)}>WhatsApp</a>
+                <button className="btn btn-secondary btn-sm" onClick={() => sendVia(channel, { phone: customer.phone, text: `Hello ${customer.name}!`, telegram: customer.telegram })}>
+                  Message via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}
+                </button>
               )}
               {customer.phone && (
                 <a className="btn btn-secondary btn-sm" href={`tel:${customer.phone}`}>Call</a>
