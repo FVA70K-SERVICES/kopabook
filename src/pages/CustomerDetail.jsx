@@ -21,6 +21,8 @@ export default function CustomerDetailPage({ customerId }) {
   const [saving, setSaving] = useState(false);
   const [biz, setBiz] = useState({ name: "", reminder_template: "", brand_color: "#166534", tagline: "" });
   const [channel, setChannel] = useState("whatsapp");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -47,6 +49,33 @@ export default function CustomerDetailPage({ customerId }) {
       load();
     } catch (err) { setError(err.message); }
     setSaving(false);
+  }
+
+  async function uploadPhoto() {
+    if (!photoFile || !customer) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("folder", "customers");
+      fd.append("refId", customer.id);
+      fd.append("file", photoFile);
+      const res = await fetch("/api/files", { method: "POST", body: fd, credentials: "same-origin" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.ok === false) throw new Error(d.message || "Upload failed.");
+      setPhotoFile(null);
+      load();
+    } catch (err) { setError(err.message); }
+    setUploading(false);
+  }
+
+  async function removePhoto() {
+    if (!customer || !window.confirm("Remove this customer photo?")) return;
+    try {
+      const res = await fetch(`/api/files?folder=customers&refId=${customer.id}`, { method: "DELETE", credentials: "same-origin" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.ok === false) throw new Error(d.message || "Could not remove photo.");
+      load();
+    } catch (err) { setError(err.message); }
   }
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
@@ -103,6 +132,23 @@ export default function CustomerDetailPage({ customerId }) {
             <div className="field"><label>Name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
             <div className="field"><label>Phone (WhatsApp)</label><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="080..." /></div>
             <div className="field"><label>Telegram username (optional)</label><input value={form.telegram} onChange={(e) => set("telegram", e.target.value)} placeholder="@username" /></div>
+            <div className="field"><label>Photo</label>
+              {customer.photo_key && (
+                <div style={{ marginBottom: 8 }}>
+                  <img src={`/api/files?key=${encodeURIComponent(customer.photo_key)}`} alt=""
+                    style={{ width: 96, height: 96, objectFit: "cover", borderRadius: "50%" }} />
+                </div>
+              )}
+              <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files[0] || null)} />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={!photoFile || uploading} onClick={uploadPhoto}>
+                  {uploading ? "Uploading..." : "Upload photo"}
+                </button>
+                {customer.photo_key && (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={removePhoto}>Remove</button>
+                )}
+              </div>
+            </div>
             <div className="field"><label>Tags (comma separated)</label><input value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="VIP, Wholesaler" /></div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
               {TAG_SUGGESTIONS.map((t) => (
@@ -118,8 +164,20 @@ export default function CustomerDetailPage({ customerId }) {
           </form>
         ) : (
           <>
-            <h2 style={{ margin: "0 0 4px" }}>{customer.name}</h2>
-            <p style={{ color: "var(--muted)", margin: "0 0 10px" }}>{customer.phone || "No phone number"}</p>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
+              {customer.photo_key ? (
+                <img src={`/api/files?key=${encodeURIComponent(customer.photo_key)}`} alt=""
+                  style={{ width: 64, height: 64, objectFit: "cover", borderRadius: "50%" }} />
+              ) : (
+                <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 700, color: "var(--muted)" }}>
+                  {(customer.name || "?").trim().charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <h2 style={{ margin: "0 0 4px" }}>{customer.name}</h2>
+                <p style={{ color: "var(--muted)", margin: 0 }}>{customer.phone || "No phone number"}</p>
+              </div>
+            </div>
             {tags.length > 0 && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                 {tags.map((t) => <span key={t} className="pill pill-green">{t}</span>)}

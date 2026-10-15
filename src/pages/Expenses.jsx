@@ -13,6 +13,24 @@ export default function ExpensesPage({ session }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ amount: "", categoryId: "", categoryName: "", note: "", incurredOn: todayISO() });
   const [saving, setSaving] = useState(false);
+  const [uploadingId, setUploadingId] = useState(null);
+
+  async function attachReceipt(expenseId, file) {
+    if (!file) return;
+    setUploadingId(expenseId);
+    try {
+      const fd = new FormData();
+      fd.append("folder", "expenses");
+      fd.append("refId", expenseId);
+      fd.append("file", file);
+      const res = await fetch("/api/files", { method: "POST", body: fd, credentials: "same-origin" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.ok === false) throw new Error(d.message || "Upload failed.");
+      setError("");
+      load();
+    } catch (e) { setError(e.message); }
+    setUploadingId(null);
+  }
 
   async function load() {
     setLoading(true);
@@ -62,7 +80,7 @@ export default function ExpensesPage({ session }) {
       {loading ? <div className="loading">Loading...</div> : (
         <div className="table-wrap">
           <table className="data">
-            <thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Amount</th></tr></thead>
+            <thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Amount</th><th>Receipt</th></tr></thead>
             <tbody>
               {expenses.map((x) => (
                 <tr key={x.id}>
@@ -70,6 +88,18 @@ export default function ExpensesPage({ session }) {
                   <td>{x.category_name || "—"}</td>
                   <td>{x.note || "—"}</td>
                   <td className="money">{fmt(x.amount)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {x.receipt_key ? (
+                      <a className="btn btn-secondary btn-sm" target="_blank" rel="noreferrer"
+                        href={`/api/files?key=${encodeURIComponent(x.receipt_key)}`}>View</a>
+                    ) : canManageExpenses ? (
+                      <label className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }}>
+                        {uploadingId === x.id ? "..." : "Attach"}
+                        <input type="file" accept="image/*,.pdf" style={{ display: "none" }}
+                          onChange={(e) => attachReceipt(x.id, e.target.files[0])} />
+                      </label>
+                    ) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

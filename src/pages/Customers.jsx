@@ -146,7 +146,14 @@ export default function CustomersPage() {
                 const tags = String(c.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
                 return (
                   <tr key={c.id}>
-                    <td><strong>{c.name}</strong>{isInContacts(c.phone) && <span title="In your phone contacts"> 📱</span>}</td>
+                    <td>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        {c.photo_key ? (
+                          <img src={`/api/files?key=${encodeURIComponent(c.photo_key)}`} alt=""
+                            style={{ width: 32, height: 32, objectFit: "cover", borderRadius: "50%" }} />
+                        ) : null}
+                        <strong>{c.name}</strong>
+                      </span>{isInContacts(c.phone) && <span title="In your phone contacts"> 📱</span>}</td>
                     <td>{c.phone || "—"}</td>
                     <td>{tags.length ? tags.map((t) => <span key={t} className="pill pill-green" style={{ marginRight: 4 }}>{t}</span>) : <small style={{ color: "var(--muted)" }}>—</small>}</td>
                     <td className={Number(c.outstanding) > 0 ? "money debt-amt" : "money"}>{fmt(c.outstanding)}</td>
