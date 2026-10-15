@@ -23,7 +23,7 @@ function MFooter() {
       <div className="wrap">
         <div>
           <div className="brand">Kopa<span>Book</span></div>
-          <p>Simple sales, stock and debt tracking for Nigerian businesses.<br />Built by Lifeverse Technologies.</p>
+          <p>Simple sales, stock and debt tracking for Nigerian businesses.<br />Owned by Fortune Godson. Built by FVA70K Services.</p>
         </div>
         <div>
           <a href="/features">Features</a> · <a href="/pricing">Pricing</a> ·{" "}

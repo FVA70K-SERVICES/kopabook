@@ -1,7 +1,7 @@
 # KopaBook
 
 A lightweight merchant operating system for Nigerian small businesses: sales, stock,
-customer debts, expenses, and a live dashboard. Built by Lifeverse Technologies.
+customer debts, expenses, and a live dashboard. Owned by Fortune Godson. Built by FVA70K Services.
 
 **Stack:** React + Vite frontend, Cloudflare Pages Functions API, Cloudflare D1 database.
 
@@ -33,7 +33,7 @@ Then open http://localhost:8788/owner-setup.
 1. Create a D1 database: `npx wrangler d1 create kopabook_db`
 2. Copy the `database_id` into `wrangler.toml`.
 3. Apply migrations: `npx wrangler d1 execute kopabook_db --file=migrations/0001_initial.sql`
-4. Create the Pages project `kopabook` connected to the `Lifeverse-Technologies/kopabook` repo.
+4. Create the Pages project `kopabook` connected to the `FVA70K-SERVICES/kopabook` repo.
 5. In Pages settings:
    - D1 binding: `KOPABOOK_DB` → `kopabook_db`
    - Secret: `BOOTSTRAP_KEY` → a long random string (used once for owner setup)
