@@ -25,6 +25,9 @@ const ALL_LINKS = [
 export default function Layout({ session, children }) {
   const [open, setOpen] = useState(false);
   const [billing, setBilling] = useState(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("kopabook-sidebar") === "collapsed"; } catch { return false; }
+  });
   const path = window.location.pathname;
 
   // Each organization type only sees the service modules that fit it.
@@ -39,23 +42,38 @@ export default function Layout({ session, children }) {
     try { await api.logout(); } finally { nav("/login"); }
   }
 
+  function toggleCollapse() {
+    const next = !collapsed;
+    setCollapsed(next);
+    try { localStorage.setItem("kopabook-sidebar", next ? "collapsed" : "open"); } catch {}
+  }
+
   const navCls = (to) => (path === to || path.startsWith(to + "/") ? "active" : "");
 
   return (
     <div className="app">
-      <aside className={"sidebar" + (open ? " open" : "")}>
-        <div className="brand">Kopa<span>Book</span></div>
+      <aside className={"sidebar" + (open ? " open" : "") + (collapsed ? " collapsed" : "")}>
+        <div className="brand-row">
+          <div className="brand">{collapsed ? "K" : <>Kopa<span>Book</span></>}</div>
+          <button className="collapse-btn" onClick={toggleCollapse}
+            aria-label={collapsed ? "Expand menu" : "Hide menu"}
+            title={collapsed ? "Expand menu" : "Hide menu"}>
+            {collapsed ? "»" : "«"}
+          </button>
+        </div>
         <div className="biz">{session.business?.name || "Your business"}</div>
         <nav className="snav">
           {LINKS.map((l) => (
-            <a key={l.to} href={l.to} className={navCls(l.to)}>
-              <span>{l.icon}</span> {l.label}
+            <a key={l.to} href={l.to} className={navCls(l.to)} title={l.label}>
+              <span className="nico">{l.icon}</span><span className="lbl">{l.label}</span>
             </a>
           ))}
         </nav>
         <div className="user">
-          <div>{session.user?.fullName}</div>
-          <div style={{ color: "#9fb3a6" }}>{session.business?.role}</div>
+          <div className="uinfo">
+            <div>{session.user?.fullName}</div>
+            <div style={{ color: "#9fb3a6" }}>{session.business?.role}</div>
+          </div>
           <button onClick={logout}>Log out</button>
         </div>
       </aside>

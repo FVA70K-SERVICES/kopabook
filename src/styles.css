@@ -152,8 +152,28 @@ a:hover { text-decoration: underline; }
 .sidebar {
   width: 240px; flex-shrink: 0; background: #0f1f14; color: #d7e3da;
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  transition: width 0.2s ease;
 }
-.sidebar .brand { color: #fff; padding: 22px 22px 6px; }
+.brand-row { display: flex; align-items: center; justify-content: space-between; padding: 22px 14px 6px 22px; }
+.sidebar .brand { color: #fff; }
+.collapse-btn {
+  display: none; background: rgba(255,255,255,0.08); border: 0; color: #d7e3da;
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1;
+}
+.collapse-btn:hover { background: rgba(255,255,255,0.16); }
+/* Desktop: collapsible icon rail */
+@media (min-width: 861px) {
+  .collapse-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .sidebar.collapsed { width: 76px; }
+  .sidebar.collapsed .brand-row { padding: 22px 0 6px; justify-content: center; }
+  .sidebar.collapsed .brand { font-size: 24px; }
+  .sidebar.collapsed .biz, .sidebar.collapsed .lbl, .sidebar.collapsed .uinfo { display: none; }
+  .sidebar.collapsed .snav { padding: 0 10px 12px; }
+  .sidebar.collapsed .snav a { justify-content: center; padding: 12px 0; }
+  .sidebar.collapsed .user { padding: 16px 0; text-align: center; }
+  .sidebar.collapsed .user button { font-size: 12px; }
+}
+.sidebar .brand { color: #fff; font-weight: 800; font-size: 22px; letter-spacing: -0.5px; }
 .sidebar .brand span { color: #4ade80; }
 .sidebar .biz { padding: 0 22px 18px; font-size: 13px; color: #9fb3a6; }
 .snav { display: flex; flex-direction: column; gap: 2px; padding: 0 12px 12px; flex: 1; overflow-y: auto; min-height: 0; }

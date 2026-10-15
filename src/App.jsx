@@ -3,7 +3,7 @@ import Layout from "./components/Layout";
 import { api, nav } from "./lib/api";
 import {
   LandingPage, FeaturesPage, PricingPage, WaitlistPage, NotFoundPage,
-  HotelsLandingPage, HotelRegisterPage,
+  HotelsLandingPage,
 } from "./pages/Marketing";
 import { LoginPage, OwnerSetupPage, ForgotPasswordPage } from "./pages/Auth";
 import RegisterPage from "./pages/Register";
