@@ -11,7 +11,9 @@ export default function SalesPage() {
   const [services, setServices] = useState([]);
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState([]);
+  const [customerPick, setCustomerPick] = useState(""); // "" = walk-in, "new" = new buyer, else customer id
   const [customerName, setCustomerName] = useState("");
+  const [customers, setCustomers] = useState([]);
   const [payments, setPayments] = useState([{ mode: "Cash", amount: "" }]);
   const [payModes, setPayModes] = useState([]);
   const [error, setError] = useState("");
@@ -28,6 +30,7 @@ export default function SalesPage() {
   useEffect(() => {
     api.get("/api/products").then((d) => setProducts(d.products)).catch(() => {});
     api.get("/api/services").then((d) => setServices(d.services)).catch(() => {});
+    api.get("/api/customers").then((d) => setCustomers(d.customers || [])).catch(() => {});
     api.get("/api/payment-modes").then((d) => {
       const modes = (d.modes || []).filter((m) => m.enabled);
       setPayModes(modes);
@@ -99,7 +102,7 @@ export default function SalesPage() {
       });
     }
     setCart(lines);
-    if (draft.customerName) setCustomerName(draft.customerName);
+    if (draft.customerName) { setCustomerPick("new"); setCustomerName(draft.customerName); }
     if (draft.amountPaid !== undefined && draft.amountPaid !== "") {
       const rawMode = String(draft.paymentMethod || "Cash");
       const matched = payModes.find((m) => m.name.toLowerCase() === rawMode.toLowerCase())
@@ -148,22 +151,28 @@ export default function SalesPage() {
 
   async function complete() {
     if (cart.length === 0) { setError("Add at least one item."); return; }
-    if (balance > 0 && !customerName.trim()) { setError("Unpaid balance needs a customer name."); return; }
+    const pickedCustomer = customerPick && customerPick !== "new"
+      ? customers.find((c) => String(c.id) === String(customerPick)) : null;
+    const newName = customerPick === "new" ? customerName.trim() : "";
+    if (balance > 0 && !customerPick) { setError("Unpaid balance needs a customer. Select one or add a new buyer."); return; }
+    if (customerPick === "new" && !newName) { setError("Enter the new buyer's name."); return; }
     setSaving(true); setError("");
     try {
       const d = await api.post("/api/sales", {
         items: cart.map((l) => l.serviceId
           ? { serviceId: l.serviceId, quantity: l.qty, unitPrice: l.unitPrice }
           : { productId: l.productId, quantity: l.qty, unitPrice: l.unitPrice }),
-        customerName: customerName.trim() || undefined,
+        customerId: pickedCustomer ? pickedCustomer.id : undefined,
+        customerName: newName || undefined,
         payments: payments
           .filter((p) => Number(p.amount) > 0 && p.mode)
           .map((p) => ({ mode: p.mode, amount: Number(p.amount) })),
       });
       setDone(d);
       setDoneItems(cart.map((l) => ({ qty: l.qty, name: l.name, unitPrice: fmt(l.unitPrice) })));
-      setDoneCustomer(customerName.trim());
-      setCart([]); setCustomerName(""); setPayments([{ mode: payModes[0]?.name || "Cash", amount: "" }]);
+      setDoneCustomer(pickedCustomer ? pickedCustomer.name : newName);
+      setCart([]); setCustomerPick(""); setCustomerName("");
+      setPayments([{ mode: payModes[0]?.name || "Cash", amount: "" }]);
       const pd = await api.get("/api/products"); setProducts(pd.products);
     } catch (e) { setError(e.message); }
     setSaving(false);
@@ -322,9 +331,21 @@ export default function SalesPage() {
               <>
                 <div className="total-row"><span>Total</span><span>{fmt(total)}</span></div>
                 <div className="field" style={{ marginTop: 14 }}>
-                  <label>Customer name (required if not fully paid)</label>
-                  <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Walk-in customer name" />
+                  <label>Customer</label>
+                  <select value={customerPick} onChange={(e) => setCustomerPick(e.target.value)}>
+                    <option value="">Walk-in (no customer)</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}{c.phone ? ` — ${c.phone}` : ""}</option>
+                    ))}
+                    <option value="new">＋ New buyer...</option>
+                  </select>
                 </div>
+                {customerPick === "new" && (
+                  <div className="field">
+                    <label>New buyer name (required if not fully paid)</label>
+                    <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Buyer's name" />
+                  </div>
+                )}
                 <div className="field" style={{ marginTop: 14 }}>
                   <label>Payments</label>
                   {payments.map((p, i) => (
@@ -346,7 +367,7 @@ export default function SalesPage() {
                   <button className="btn btn-secondary btn-sm" onClick={addPay}>+ Split payment</button>
                   {paid > 0 && <p className="hint" style={{ margin: "6px 0 0" }}>Paid so far: <strong>{fmt(paid)}</strong></p>}
                 </div>
-                {balance > 0 && <div className="alert alert-error" style={{ marginBottom: 12 }}>Balance of {fmt(balance)} will be recorded as debt for {customerName || "the customer"}.</div>}
+                {balance > 0 && <div className="alert alert-error" style={{ marginBottom: 12 }}>Balance of {fmt(balance)} will be recorded as debt for {customerPick === "new" ? (customerName.trim() || "the new buyer") : (customers.find((c) => String(c.id) === String(customerPick))?.name || "the customer")}.</div>}
                 <button className="btn btn-primary btn-block" disabled={saving} onClick={complete}>
                   {saving ? "Saving..." : `Complete sale · ${fmt(total)}`}
                 </button>
