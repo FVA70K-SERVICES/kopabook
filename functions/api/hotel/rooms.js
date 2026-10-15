@@ -1,5 +1,5 @@
 // /api/hotel/rooms — GET list, POST create, PATCH update, DELETE remove.
-import { json, getAuthContext, requireAuth, audit } from "../_utils";
+import { json, getAuthContext, requireAuth, requireHotelRole, audit } from "../_utils";
 
 const STATUSES = ["vacant", "occupied", "reserved", "maintenance"];
 
@@ -27,6 +27,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const roleDenied = requireHotelRole(auth, ["hotel_manager"]);
+    if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));
     const room_number = String(body.room_number || "").trim();
     if (!room_number) return json({ ok: false, message: "Room number is required." }, 400);
@@ -60,6 +62,12 @@ export async function onRequestPatch(context) {
     const denied = requireAuth(auth);
     if (denied) return denied;
     const body = await context.request.json().catch(() => ({}));
+    // Status-only updates (housekeeping) are open to housekeepers;
+    // editing room details or rates needs a manager.
+    const keys = Object.keys(body).filter((k) => k !== "id");
+    const statusOnly = keys.length === 1 && keys[0] === "status";
+    const roleDenied = requireHotelRole(auth, statusOnly ? ["hotel_manager", "housekeeper"] : ["hotel_manager"]);
+    if (roleDenied) return roleDenied;
     const id = Number(body.id);
     if (!id) return json({ ok: false, message: "Room id is required." }, 400);
 
@@ -100,6 +108,8 @@ export async function onRequestDelete(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const roleDenied = requireHotelRole(auth, []);
+    if (roleDenied) return roleDenied;
     const id = Number(new URL(context.request.url).searchParams.get("id"));
     if (!id) return json({ ok: false, message: "Room id is required." }, 400);
 

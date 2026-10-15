@@ -197,6 +197,9 @@ export default function StaffPage({ session }) {
         <p style={{ color: "var(--muted)", margin: 0 }}>
           <strong>Attendants</strong> record sales and view their work areas.{" "}
           <strong>Managers</strong> also manage products, stock, customers and debts.{" "}
+          <strong>Hotel managers</strong> run rooms, bookings and folios.{" "}
+          <strong>Receptionists</strong> handle bookings, check-in/out, charges and payments.{" "}
+          <strong>Housekeepers</strong> update room status.{" "}
           <strong>Owners</strong> control everything including staff and settings.
         </p>
       </div>
@@ -353,6 +356,7 @@ export default function StaffPage({ session }) {
                 <div><label>Role</label>
                   <select value={form.role} onChange={(e) => set("role", e.target.value)}>
                     <option value="attendant">Attendant</option><option value="manager">Manager</option>
+                    <option value="hotel_manager">Hotel manager</option><option value="receptionist">Receptionist</option><option value="housekeeper">Housekeeper</option>
                   </select>
                 </div>
               </div></div>

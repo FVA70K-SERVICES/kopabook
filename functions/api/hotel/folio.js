@@ -4,7 +4,7 @@
 // POST { action: "payment", bookingId, amount, mode, note }
 // POST { action: "checkout", bookingId, amount?, mode?, note? } — optional final
 //   payment, then closes the booking and frees the room.
-import { json, getAuthContext, requireAuth, audit } from "../_utils";
+import { json, getAuthContext, requireAuth, requireHotelRole, audit } from "../_utils";
 
 const CATEGORIES = ["room", "restaurant", "bar", "laundry", "transport", "other"];
 
@@ -51,6 +51,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const roleDenied = requireHotelRole(auth, ["hotel_manager", "receptionist"]);
+    if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));
     const action = String(body.action || "");
     const bookingId = Number(body.bookingId);

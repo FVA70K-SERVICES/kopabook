@@ -34,7 +34,18 @@ export async function onRequestPost(context) {
 
     const body = await context.request.json().catch(() => ({}));
     const { fullName, email, password, role, phone } = body;
-    const staffRole = ["manager", "attendant"].includes(role) ? role : "attendant";
+    const staffRole = ["manager", "attendant", "hotel_manager", "receptionist", "housekeeper"].includes(role)
+      ? role : "attendant";
+
+    // Sensible default permission flags per role.
+    const roleFlags = {
+      manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
+      attendant: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
+      hotel_manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
+      receptionist: { can_view_profit: 0, can_discount: 1, can_manage_expenses: 0, can_manage_products: 0 },
+      housekeeper: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
+    };
+    const flags = roleFlags[staffRole];
 
     if (!fullName || !email || !password) {
       return json({ ok: false, message: "Name, email and password are required." }, 400);
@@ -57,9 +68,12 @@ export async function onRequestPost(context) {
       .run();
 
     await context.env.KOPABOOK_DB.prepare(
-      `INSERT INTO business_members (business_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)`
+      `INSERT INTO business_members (business_id, user_id, role, joined_at,
+        can_view_profit, can_discount, can_manage_expenses, can_manage_products)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind(auth.business.id, userResult.meta.last_row_id, staffRole, now)
+      .bind(auth.business.id, userResult.meta.last_row_id, staffRole, now,
+        flags.can_view_profit, flags.can_discount, flags.can_manage_expenses, flags.can_manage_products)
       .run();
 
     await audit(context, auth, "staff.invite", "user", userResult.meta.last_row_id, { role: staffRole });

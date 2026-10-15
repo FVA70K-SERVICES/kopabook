@@ -207,3 +207,21 @@ export async function audit(context, auth, actionType, entityType, entityId, met
     // audit must never break the main flow
   }
 }
+
+// Hotel staff roles. Owner always passes. Shop roles (manager, attendant)
+// get no hotel write access.
+export const HOTEL_ROLES = {
+  owner: "Owner",
+  hotel_manager: "Hotel manager",
+  receptionist: "Receptionist",
+  housekeeper: "Housekeeper",
+};
+
+export function requireHotelRole(auth, allowedRoles) {
+  const role = auth && auth.business && auth.business.role;
+  if (role === "owner" || allowedRoles.includes(role)) return null;
+  return json(
+    { ok: false, message: "Your staff role does not allow this action." },
+    403
+  );
+}

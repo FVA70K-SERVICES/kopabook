@@ -49,7 +49,10 @@ export default function HotelsPage({ session }) {
   const [showCheckout, setShowCheckout] = useState(false);
   const [folioBusy, setFolioBusy] = useState(false);
 
-  const canManage = session?.perms?.can_manage_products !== false;
+  const role = session?.business?.role || "owner";
+  const canManageRooms = ["owner", "hotel_manager"].includes(role);
+  const canFrontdesk = ["owner", "hotel_manager", "receptionist"].includes(role);
+  const canHousekeeping = ["owner", "hotel_manager", "housekeeper"].includes(role);
 
   async function load() {
     setLoading(true);
@@ -212,8 +215,8 @@ export default function HotelsPage({ session }) {
       <div className="page-head">
         <h1>🏨 Hotels</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          {canManage && <button className="btn btn-secondary btn-sm" onClick={openRoomAdd}>+ Room</button>}
-          <button className="btn btn-primary btn-sm" onClick={() => openBookingAdd(null)}>+ Booking</button>
+          {canManageRooms && <button className="btn btn-secondary btn-sm" onClick={openRoomAdd}>+ Room</button>}
+          {canFrontdesk && <button className="btn btn-primary btn-sm" onClick={() => openBookingAdd(null)}>+ Booking</button>}
         </div>
       </div>
 
@@ -241,8 +244,8 @@ export default function HotelsPage({ session }) {
           rooms.length === 0 ? <p className="empty">No rooms yet. Add your first room to start.</p> : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
               {rooms.map((r) => (
-                <div key={r.id} className="card" style={{ margin: 0, borderTop: `4px solid ${STATUS_COLORS[r.status] || "#999"}`, cursor: "pointer" }}
-                  onClick={() => { setEditingRoom(r); openRoomEdit(r); }}>
+                <div key={r.id} className="card" style={{ margin: 0, borderTop: `4px solid ${STATUS_COLORS[r.status] || "#999"}`, cursor: canManageRooms ? "pointer" : "default" }}
+                  onClick={() => { if (canManageRooms) { setEditingRoom(r); openRoomEdit(r); } }}>
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{r.room_number}</div>
                   <div style={{ color: "var(--muted)", fontSize: 13 }}>{r.room_type} · {fmt(r.rate_per_night)}/night</div>
                   <div style={{ marginTop: 6 }}>
@@ -250,11 +253,11 @@ export default function HotelsPage({ session }) {
                   </div>
                   {r.current_guest && <div style={{ fontSize: 12, marginTop: 6 }}>🧑 {r.current_guest}</div>}
                   <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
-                    {(r.status === "vacant") && <button className="btn btn-secondary btn-sm" onClick={() => openBookingAdd(r)}>Book</button>}
-                    {r.status === "maintenance"
+                    {canFrontdesk && r.status === "vacant" && <button className="btn btn-secondary btn-sm" onClick={() => openBookingAdd(r)}>Book</button>}
+                    {canHousekeeping && (r.status === "maintenance"
                       ? <button className="btn btn-secondary btn-sm" onClick={() => setRoomStatus(r, "vacant")}>Back in service</button>
                       : (r.status === "vacant" || r.status === "reserved") &&
-                        <button className="btn btn-secondary btn-sm" onClick={() => setRoomStatus(r, "maintenance")}>Maintenance</button>}
+                        <button className="btn btn-secondary btn-sm" onClick={() => setRoomStatus(r, "maintenance")}>Maintenance</button>)}
                   </div>
                 </div>
               ))}
@@ -286,7 +289,7 @@ export default function HotelsPage({ session }) {
                     <td className="money">{fmt((b.total_charged || 0) - (b.total_paid || 0))}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button className="btn btn-secondary btn-sm" onClick={() => loadFolio(b.id)}>Folio</button>{" "}
-                      {b.status === "reserved" && <button className="btn btn-secondary btn-sm" onClick={() => bookingAction(b.id, "check_in")}>Check in</button>}
+                      {canFrontdesk && b.status === "reserved" && <button className="btn btn-secondary btn-sm" onClick={() => bookingAction(b.id, "check_in")}>Check in</button>}
                     </td>
                   </tr>
                 ))}
@@ -307,7 +310,7 @@ export default function HotelsPage({ session }) {
                   <td className="money">{fmt(r.rate_per_night)}</td>
                   <td><span className="pill" style={{ background: STATUS_COLORS[r.status] + "22", color: STATUS_COLORS[r.status] }}>{r.status}</span></td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    {canManage && <>
+                    {canManageRooms && <>
                       <button className="btn btn-secondary btn-sm" onClick={() => openRoomEdit(r)}>Edit</button>{" "}
                       <button className="btn btn-danger btn-sm" onClick={() => deleteRoom(r)}>Delete</button>
                     </>}
@@ -400,7 +403,7 @@ export default function HotelsPage({ session }) {
                   </tbody>
                 </table></div>
               )}
-              {["reserved", "checked_in"].includes(folio.booking.status) && (
+              {canFrontdesk && ["reserved", "checked_in"].includes(folio.booking.status) && (
                 <form onSubmit={addCharge} style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                   <select value={chargeForm.category} onChange={(e) => setChargeForm({ ...chargeForm, category: e.target.value })}>
                     {CHARGE_CATS.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -421,7 +424,7 @@ export default function HotelsPage({ session }) {
                   </tbody>
                 </table></div>
               )}
-              {["reserved", "checked_in"].includes(folio.booking.status) && (
+              {canFrontdesk && ["reserved", "checked_in"].includes(folio.booking.status) && (
                 <form onSubmit={addPayment} style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                   <input type="number" min="0" step="0.01" placeholder="Amount" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} required style={{ width: 110 }} />
                   <select value={payForm.mode} onChange={(e) => setPayForm({ ...payForm, mode: e.target.value })}>
@@ -439,13 +442,13 @@ export default function HotelsPage({ session }) {
               </div>
 
               <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-                {folio.booking.status === "reserved" && (
+                {canFrontdesk && folio.booking.status === "reserved" && (
                   <button className="btn btn-primary btn-sm" onClick={() => bookingAction(folio.booking.id, "check_in")}>Check in</button>
                 )}
-                {folio.booking.status === "checked_in" && !showCheckout && (
+                {canFrontdesk && folio.booking.status === "checked_in" && !showCheckout && (
                   <button className="btn btn-primary btn-sm" onClick={() => setShowCheckout(true)}>Check out</button>
                 )}
-                {folio.booking.status === "reserved" && (
+                {canFrontdesk && folio.booking.status === "reserved" && (
                   <>
                     <button className="btn btn-secondary btn-sm" onClick={() => bookingAction(folio.booking.id, "cancel")}>Cancel</button>
                     <button className="btn btn-secondary btn-sm" onClick={() => bookingAction(folio.booking.id, "no_show")}>No-show</button>

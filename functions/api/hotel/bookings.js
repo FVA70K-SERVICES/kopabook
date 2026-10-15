@@ -1,6 +1,6 @@
 // /api/hotel/bookings — GET list, POST create (with availability check),
 // PATCH change status: check_in, check_out handled via folio checkout, cancel, no_show.
-import { json, getAuthContext, requireAuth, audit } from "../_utils";
+import { json, getAuthContext, requireAuth, requireHotelRole, audit } from "../_utils";
 
 function nightsBetween(checkIn, checkOut) {
   const ms = new Date(checkOut) - new Date(checkIn);
@@ -48,6 +48,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const roleDenied = requireHotelRole(auth, ["hotel_manager", "receptionist"]);
+    if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));
 
     const room_id = Number(body.room_id);
@@ -113,6 +115,8 @@ export async function onRequestPatch(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const roleDenied = requireHotelRole(auth, ["hotel_manager", "receptionist"]);
+    if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));
     const id = Number(body.id);
     const action = String(body.action || "");
