@@ -4,7 +4,7 @@ import { api, nav } from "./lib/api";
 import {
   LandingPage, FeaturesPage, PricingPage, WaitlistPage, NotFoundPage,
 } from "./pages/Marketing";
-import { LoginPage, OwnerSetupPage } from "./pages/Auth";
+import { LoginPage, OwnerSetupPage, ForgotPasswordPage } from "./pages/Auth";
 import DashboardPage from "./pages/Dashboard";
 import ProductsPage from "./pages/Products";
 import SalesPage from "./pages/Sales";
@@ -44,6 +44,10 @@ function AppRoute({ session }) {
   if (path === "/owner-setup") {
     if (session) { nav("/app/dashboard"); return null; }
     return <OwnerSetupPage />;
+  }
+  if (path === "/forgot-password") {
+    if (session) { nav("/app/dashboard"); return null; }
+    return <ForgotPasswordPage />;
   }
 
   if (path.startsWith("/app")) {

@@ -10,6 +10,10 @@ export default function SettingsPage({ session }) {
   const [ok, setOk] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Change password
+  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
+  const [pwStatus, setPwStatus] = useState({ loading: false, error: "", ok: "" });
+
   const isOwner = session.business?.role === "owner";
 
   useEffect(() => {
@@ -34,6 +38,27 @@ export default function SettingsPage({ session }) {
       setOk("Business profile updated.");
     } catch (err) { setError(err.message); }
     setSaving(false);
+  }
+
+  function setPwField(k, v) { setPw((p) => ({ ...p, [k]: v })); setPwStatus({ loading: false, error: "", ok: "" }); }
+
+  async function changePassword(e) {
+    e.preventDefault();
+    setPwStatus({ loading: true, error: "", ok: "" });
+    try {
+      if (pw.next !== pw.confirm) {
+        setPwStatus({ loading: false, error: "New passwords do not match.", ok: "" });
+        return;
+      }
+      const d = await api.post("/api/auth/change-password", {
+        currentPassword: pw.current,
+        newPassword: pw.next,
+      });
+      setPw({ current: "", next: "", confirm: "" });
+      setPwStatus({ loading: false, error: "", ok: d.message || "Password changed." });
+    } catch (err) {
+      setPwStatus({ loading: false, error: err.message, ok: "" });
+    }
   }
 
   if (loading) return <div className="loading">Loading...</div>;
@@ -67,6 +92,20 @@ export default function SettingsPage({ session }) {
           {isOwner
             ? <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
             : <p style={{ color: "var(--muted)" }}>Only the owner can change business settings.</p>}
+        </form>
+      </div>
+
+      <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Change password</h3>
+        {pwStatus.error && <div className="alert alert-error">{pwStatus.error}</div>}
+        {pwStatus.ok && <div className="alert alert-ok">{pwStatus.ok}</div>}
+        <form onSubmit={changePassword}>
+          <div className="field"><label>Current password</label><input type="password" value={pw.current} onChange={(e) => setPwField("current", e.target.value)} required /></div>
+          <div className="field"><div className="row2">
+            <div><label>New password</label><input type="password" value={pw.next} onChange={(e) => setPwField("next", e.target.value)} required minLength={8} /></div>
+            <div><label>Confirm new</label><input type="password" value={pw.confirm} onChange={(e) => setPwField("confirm", e.target.value)} required minLength={8} /></div>
+          </div></div>
+          <button className="btn btn-secondary" disabled={pwStatus.loading}>{pwStatus.loading ? "Changing..." : "Change password"}</button>
         </form>
       </div>
 

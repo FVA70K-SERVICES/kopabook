@@ -34,6 +34,9 @@ export function LoginPage() {
             <button className="btn btn-primary btn-block" disabled={status.loading}>
               {status.loading ? "Signing in..." : "Sign in"}
             </button>
+            <p style={{ textAlign: "center", marginTop: 12, fontSize: 14 }}>
+              <a href="/forgot-password">Forgot password?</a>
+            </p>
           </form>
           <p style={{ textAlign: "center", marginTop: 18, fontSize: 14, color: "var(--muted)" }}>
             First time here? <a href="/owner-setup">Set up your business</a>
@@ -94,6 +97,77 @@ export function OwnerSetupPage() {
               {status.loading ? "Setting up..." : "Create my business"}
             </button>
           </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ForgotPasswordPage() {
+  const [form, setForm] = useState({ bootstrapKey: "", email: "", newPassword: "", confirm: "" });
+  const [status, setStatus] = useState({ loading: false, error: "", ok: "" });
+
+  function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
+
+  async function submit(e) {
+    e.preventDefault();
+    setStatus({ loading: true, error: "", ok: "" });
+    try {
+      if (form.newPassword !== form.confirm) {
+        setStatus({ loading: false, error: "New passwords do not match.", ok: "" });
+        return;
+      }
+      const d = await api.post("/api/auth/recover", {
+        bootstrapKey: form.bootstrapKey,
+        email: form.email,
+        newPassword: form.newPassword,
+      });
+      setStatus({ loading: false, error: "", ok: d.message || "Password reset." });
+    } catch (err) {
+      setStatus({ loading: false, error: err.message, ok: "" });
+    }
+  }
+
+  return (
+    <div className="page" style={{ background: "var(--bg)" }}>
+      <div className="wrap">
+        <div style={{ textAlign: "center", marginTop: 40 }}>
+          <a href="/" className="brand">Kopa<span>Book</span></a>
+        </div>
+        <div className="form-card">
+          <h1>Reset password</h1>
+          {status.error && <div className="alert alert-error">{status.error}</div>}
+          {status.ok && (
+            <div className="alert alert-ok">
+              {status.ok} <a href="/login">Sign in now</a>.
+            </div>
+          )}
+
+          <div className="card" style={{ margin: "0 0 18px", background: "var(--bg)" }}>
+            <h3 style={{ marginTop: 0 }}>Staff member?</h3>
+            <p className="hint" style={{ margin: 0 }}>
+              Ask your business owner. They can set a new password for you from the Staff page in seconds.
+            </p>
+          </div>
+
+          <h3>Business owner?</h3>
+          <p className="hint">
+            Use your bootstrap key (the secret in your Cloudflare Pages settings) to reset any account on this business, including your own.
+          </p>
+          <form onSubmit={submit}>
+            <div className="field"><label>Bootstrap key *</label><input value={form.bootstrapKey} onChange={(e) => set("bootstrapKey", e.target.value)} required placeholder="From your Cloudflare Pages secrets" /></div>
+            <div className="field"><label>Account email *</label><input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} required placeholder="you@example.com" /></div>
+            <div className="field"><div className="row2">
+              <div><label>New password *</label><input type="password" value={form.newPassword} onChange={(e) => set("newPassword", e.target.value)} required minLength={8} /></div>
+              <div><label>Confirm *</label><input type="password" value={form.confirm} onChange={(e) => set("confirm", e.target.value)} required minLength={8} /></div>
+            </div></div>
+            <button className="btn btn-primary btn-block" disabled={status.loading}>
+              {status.loading ? "Resetting..." : "Reset password"}
+            </button>
+          </form>
+          <p style={{ textAlign: "center", marginTop: 18, fontSize: 14, color: "var(--muted)" }}>
+            <a href="/login">Back to sign in</a>
+          </p>
         </div>
       </div>
     </div>

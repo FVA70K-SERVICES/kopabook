@@ -38,6 +38,11 @@ export default function StaffPage({ session }) {
   const [form, setForm] = useState({ fullName: "", email: "", password: "", role: "attendant" });
   const [saving, setSaving] = useState(false);
 
+  // Owner password reset for a staff member
+  const [resetFor, setResetFor] = useState(null);
+  const [resetPw, setResetPw] = useState("");
+  const [resetStatus, setResetStatus] = useState({ loading: false, error: "", ok: "" });
+
   // Clock in / out state (signed-in member)
   const [clockedIn, setClockedIn] = useState(false);
   const [clockInAt, setClockInAt] = useState(null);
@@ -114,6 +119,20 @@ export default function StaffPage({ session }) {
     setSaving(false);
   }
 
+  async function resetPassword(e) {
+    e.preventDefault();
+    setResetStatus({ loading: true, error: "", ok: "" });
+    try {
+      const d = await api.post("/api/staff/reset-password", {
+        userId: resetFor.id, newPassword: resetPw,
+      });
+      setResetStatus({ loading: false, error: "", ok: d.message || "Password reset." });
+      setResetPw("");
+    } catch (err) {
+      setResetStatus({ loading: false, error: err.message, ok: "" });
+    }
+  }
+
   async function clockAction() {
     setClockBusy(true);
     try {
@@ -124,8 +143,7 @@ export default function StaffPage({ session }) {
     setClockBusy(false);
   }
 
-  async function savePerms(userId, patch) {
-    try {
+  async function savePerms(userId, patch) {    try {
       await api.patch("/api/staff", { userId, ...patch });
       setMembers((ms) => ms.map((m) => (m.id === userId ? { ...m, ...patch } : m)));
       setError("");
@@ -245,6 +263,16 @@ export default function StaffPage({ session }) {
                     }}
                   />
                 </div>
+                {isOwner && (
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => { setResetFor(m); setResetPw(""); setResetStatus({ loading: false, error: "", ok: "" }); }}
+                    >
+                      Reset password
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -328,6 +356,21 @@ export default function StaffPage({ session }) {
                 </div>
               </div></div>
               <button className="btn btn-primary btn-block" disabled={saving}>{saving ? "Inviting..." : "Invite staff"}</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {resetFor && (
+        <div className="modal-back" onClick={() => setResetFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Reset password</h2>
+            <p className="hint">Set a new password for <strong>{resetFor.full_name}</strong> ({resetFor.email}). Share it with them directly.</p>
+            {resetStatus.error && <div className="alert alert-error">{resetStatus.error}</div>}
+            {resetStatus.ok && <div className="alert alert-ok">{resetStatus.ok}</div>}
+            <form onSubmit={resetPassword}>
+              <div className="field"><label>New temporary password *</label><input type="password" value={resetPw} onChange={(e) => setResetPw(e.target.value)} required minLength={8} placeholder="At least 8 characters" /></div>
+              <button className="btn btn-primary btn-block" disabled={resetStatus.loading}>{resetStatus.loading ? "Resetting..." : "Set new password"}</button>
             </form>
           </div>
         </div>
