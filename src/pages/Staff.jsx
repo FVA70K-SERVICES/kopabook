@@ -1,0 +1,337 @@
+import { useEffect, useState } from "react";
+import { api, fmt, todayISO } from "../lib/api";
+
+const PERMS = [
+  { key: "can_view_profit", label: "View profit" },
+  { key: "can_discount", label: "Apply discounts" },
+  { key: "can_manage_expenses", label: "Manage expenses" },
+  { key: "can_manage_products", label: "Manage products" },
+];
+
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function parseStamp(s) {
+  // DB stores "YYYY-MM-DD HH:MM:SS" in UTC.
+  return new Date(String(s).replace(" ", "T") + "Z");
+}
+
+function hoursBetween(start, end) {
+  const ms = parseStamp(end) - parseStamp(start);
+  if (!Number.isFinite(ms) || ms < 0) return "-";
+  return (ms / 3600000).toFixed(2);
+}
+
+function shortTime(s) {
+  const d = parseStamp(s);
+  return d.toLocaleString("en-NG", { hour: "2-digit", minute: "2-digit" });
+}
+
+export default function StaffPage({ session }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ fullName: "", email: "", password: "", role: "attendant" });
+  const [saving, setSaving] = useState(false);
+
+  // Clock in / out state (signed-in member)
+  const [clockedIn, setClockedIn] = useState(false);
+  const [clockInAt, setClockInAt] = useState(null);
+  const [clockBusy, setClockBusy] = useState(false);
+
+  // Attendance (owner/manager)
+  const [attFrom, setAttFrom] = useState(daysAgo(7));
+  const [attTo, setAttTo] = useState(todayISO());
+  const [shifts, setShifts] = useState([]);
+  const [attLoading, setAttLoading] = useState(false);
+
+  // Commissions (owner/manager)
+  const [comFrom, setComFrom] = useState(daysAgo(30));
+  const [comTo, setComTo] = useState(todayISO());
+  const [comReport, setComReport] = useState([]);
+  const [unattributed, setUnattributed] = useState(null);
+  const [comLoading, setComLoading] = useState(false);
+
+  const role = session.business?.role;
+  const isOwner = role === "owner";
+  const isManager = role === "manager";
+  const manage = isOwner || isManager;
+
+  async function load() {
+    setLoading(true);
+    try { const d = await api.get("/api/staff"); setMembers(d.members); setError(""); }
+    catch (e) { setError(e.message); }
+    setLoading(false);
+  }
+
+  async function loadClock() {
+    try {
+      const d = await api.get("/api/staff/clock");
+      setClockedIn(!!d.clockedIn);
+      setClockInAt(d.clockIn || null);
+    } catch { /* clock card is best-effort */ }
+  }
+
+  async function loadAttendance() {
+    setAttLoading(true);
+    try {
+      const d = await api.get(`/api/staff/attendance?from=${attFrom}&to=${attTo}`);
+      setShifts(d.shifts || []);
+    } catch (e) { setError(e.message); }
+    setAttLoading(false);
+  }
+
+  async function loadCommissions() {
+    setComLoading(true);
+    try {
+      const d = await api.get(`/api/staff/commissions?from=${comFrom}&to=${comTo}`);
+      setComReport(d.report || []);
+      setUnattributed({ total: d.unattributedTotal || 0, count: d.unattributedCount || 0 });
+    } catch (e) { setError(e.message); }
+    setComLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+    loadClock();
+  }, []);
+
+  useEffect(() => { if (manage) { loadAttendance(); loadCommissions(); } }, [manage]);
+
+  function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
+
+  async function invite(e) {
+    e.preventDefault(); setSaving(true);
+    try {
+      await api.post("/api/staff", form);
+      setShowForm(false); setForm({ fullName: "", email: "", password: "", role: "attendant" });
+      load();
+    } catch (err) { setError(err.message); }
+    setSaving(false);
+  }
+
+  async function clockAction() {
+    setClockBusy(true);
+    try {
+      const d = await api.post("/api/staff/clock", { action: clockedIn ? "out" : "in" });
+      setClockedIn(!!d.clockedIn);
+      setClockInAt(d.clockIn || null);
+    } catch (e) { setError(e.message); }
+    setClockBusy(false);
+  }
+
+  async function savePerms(userId, patch) {
+    try {
+      await api.patch("/api/staff", { userId, ...patch });
+      setMembers((ms) => ms.map((m) => (m.id === userId ? { ...m, ...patch } : m)));
+      setError("");
+    } catch (e) { setError(e.message); }
+  }
+
+  function togglePerm(member, key) {
+    savePerms(member.id, { [key]: member[key] ? 0 : 1 });
+  }
+
+  function clockCard() {
+    return (
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h3 style={{ marginTop: 0 }}>My shift</h3>
+        <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
+          {clockedIn && clockInAt
+            ? `Clocked in since ${shortTime(clockInAt)} (${hoursBetween(clockInAt, new Date().toISOString().slice(0, 19).replace("T", " "))}h so far)`
+            : "You are not clocked in."}
+        </p>
+        <button className={"btn " + (clockedIn ? "btn-secondary" : "btn-primary")} onClick={clockAction} disabled={clockBusy}>
+          {clockBusy ? "Please wait..." : clockedIn ? "Clock out" : "Clock in"}
+        </button>
+      </div>
+    );
+  }
+
+  // Attendants only see their own clock button and status.
+  if (!manage) {
+    return (
+      <>
+        <div className="page-head"><h1>Staff</h1></div>
+        {error && <div className="alert alert-error">{error}</div>}
+        {clockCard()}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="page-head">
+        <h1>Staff</h1>
+        {isOwner && <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Invite staff</button>}
+      </div>
+
+      {error && <div className="alert alert-error">{error}</div>}
+
+      {clockCard()}
+
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h3 style={{ marginTop: 0 }}>How roles work</h3>
+        <p style={{ color: "var(--muted)", margin: 0 }}>
+          <strong>Attendants</strong> record sales and view their work areas.{" "}
+          <strong>Managers</strong> also manage products, stock, customers and debts.{" "}
+          <strong>Owners</strong> control everything including staff and settings.
+        </p>
+      </div>
+
+      {loading ? <div className="loading">Loading...</div> : (
+        <>
+          <div className="table-wrap" style={{ marginBottom: 18 }}>
+            <table className="data">
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr key={m.id}>
+                    <td><strong>{m.full_name}</strong></td>
+                    <td>{m.email}</td>
+                    <td><span className={"pill " + (m.business_role === "owner" ? "pill-green" : m.business_role === "manager" ? "pill-gold" : "pill-gray")}>{m.business_role}</span></td>
+                    <td>{m.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card" style={{ marginBottom: 18 }}>
+            <h3 style={{ marginTop: 0 }}>Permissions and commission</h3>
+            <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
+              {isOwner
+                ? "Toggle what each staff member can do, and set their commission rate. Owners always keep full access."
+                : "Set by the business owner (read only)."}
+            </p>
+            {members.filter((m) => m.business_role !== "owner").map((m) => (
+              <div key={m.id} style={{ borderTop: "1px solid var(--border, #eee)", padding: "12px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <strong>{m.full_name}</strong>
+                  <span className="pill pill-gray">{m.business_role}</span>
+                </div>
+                <div className="row2" style={{ marginTop: 8 }}>
+                  {PERMS.map((p) => (
+                    <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
+                      <input
+                        type="checkbox"
+                        checked={!!m[p.key]}
+                        disabled={!isOwner}
+                        onChange={() => togglePerm(m, p.key)}
+                      />
+                      {p.label}
+                    </label>
+                  ))}
+                </div>
+                <div className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
+                  <label>Commission %</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    defaultValue={m.commission_percent ?? 0}
+                    key={`${m.id}-${m.commission_percent}`}
+                    disabled={!isOwner}
+                    onBlur={(e) => {
+                      const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                      if (v !== Number(m.commission_percent || 0)) {
+                        savePerms(m.id, { commission_percent: v });
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Attendance</h3>
+        <div className="toolbar" style={{ marginBottom: 12 }}>
+          <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={attFrom} onChange={(e) => setAttFrom(e.target.value)} /></div>
+          <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={attTo} onChange={(e) => setAttTo(e.target.value)} /></div>
+          <button className="btn btn-secondary btn-sm" onClick={loadAttendance} disabled={attLoading}>{attLoading ? "Loading..." : "View"}</button>
+        </div>
+        <div className="table-wrap">
+          <table className="data">
+            <thead><tr><th>Member</th><th>Date</th><th>Clock in</th><th>Clock out</th><th>Hours</th></tr></thead>
+            <tbody>
+              {shifts.map((s) => (
+                <tr key={s.id}>
+                  <td><strong>{s.name}</strong></td>
+                  <td>{String(s.clock_in).slice(0, 10)}</td>
+                  <td>{shortTime(s.clock_in)}</td>
+                  <td>{s.clock_out ? shortTime(s.clock_out) : "On shift"}</td>
+                  <td>{s.clock_out ? hoursBetween(s.clock_in, s.clock_out) : "-"}</td>
+                </tr>
+              ))}
+              {shifts.length === 0 && !attLoading && (
+                <tr><td colSpan={5}><div className="empty">No shifts in this period.</div></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Commission report</h3>
+        <div className="toolbar" style={{ marginBottom: 12 }}>
+          <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={comFrom} onChange={(e) => setComFrom(e.target.value)} /></div>
+          <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={comTo} onChange={(e) => setComTo(e.target.value)} /></div>
+          <button className="btn btn-secondary btn-sm" onClick={loadCommissions} disabled={comLoading}>{comLoading ? "Loading..." : "View"}</button>
+        </div>
+        <div className="table-wrap">
+          <table className="data">
+            <thead><tr><th>Member</th><th>Rate</th><th>Sales</th><th>Sales total</th><th>Commission due</th></tr></thead>
+            <tbody>
+              {comReport.map((r) => (
+                <tr key={r.memberId}>
+                  <td><strong>{r.name}</strong></td>
+                  <td>{r.commissionPercent}%</td>
+                  <td>{r.salesCount}</td>
+                  <td className="money">{fmt(r.salesTotal)}</td>
+                  <td className="money"><strong>{fmt(r.commissionDue)}</strong></td>
+                </tr>
+              ))}
+              {comReport.length === 0 && !comLoading && (
+                <tr><td colSpan={5}><div className="empty">No staff in this business yet.</div></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {unattributed && unattributed.count > 0 && (
+          <p style={{ color: "var(--muted)", margin: "8px 0 0" }}>
+            {unattributed.count} sale(s) ({fmt(unattributed.total)}) could not be linked to any staff member.
+          </p>
+        )}
+      </div>
+
+      {showForm && (
+        <div className="modal-back" onClick={() => setShowForm(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Invite staff</h2>
+            <form onSubmit={invite}>
+              <div className="field"><label>Full name *</label><input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} required /></div>
+              <div className="field"><label>Email *</label><input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} required /></div>
+              <div className="field"><div className="row2">
+                <div><label>Temporary password *</label><input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} /></div>
+                <div><label>Role</label>
+                  <select value={form.role} onChange={(e) => set("role", e.target.value)}>
+                    <option value="attendant">Attendant</option><option value="manager">Manager</option>
+                  </select>
+                </div>
+              </div></div>
+              <button className="btn btn-primary btn-block" disabled={saving}>{saving ? "Inviting..." : "Invite staff"}</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
