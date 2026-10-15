@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fmt, todayISO } from "../lib/api";
 import { waLink, receiptText } from "../lib/whatsapp";
+import { receiptCardUrl, shareCard } from "../lib/shareCards";
 import MessageSale from "../components/MessageSale";
 
 export default function SalesPage() {
@@ -16,6 +17,8 @@ export default function SalesPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(null);
+  const [doneItems, setDoneItems] = useState([]);
+  const [doneCustomer, setDoneCustomer] = useState("");
   const [history, setHistory] = useState([]);
   const [dateFilter, setDateFilter] = useState(todayISO());
   const [receiptPhone, setReceiptPhone] = useState("");
@@ -25,7 +28,10 @@ export default function SalesPage() {
   useEffect(() => {
     api.get("/api/products").then((d) => setProducts(d.products)).catch(() => {});
     api.get("/api/services").then((d) => setServices(d.services)).catch(() => {});
-    api.get("/api/business").then((d) => setBizName(d.business?.name || "")).catch(() => {});
+    api.get("/api/business").then((d) => {
+      setBizName(d.business?.name || "");
+      setBrand({ name: d.business?.name || "", color: d.business?.brand_color || "#166534", tagline: d.business?.tagline || "" });
+    }).catch(() => {});
   }, []);
 
   async function loadHistory() {
@@ -135,6 +141,8 @@ export default function SalesPage() {
         paymentMethod,
       });
       setDone(d);
+      setDoneItems(cart.map((l) => ({ qty: l.qty, name: l.name, unitPrice: fmt(l.unitPrice) })));
+      setDoneCustomer(customerName.trim());
       setCart([]); setCustomerName(""); setAmountPaid("");
       const pd = await api.get("/api/products"); setProducts(pd.products);
     } catch (e) { setError(e.message); }
@@ -170,6 +178,20 @@ export default function SalesPage() {
             }))}>
             Send receipt on WhatsApp
           </a>
+          <button className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => {
+            const url = receiptCardUrl({
+              saleNumber: done.saleNumber,
+              date: new Date().toLocaleDateString(),
+              items: doneItems,
+              total: fmt(done.total),
+              paid: fmt(done.paid),
+              balanceDue: done.balanceDue > 0 ? fmt(done.balanceDue) : null,
+              customerName: doneCustomer || null,
+            }, brand);
+            shareCard(url, { title: "Receipt " + done.saleNumber, filename: `receipt-${done.saleNumber}.png` });
+          }}>
+            Share receipt card (image)
+          </button>
           <button className="btn btn-primary btn-block" style={{ marginTop: 8 }} onClick={() => setDone(null)}>New sale</button>
         </div>
       </>

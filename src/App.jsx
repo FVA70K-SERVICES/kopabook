@@ -14,6 +14,7 @@ import ImportPage from "./pages/Import";
 import ExpensesPage from "./pages/Expenses";
 import CustomersPage from "./pages/Customers";
 import DebtsPage from "./pages/Debts";
+import MessagesPage from "./pages/Messages";
 import ReportsPage from "./pages/Reports";
 import StaffPage from "./pages/Staff";
 import SettingsPage from "./pages/Settings";
@@ -61,6 +62,7 @@ function AppRoute({ session }) {
     else if (path === "/app/expenses") page = <ExpensesPage session={session} />;
     else if (path === "/app/customers") page = <CustomersPage />;
     else if (path === "/app/debts") page = <DebtsPage />;
+    else if (path === "/app/messages") page = <MessagesPage session={session} />;
     else if (path === "/app/reports") page = <ReportsPage />;
     else if (path === "/app/staff") page = <StaffPage session={session} />;
     else if (path === "/app/settings") page = <SettingsPage session={session} />;

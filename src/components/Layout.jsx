@@ -13,6 +13,7 @@ const LINKS = [
   { to: "/app/expenses", label: "Expenses", icon: "💸" },
   { to: "/app/customers", label: "Customers", icon: "👥" },
   { to: "/app/debts", label: "Debts", icon: "📒" },
+  { to: "/app/messages", label: "Messages", icon: "💬" },
   { to: "/app/reports", label: "Reports", icon: "📈" },
   { to: "/app/staff", label: "Staff", icon: "🧑‍💼" },
   { to: "/app/settings", label: "Settings", icon: "⚙️" },

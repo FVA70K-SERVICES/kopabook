@@ -35,7 +35,7 @@ export default function StaffPage({ session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ fullName: "", email: "", password: "", role: "attendant" });
+  const [form, setForm] = useState({ fullName: "", email: "", password: "", role: "attendant", phone: "" });
   const [saving, setSaving] = useState(false);
 
   // Owner password reset for a staff member
@@ -113,7 +113,7 @@ export default function StaffPage({ session }) {
     e.preventDefault(); setSaving(true);
     try {
       await api.post("/api/staff", form);
-      setShowForm(false); setForm({ fullName: "", email: "", password: "", role: "attendant" });
+      setShowForm(false); setForm({ fullName: "", email: "", password: "", role: "attendant", phone: "" });
       load();
     } catch (err) { setError(err.message); }
     setSaving(false);
@@ -347,6 +347,7 @@ export default function StaffPage({ session }) {
             <form onSubmit={invite}>
               <div className="field"><label>Full name *</label><input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} required /></div>
               <div className="field"><label>Email *</label><input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} required /></div>
+              <div className="field"><label>WhatsApp number</label><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="080..." /></div>
               <div className="field"><div className="row2">
                 <div><label>Temporary password *</label><input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} /></div>
                 <div><label>Role</label>

@@ -4,7 +4,7 @@ import { NIGERIAN_STATES } from "../lib/nigeria";
 
 export default function SettingsPage({ session }) {
   const [biz, setBiz] = useState(null);
-  const [form, setForm] = useState({ name: "", businessType: "", state: "", city: "", currency: "NGN" });
+  const [form, setForm] = useState({ name: "", businessType: "", state: "", city: "", currency: "NGN", brandColor: "#166534", tagline: "", reminderTemplate: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
@@ -39,6 +39,8 @@ export default function SettingsPage({ session }) {
         setForm({
           name: d.business.name || "", businessType: d.business.business_type || "",
           state: d.business.state || "", city: d.business.city || "", currency: d.business.currency || "NGN",
+          brandColor: d.business.brand_color || "#166534", tagline: d.business.tagline || "",
+          reminderTemplate: d.business.reminder_template || "",
         });
         setLoading(false);
       })
@@ -119,6 +121,38 @@ export default function SettingsPage({ session }) {
           {isOwner
             ? <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
             : <p style={{ color: "var(--muted)" }}>Only the owner can change business settings.</p>}
+        </form>
+      </div>
+
+      <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Store branding</h3>
+        <p className="hint">Your brand color and tagline appear on the share cards you send on WhatsApp.</p>
+        <form onSubmit={save}>
+          <div className="field"><label>Brand color</label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {["#166534", "#1d4ed8", "#7c3aed", "#c2410c", "#be185d", "#0f766e", "#111827"].map((c) => (
+                <button key={c} type="button" onClick={() => set("brandColor", c)} disabled={!isOwner}
+                  style={{ width: 36, height: 36, borderRadius: "50%", background: c, border: form.brandColor === c ? "3px solid #111" : "2px solid #ddd", cursor: "pointer" }}
+                  aria-label={"Brand color " + c} />
+              ))}
+              <input type="color" value={form.brandColor} onChange={(e) => set("brandColor", e.target.value)} disabled={!isOwner}
+                style={{ width: 40, height: 36, padding: 2, border: "1px solid var(--line)", borderRadius: 8 }} aria-label="Custom brand color" />
+            </div>
+          </div>
+          <div className="field"><label>Tagline</label><input value={form.tagline} onChange={(e) => set("tagline", e.target.value)} disabled={!isOwner} placeholder="e.g. Quality you can trust" maxLength={80} /></div>
+          {isOwner && <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save branding"}</button>}
+        </form>
+      </div>
+
+      <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Debt reminder template</h3>
+        <p className="hint">Use {"{name}"}, {"{amount}"} and {"{business}"} as placeholders. Leave empty to use the default message.</p>
+        <form onSubmit={save}>
+          <div className="field"><label>Template</label>
+            <textarea rows={4} value={form.reminderTemplate} onChange={(e) => set("reminderTemplate", e.target.value)} disabled={!isOwner}
+              placeholder="Hello {name}, this is a friendly reminder from {business}. Your outstanding balance is {amount}. Please pay at your earliest convenience. Thank you." />
+          </div>
+          {isOwner && <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save template"}</button>}
         </form>
       </div>
 

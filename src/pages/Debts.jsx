@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
 import { api, fmt } from "../lib/api";
-import { waLink, debtReminderText } from "../lib/whatsapp";
+import { waLink, fillReminderTemplate } from "../lib/whatsapp";
 
-export default function DebtsPage() {
+const DUE_DAYS = 7;
+
+function isDue(lastRemindedAt) {
+  if (!lastRemindedAt) return true;
+  const days = (Date.now() - new Date(lastRemindedAt).getTime()) / 86400000;
+  return days >= DUE_DAYS;
+}
+
+export default function DebtsPage({ session }) {
   const [data, setData] = useState({ total: 0, count: 0, debtors: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -11,20 +19,39 @@ export default function DebtsPage() {
   const [method, setMethod] = useState("cash");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const [bizName, setBizName] = useState("");
+  const [biz, setBiz] = useState({ name: "", reminderTemplate: "" });
   const [askPhone, setAskPhone] = useState(null);
   const [phoneInput, setPhoneInput] = useState("");
+  // Remind-all queue
+  const [queue, setQueue] = useState(null); // { list, idx }
 
   useEffect(() => {
-    api.get("/api/business").then((d) => setBizName(d.business?.name || "")).catch(() => {});
+    api.get("/api/business")
+      .then((d) => setBiz({ name: d.business?.name || "", reminderTemplate: d.business?.reminder_template || "" }))
+      .catch(() => {});
   }, []);
 
-  function remindHref(debtor, phone) {
-    return waLink(phone, debtReminderText({
+  function reminderText(debtor) {
+    return fillReminderTemplate(biz.reminderTemplate, {
       debtorName: debtor.name,
       amount: fmt(debtor.outstanding),
-      businessName: bizName,
-    }));
+      businessName: biz.name,
+    });
+  }
+
+  async function logReminder(debtor, phone, message) {
+    try {
+      await api.post("/api/reminders", {
+        kind: "debt", customerId: debtor.id, phone: phone || null, message,
+      });
+    } catch { /* logging must never block the reminder */ }
+  }
+
+  function openReminder(debtor, phone) {
+    const message = reminderText(debtor);
+    logReminder(debtor, phone, message);
+    window.open(waLink(phone, message), "_blank", "noopener");
+    load();
   }
 
   async function load() {
@@ -55,56 +82,110 @@ export default function DebtsPage() {
     setSaving(false);
   }
 
+  const dueDebtors = data.debtors.filter((d) => isDue(d.last_reminded_at));
+  const current = queue ? queue.list[queue.idx] : null;
+
+  function startQueue() {
+    const list = dueDebtors.filter((d) => d.phone);
+    if (!list.length) return;
+    setQueue({ list, idx: 0 });
+  }
+
+  function queueSend() {
+    if (!current) return;
+    openReminder(current, current.phone);
+    if (queue.idx + 1 < queue.list.length) setQueue({ ...queue, idx: queue.idx + 1 });
+    else setQueue(null);
+  }
+
   return (
     <>
-      <div className="page-head"><h1>Debts</h1></div>
+      <div className="page-head">
+        <h1>Debts</h1>
+        {dueDebtors.length > 0 && (
+          <button className="btn btn-primary btn-sm" onClick={startQueue}>
+            Remind all due ({dueDebtors.filter((d) => d.phone).length})
+          </button>
+        )}
+      </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+      <p className="hint" style={{ marginTop: 0 }}>
+        A debtor is due for a nudge when they have not been reminded in {DUE_DAYS} days.
+        Reminders open WhatsApp with your template message; nothing sends automatically.
+      </p>
 
       <div className="metric-grid">
         <div className="metric-card bad"><span>Total outstanding</span><strong>{fmt(data.total)}</strong></div>
         <div className="metric-card"><span>Customers owing</span><strong>{data.count}</strong></div>
+        <div className="metric-card"><span>Due a reminder</span><strong>{dueDebtors.length}</strong></div>
       </div>
 
       {loading ? <div className="loading">Loading...</div> : (
         <div className="table-wrap">
           <table className="data">
-            <thead><tr><th>Customer</th><th>Phone</th><th>Owing</th><th>Last activity</th><th></th></tr></thead>
+            <thead><tr><th>Customer</th><th>Phone</th><th>Owing</th><th>Last activity</th><th>Reminder</th><th></th></tr></thead>
             <tbody>
-              {data.debtors.map((d) => (
-                <tr key={d.id}>
-                  <td><strong>{d.name}</strong></td>
-                  <td>{d.phone || "—"}</td>
-                  <td className="money debt-amt">{fmt(d.outstanding)}</td>
-                  <td><small>{d.last_activity?.slice(0, 10)}</small></td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button className="btn btn-primary btn-sm" onClick={() => setPaying(d)}>Record payment</button>
-                      {d.phone
-                        ? <a className="btn btn-secondary btn-sm" target="_blank" rel="noreferrer"
-                             href={remindHref(d, d.phone)}>Remind on WhatsApp</a>
-                        : <button className="btn btn-secondary btn-sm"
-                             onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind on WhatsApp</button>}
-                    </div>
-                    {askPhone && askPhone.id === d.id && (
-                      <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-                        <input
-                          style={{ width: 130, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8 }}
-                          placeholder="080..."
-                          value={phoneInput}
-                          onChange={(e) => setPhoneInput(e.target.value)}
-                          aria-label="Debtor WhatsApp number"
-                        />
-                        <a className="btn btn-secondary btn-sm" target="_blank" rel="noreferrer"
-                           href={remindHref(d, phoneInput)}>Send</a>
+              {data.debtors.map((d) => {
+                const due = isDue(d.last_reminded_at);
+                return (
+                  <tr key={d.id}>
+                    <td><strong>{d.name}</strong></td>
+                    <td>{d.phone || "—"}</td>
+                    <td className="money debt-amt">{fmt(d.outstanding)}</td>
+                    <td><small>{d.last_activity?.slice(0, 10)}</small></td>
+                    <td>
+                      {due
+                        ? <span className="pill pill-gold">Due</span>
+                        : <small style={{ color: "var(--muted)" }}>Sent {d.last_reminded_at?.slice(0, 10)}</small>}
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => setPaying(d)}>Record payment</button>
+                        {d.phone
+                          ? <button className="btn btn-secondary btn-sm" onClick={() => openReminder(d, d.phone)}>Remind on WhatsApp</button>
+                          : <button className="btn btn-secondary btn-sm" onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind on WhatsApp</button>}
                       </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                      {askPhone && askPhone.id === d.id && (
+                        <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+                          <input
+                            style={{ width: 130, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8 }}
+                            placeholder="080..."
+                            value={phoneInput}
+                            onChange={(e) => setPhoneInput(e.target.value)}
+                            aria-label="Debtor WhatsApp number"
+                          />
+                          <button className="btn btn-secondary btn-sm" onClick={() => openReminder(d, phoneInput)}>Send</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {data.debtors.length === 0 && <p className="empty">No outstanding debts. Clean book.</p>}
+        </div>
+      )}
+
+      {queue && current && (
+        <div className="modal-back" onClick={() => setQueue(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Remind debtors ({queue.idx + 1} of {queue.list.length})</h2>
+            <p><strong>{current.name}</strong> owes <strong className="debt-amt money">{fmt(current.outstanding)}</strong></p>
+            <div className="card" style={{ background: "var(--bg)", margin: "12px 0" }}>
+              <p style={{ fontSize: 14, margin: 0, whiteSpace: "pre-wrap" }}>{reminderText(current)}</p>
+            </div>
+            <p className="hint">Tap Send to open WhatsApp for {current.name}. Press send in WhatsApp, come back, and continue.</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
+                if (queue.idx + 1 < queue.list.length) setQueue({ ...queue, idx: queue.idx + 1 });
+                else setQueue(null);
+              }}>Skip</button>
+              <button className="btn btn-primary" style={{ flex: 2 }} onClick={queueSend}>Send on WhatsApp</button>
+            </div>
+            <button className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => setQueue(null)}>Done</button>
+          </div>
         </div>
       )}
 
