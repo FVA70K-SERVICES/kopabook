@@ -178,6 +178,12 @@ export default function SettingsPage({ session }) {
       </div>
 
       <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Backups</h3>
+        <p className="hint">Save a full copy of your business data (products, customers, sales, debts and more) to your R2 bucket. Download any backup to keep it safe.</p>
+        <BackupCard />
+      </div>
+
+      <div className="card narrow" style={{ marginTop: 18 }}>
         <h3 style={{ marginTop: 0 }}>Plan</h3>
         <p style={{ color: "var(--muted)", margin: "0 0 6px" }}>
           Current plan: <strong style={{ textTransform: "capitalize" }}>{biz?.plan_tier || "free"}</strong>
@@ -185,5 +191,57 @@ export default function SettingsPage({ session }) {
         <p style={{ color: "var(--muted)", margin: 0 }}>Paid upgrades for staff workflows and advanced reports are coming soon.</p>
       </div>
     </>
+  );
+}
+
+function BackupCard() {
+  const [backups, setBackups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState("");
+
+  async function load() {
+    setLoading(true);
+    try {
+      const d = await api.get("/api/backup");
+      setBackups(d.backups || []);
+      setError("");
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function create() {
+    if (!window.confirm("Create a backup of all your business data now?")) return;
+    setBusy(true);
+    try {
+      const d = await api.post("/api/backup", {});
+      setOk(`Backup saved (${(d.bytes / 1024).toFixed(0)} KB, ${d.tables} tables).`);
+      setError("");
+      load();
+    } catch (e) { setError(e.message); setOk(""); }
+    setBusy(false);
+  }
+
+  return (
+    <div>
+      {error && <div className="alert alert-error">{error}</div>}
+      {ok && <div className="alert alert-ok">{ok}</div>}
+      <button className="btn btn-primary btn-sm" onClick={create} disabled={busy}>
+        {busy ? "Backing up..." : "Backup now"}
+      </button>
+      <div style={{ marginTop: 12 }}>
+        {loading ? <p className="hint">Loading backups...</p>
+          : backups.length === 0 ? <p className="hint">No backups yet.</p>
+          : backups.map((b) => (
+            <div key={b.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--border)" }}>
+              <span><strong>{b.key.split("/").pop()}</strong><br /><small style={{ color: "var(--muted)" }}>{(b.size / 1024).toFixed(0)} KB</small></span>
+              <a className="btn btn-secondary btn-sm" href={`/api/backup?download=${encodeURIComponent(b.key)}`}>Download</a>
+            </div>
+          ))}
+      </div>
+    </div>
   );
 }

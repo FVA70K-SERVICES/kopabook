@@ -15,6 +15,8 @@ export default function ProductsPage({ session }) {
   const [adjusting, setAdjusting] = useState(null);
   const [adjustQty, setAdjustQty] = useState("");
   const [adjustNote, setAdjustNote] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   const canManage = session.perms?.can_manage_products;
 
@@ -32,9 +34,10 @@ export default function ProductsPage({ session }) {
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
-  function openAdd() { setEditing(null); setForm(emptyForm); setShowForm(true); }
+  function openAdd() { setEditing(null); setForm(emptyForm); setPhotoFile(null); setShowForm(true); }
   function openEdit(p) {
     setEditing(p);
+    setPhotoFile(null);
     setForm({
       name: p.name, sku: p.sku || "", unitPrice: String(p.unit_price),
       costPrice: String(p.cost_price || ""), openingQuantity: "",
@@ -67,6 +70,35 @@ export default function ProductsPage({ session }) {
       load(q);
     } catch (err) { setError(err.message); }
     setSaving(false);
+  }
+
+  async function uploadPhoto() {
+    if (!photoFile || !editing) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("productId", editing.id);
+      fd.append("photo", photoFile);
+      const res = await fetch("/api/product-photo", { method: "POST", body: fd, credentials: "same-origin" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.ok === false) throw new Error(d.message || "Upload failed.");
+      setPhotoFile(null);
+      setEditing({ ...editing, photo_key: d.key });
+      setError("");
+      load(q);
+    } catch (err) { setError(err.message); }
+    setUploading(false);
+  }
+
+  async function removePhoto() {
+    if (!editing || !window.confirm("Remove this product photo?")) return;
+    try {
+      const res = await fetch(`/api/product-photo?productId=${editing.id}`, { method: "DELETE", credentials: "same-origin" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.ok === false) throw new Error(d.message || "Could not remove photo.");
+      setEditing({ ...editing, photo_key: null });
+      load(q);
+    } catch (err) { setError(err.message); }
   }
 
   async function archive(p) {
@@ -107,7 +139,13 @@ export default function ProductsPage({ session }) {
                 const low = Number(p.stock) <= Number(p.reorder_level);
                 return (
                   <tr key={p.id}>
-                    <td><strong>{p.name}</strong><br /><small style={{ color: "var(--muted)" }}>{p.sku || ""}{p.category ? ` · ${p.category}` : ""}</small></td>
+                    <td>
+                      {p.photo_key && (
+                        <img src={`/api/product-photo?key=${encodeURIComponent(p.photo_key)}`} alt=""
+                          style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 8, marginRight: 8, verticalAlign: "middle" }} />
+                      )}
+                      <strong>{p.name}</strong><br /><small style={{ color: "var(--muted)" }}>{p.sku || ""}{p.category ? ` · ${p.category}` : ""}</small>
+                    </td>
                     <td className="money">{fmt(p.unit_price)}</td>
                     <td>
                       <span className={"pill " + (low ? "pill-gold" : "pill-green")}>{p.stock}</span>
@@ -149,6 +187,26 @@ export default function ProductsPage({ session }) {
                 {!editing && <div><label>Opening stock</label><input type="number" step="0.01" value={form.openingQuantity} onChange={(e) => set("openingQuantity", e.target.value)} /></div>}
                 <div><label>Low-stock alert at</label><input type="number" min="0" step="0.01" value={form.lowStockThreshold} onChange={(e) => set("lowStockThreshold", e.target.value)} /></div>
               </div></div>
+              {editing && (
+                <div className="field"><label>Photo</label>
+                  {editing.photo_key && (
+                    <div style={{ marginBottom: 8 }}>
+                      <img src={`/api/product-photo?key=${encodeURIComponent(editing.photo_key)}`} alt=""
+                        style={{ width: 120, height: 120, objectFit: "cover", borderRadius: 12 }} />
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files[0] || null)} />
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={!photoFile || uploading} onClick={uploadPhoto}>
+                      {uploading ? "Uploading..." : "Upload photo"}
+                    </button>
+                    {editing.photo_key && (
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={removePhoto}>Remove</button>
+                    )}
+                  </div>
+                  <p className="hint">Stored in your R2 bucket, under 3 MB.</p>
+                </div>
+              )}
               <button className="btn btn-primary btn-block" disabled={saving}>{saving ? "Saving..." : "Save product"}</button>
             </form>
           </div>
