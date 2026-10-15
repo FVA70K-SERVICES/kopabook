@@ -1,7 +1,9 @@
 // /api/sales — GET list, POST create sale
 // POST creates: sale header, sale items, stock deduction + movements,
 // payment record, and customer debt via customer_ledger when balance remains.
-import { json, getAuthContext, requireAuth, audit, toSqliteDate } from "./_utils";
+// All writes for one sale run in a single D1 batch so a sale is atomic:
+// it either records completely or not at all.
+import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "./_utils";
 
 export async function onRequestGet(context) {
   try {
@@ -69,7 +71,7 @@ export async function onRequestPost(context) {
         const unitPrice = item.unitPrice !== undefined ? Number(item.unitPrice) : Number(service.price);
         const lineTotal = Math.round(unitPrice * qty * 100) / 100;
         subtotal += lineTotal;
-        lines.push({ kind: "service", service, qty, unitPrice, lineTotal });
+        lines.push({ kind: "service", service, qty, unitPrice, lineTotal, defaultPrice: Number(service.price) });
         continue;
       }
 
@@ -95,11 +97,22 @@ export async function onRequestPost(context) {
       const unitPrice = item.unitPrice !== undefined ? Number(item.unitPrice) : Number(product.unit_price);
       const lineTotal = Math.round(unitPrice * qty * 100) / 100;
       subtotal += lineTotal;
-      lines.push({ kind: "product", product, qty, unitPrice, lineTotal });
+      lines.push({ kind: "product", product, qty, unitPrice, lineTotal, defaultPrice: Number(product.unit_price) });
     }
     subtotal = Math.round(subtotal * 100) / 100;
 
-    const paid = Math.max(0, Number(amountPaid || 0));
+    // Discount gate: selling below the default price needs the discount permission.
+    const discounted = lines.some((l) => Math.round(l.unitPrice * 100) < Math.round(l.defaultPrice * 100));
+    if (discounted) {
+      const permDenied = requirePerm(auth, "can_discount", "Only staff with discount permission can sell below the listed price.");
+      if (permDenied) return permDenied;
+    }
+
+    // Overpayment guard: amount paid is capped at the subtotal so balance_due
+    // can never go negative. Any excess comes back as change.
+    const tendered = Math.max(0, Number(amountPaid || 0));
+    const paid = Math.min(tendered, subtotal);
+    const change = Math.round((tendered - paid) * 100) / 100;
     const balanceDue = Math.round((subtotal - paid) * 100) / 100;
     if (balanceDue > 0 && !customerId && !customerName) {
       return json({ ok: false, message: "Unpaid balance needs a customer. Add or select one." }, 400);
@@ -133,73 +146,82 @@ export async function onRequestPost(context) {
     )
       .bind(
         auth.business.id, auth.user.id, custId, saleNumber,
-        subtotal, subtotal, Math.min(paid, subtotal), balanceDue,
+        subtotal, subtotal, paid, balanceDue,
         paymentMethod || "cash"
       )
       .run();
     const saleId = saleResult.meta.last_row_id;
 
-    for (const line of lines) {
-      if (line.kind === "service") {
-        // Service lines: no product, no cost snapshot, no stock deduction.
-        await db.prepare(
-          `INSERT INTO sale_items (sale_id, item_type, product_id, service_id, quantity, unit_price, cost_snapshot, line_total)
-           VALUES (?, 'service', NULL, ?, ?, ?, 0, ?)`
-        )
-          .bind(saleId, line.service.id, line.qty, line.unitPrice, line.lineTotal)
-          .run();
-        continue;
-      }
-
-      await db.prepare(
-        `INSERT INTO sale_items (sale_id, item_type, product_id, quantity, unit_price, cost_snapshot, line_total)
-         VALUES (?, 'product', ?, ?, ?, ?, ?)`
-      )
-        .bind(saleId, line.product.id, line.qty, line.unitPrice, Number(line.product.cost_price || 0), line.lineTotal)
-        .run();
-
-      await db.prepare(
-        `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?, updated_at = ?
-         WHERE product_id = ?`
-      )
-        .bind(line.qty, now, line.product.id)
-        .run();
-
-      await db.prepare(
-        `INSERT INTO inventory_movements (product_id, movement_type, quantity_delta, source_type, source_id, note, created_by)
-         VALUES (?, 'sale', ?, 'sale', ?, ?, ?)`
-      )
-        .bind(line.product.id, -line.qty, saleId, `Sale ${saleNumber}`, auth.user.id)
-        .run();
-    }
-
-    // Payment record (always, even if zero paid)
-    await db.prepare(
-      `INSERT INTO payment_records (business_id, sale_id, customer_id, amount, payment_method, recorded_by)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-      .bind(auth.business.id, saleId, custId, Math.min(paid, subtotal), paymentMethod || "cash", auth.user.id)
-      .run();
-
-    // Debt: unpaid balance becomes customer debt via ledger
+    // Previous ledger balance (read before the batch so the debt entry is correct).
+    let prevLedgerBalance = 0;
     if (balanceDue > 0 && custId) {
       const lastLedger = await db.prepare(
         `SELECT balance_after FROM customer_ledger WHERE customer_id = ? ORDER BY id DESC LIMIT 1`
       )
         .bind(custId)
         .first();
-      const prevBalance = lastLedger ? Number(lastLedger.balance_after) : 0;
-      const newBalance = Math.round((prevBalance + balanceDue) * 100) / 100;
-      await db.prepare(
-        `INSERT INTO customer_ledger (customer_id, entry_type, amount_delta, balance_after, source_type, source_id, note)
-         VALUES (?, 'debt', ?, ?, 'sale', ?, ?)`
-      )
-        .bind(custId, balanceDue, newBalance, saleId, `Sale ${saleNumber}`)
-        .run();
+      prevLedgerBalance = lastLedger ? Number(lastLedger.balance_after) : 0;
     }
 
+    // Every write for this sale goes in ONE batch: all or nothing.
+    const stmts = [];
+    for (const line of lines) {
+      if (line.kind === "service") {
+        // Service lines: no product, no cost snapshot, no stock deduction.
+        stmts.push(
+          db.prepare(
+            `INSERT INTO sale_items (sale_id, item_type, product_id, service_id, quantity, unit_price, cost_snapshot, line_total)
+             VALUES (?, 'service', NULL, ?, ?, ?, 0, ?)`
+          ).bind(saleId, line.service.id, line.qty, line.unitPrice, line.lineTotal)
+        );
+        continue;
+      }
+
+      stmts.push(
+        db.prepare(
+          `INSERT INTO sale_items (sale_id, item_type, product_id, quantity, unit_price, cost_snapshot, line_total)
+           VALUES (?, 'product', ?, ?, ?, ?, ?)`
+        ).bind(saleId, line.product.id, line.qty, line.unitPrice, Number(line.product.cost_price || 0), line.lineTotal)
+      );
+
+      stmts.push(
+        db.prepare(
+          `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?, updated_at = ?
+           WHERE product_id = ?`
+        ).bind(line.qty, now, line.product.id)
+      );
+
+      stmts.push(
+        db.prepare(
+          `INSERT INTO inventory_movements (product_id, movement_type, quantity_delta, source_type, source_id, note, created_by)
+           VALUES (?, 'sale', ?, 'sale', ?, ?, ?)`
+        ).bind(line.product.id, -line.qty, saleId, `Sale ${saleNumber}`, auth.user.id)
+      );
+    }
+
+    // Payment record (always, even if zero paid)
+    stmts.push(
+      db.prepare(
+        `INSERT INTO payment_records (business_id, sale_id, customer_id, amount, payment_method, recorded_by)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(auth.business.id, saleId, custId, paid, paymentMethod || "cash", auth.user.id)
+    );
+
+    // Debt: unpaid balance becomes customer debt via ledger
+    if (balanceDue > 0 && custId) {
+      const newBalance = Math.round((prevLedgerBalance + balanceDue) * 100) / 100;
+      stmts.push(
+        db.prepare(
+          `INSERT INTO customer_ledger (customer_id, entry_type, amount_delta, balance_after, source_type, source_id, note)
+           VALUES (?, 'debt', ?, ?, 'sale', ?, ?)`
+        ).bind(custId, balanceDue, newBalance, saleId, `Sale ${saleNumber}`)
+      );
+    }
+
+    await db.batch(stmts);
+
     await audit(context, auth, "sale.create", "sale", saleId, { saleNumber, total: subtotal });
-    return json({ ok: true, saleId, saleNumber, total: subtotal, balanceDue }, 201);
+    return json({ ok: true, saleId, saleNumber, total: subtotal, paid, change, balanceDue }, 201);
   } catch (error) {
     return json({ ok: false, message: "Could not record sale.", error: String(error) }, 500);
   }

@@ -50,7 +50,10 @@ export async function onRequestGet(context) {
         salesTotal: Number(totals?.sales_total || 0),
         salesCount: Number(totals?.sales_count || 0),
         expenseTotal: Number(totals?.expense_total || 0),
-        profit: Math.round((Number(totals?.sales_total || 0) - Number(totals?.expense_total || 0)) * 100) / 100,
+        // Profit is only visible to staff with the profit permission.
+        profit: auth.perms.can_view_profit
+          ? Math.round((Number(totals?.sales_total || 0) - Number(totals?.expense_total || 0)) * 100) / 100
+          : null,
       },
       daily: daily.results || [],
       topProducts: topProducts.results || [],

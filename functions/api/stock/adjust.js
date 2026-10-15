@@ -1,14 +1,13 @@
 // POST /api/stock/adjust — manual stock increase/decrease (owner/manager only)
-import { json, getAuthContext, requireAuth, canManage, audit, toSqliteDate } from "../_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "../_utils";
 
 export async function onRequestPost(context) {
   try {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (!canManage(auth)) {
-      return json({ ok: false, message: "Only owners and managers can adjust stock." }, 403);
-    }
+    const permDenied = requirePerm(auth, "can_manage_products", "Only staff with product permission can adjust stock.");
+    if (permDenied) return permDenied;
 
     const body = await context.request.json().catch(() => ({}));
     const { productId, quantityDelta, note } = body;

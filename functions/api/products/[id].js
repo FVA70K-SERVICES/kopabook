@@ -1,5 +1,5 @@
 // /api/products/[id] — PATCH update, DELETE archive
-import { json, getAuthContext, requireAuth, canManage, audit } from "../_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit } from "../_utils";
 
 async function getProduct(context, auth, id) {
   return context.env.KOPABOOK_DB.prepare(
@@ -14,9 +14,8 @@ export async function onRequestPatch(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (!canManage(auth)) {
-      return json({ ok: false, message: "Only owners and managers can edit products." }, 403);
-    }
+    const permDenied = requirePerm(auth, "can_manage_products", "Only staff with product permission can edit products.");
+    if (permDenied) return permDenied;
 
     const id = Number(context.params.id);
     const product = await getProduct(context, auth, id);

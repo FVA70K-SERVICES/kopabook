@@ -1,11 +1,13 @@
 // /api/suppliers/purchase — POST record a purchase from a supplier
-import { json, getAuthContext, requireAuth, audit, toSqliteDate } from "../_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "../_utils";
 
 export async function onRequestPost(context) {
   try {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const permDenied = requirePerm(auth, "can_manage_expenses", "Only staff with expense permission can record supplier purchases.");
+    if (permDenied) return permDenied;
 
     const body = await context.request.json().catch(() => ({}));
     const supplierId = Number(body.supplierId);

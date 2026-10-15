@@ -1,6 +1,6 @@
 // /api/services — GET list, POST create
 // Services are sold like products but never touch stock.
-import { json, getAuthContext, requireAuth, canManage, audit, toSqliteDate } from "./_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "./_utils";
 
 export async function onRequestGet(context) {
   try {
@@ -28,9 +28,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (!canManage(auth)) {
-      return json({ ok: false, message: "Only owners and managers can add services." }, 403);
-    }
+    const permDenied = requirePerm(auth, "can_manage_products", "Only staff with product permission can add services.");
+    if (permDenied) return permDenied;
 
     const body = await context.request.json().catch(() => ({}));
     const { name, description, price, unit } = body;
