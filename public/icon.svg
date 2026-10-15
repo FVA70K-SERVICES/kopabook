@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="110" fill="#15803d"/>
+  <text x="256" y="335" font-family="-apple-system, 'Segoe UI', Roboto, Arial, sans-serif"
+        font-size="220" font-weight="800" fill="#ffffff" text-anchor="middle">KB</text>
+</svg>
