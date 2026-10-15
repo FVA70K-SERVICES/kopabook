@@ -54,9 +54,9 @@ export default function SuppliersPage({ session }) {
   const [psaving, setPsaving] = useState(false);
   const [pwarning, setPwarning] = useState("");
 
-  const canManage = session.business?.role === "owner" || session.business?.role === "manager";
+  const canManage = ["owner", "partner"].includes(session.business?.role) || session.business?.role === "manager";
   const canManageExpenses = session.perms?.can_manage_expenses;
-  const isOwner = session.business?.role === "owner";
+  const isOwner = ["owner", "partner"].includes(session.business?.role);
 
   async function load(search) {
     setLoading(true);

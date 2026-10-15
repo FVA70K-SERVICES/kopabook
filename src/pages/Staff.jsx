@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmt, todayISO } from "../lib/api";
+import { staffRolesFor } from "../lib/businessTypes";
 
 const PERMS = [
   { key: "can_view_profit", label: "View profit" },
@@ -35,7 +36,7 @@ export default function StaffPage({ session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ fullName: "", email: "", password: "", role: "attendant", phone: "" });
+  const [form, setForm] = useState({ fullName: "", email: "", password: "", role: "", phone: "" });
   const [saving, setSaving] = useState(false);
 
   // Owner password reset for a staff member
@@ -64,6 +65,8 @@ export default function StaffPage({ session }) {
   const role = session.business?.role;
   const isOwner = role === "owner";
   const isManager = role === "manager";
+  const rolesForType = staffRolesFor(session.business?.business_type);
+  const defaultRole = rolesForType[rolesForType.length - 1].key;
   const manage = isOwner || isManager;
 
   async function load() {
@@ -112,8 +115,8 @@ export default function StaffPage({ session }) {
   async function invite(e) {
     e.preventDefault(); setSaving(true);
     try {
-      await api.post("/api/staff", form);
-      setShowForm(false); setForm({ fullName: "", email: "", password: "", role: "attendant", phone: "" });
+      await api.post("/api/staff", { ...form, role: form.role || defaultRole });
+      setShowForm(false); setForm({ fullName: "", email: "", password: "", role: "", phone: "" });
       load();
     } catch (err) { setError(err.message); }
     setSaving(false);
@@ -195,12 +198,10 @@ export default function StaffPage({ session }) {
       <div className="card" style={{ marginBottom: 18 }}>
         <h3 style={{ marginTop: 0 }}>How roles work</h3>
         <p style={{ color: "var(--muted)", margin: 0 }}>
-          <strong>Attendants</strong> record sales and view their work areas.{" "}
-          <strong>Managers</strong> also manage products, stock, customers and debts.{" "}
-          <strong>Hotel managers</strong> run rooms, bookings and folios.{" "}
-          <strong>Receptionists</strong> handle bookings, check-in/out, charges and payments.{" "}
-          <strong>Housekeepers</strong> update room status.{" "}
-          <strong>Owners</strong> control everything including staff and settings.
+          <strong>Owners</strong> control everything including staff and settings.{" "}
+          {rolesForType.map((r) => (
+            <span key={r.key}><strong>{r.label}s</strong> {r.desc.charAt(0).toLowerCase() + r.desc.slice(1)}{" "}</span>
+          ))}
         </p>
       </div>
 
@@ -214,7 +215,7 @@ export default function StaffPage({ session }) {
                   <tr key={m.id}>
                     <td><strong>{m.full_name}</strong></td>
                     <td>{m.email}</td>
-                    <td><span className={"pill " + (m.business_role === "owner" ? "pill-green" : m.business_role === "manager" ? "pill-gold" : "pill-gray")}>{m.business_role}</span></td>
+                    <td><span className={"pill " + (m.business_role === "owner" ? "pill-green" : m.business_role === "partner" ? "pill-gold" : m.business_role === "manager" ? "pill-gold" : "pill-gray")}>{m.business_role}</span></td>
                     <td>{m.status}</td>
                   </tr>
                 ))}
@@ -354,12 +355,18 @@ export default function StaffPage({ session }) {
               <div className="field"><div className="row2">
                 <div><label>Temporary password *</label><input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} /></div>
                 <div><label>Role</label>
-                  <select value={form.role} onChange={(e) => set("role", e.target.value)}>
-                    <option value="attendant">Attendant</option><option value="manager">Manager</option>
-                    <option value="hotel_manager">Hotel manager</option><option value="receptionist">Receptionist</option><option value="housekeeper">Housekeeper</option>
+                  <select value={form.role || defaultRole} onChange={(e) => set("role", e.target.value)}>
+                    {rolesForType.map((r) => (
+                      <option key={r.key} value={r.key}>{r.label}</option>
+                    ))}
                   </select>
                 </div>
               </div></div>
+              {(form.role || defaultRole) === "partner" && (
+                <div className="alert alert-error" style={{ marginBottom: 12 }}>
+                  A partner is a co-owner with full access to money, records and staff. Only invite someone you trust completely.
+                </div>
+              )}
               <button className="btn btn-primary btn-block" disabled={saving}>{saving ? "Inviting..." : "Invite staff"}</button>
             </form>
           </div>
