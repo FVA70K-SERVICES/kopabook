@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
+import PaymentModesEditor from "../components/PaymentModesEditor";
 
 export default function SettingsPage({ session }) {
   const [biz, setBiz] = useState(null);
@@ -142,6 +143,12 @@ export default function SettingsPage({ session }) {
           <div className="field"><label>Tagline</label><input value={form.tagline} onChange={(e) => set("tagline", e.target.value)} disabled={!isOwner} placeholder="e.g. Quality you can trust" maxLength={80} /></div>
           {isOwner && <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save branding"}</button>}
         </form>
+      </div>
+
+      <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Payment modes</h3>
+        <p className="hint">The ways your customers can pay. Add your own, e.g. OPay, Moniepoint, PalmPay. Disabled modes stop showing in the sale form.</p>
+        <PaymentModesEditor canManage={isOwner || session.business?.role === "manager"} />
       </div>
 
       <div className="card narrow" style={{ marginTop: 18 }}>

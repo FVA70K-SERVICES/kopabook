@@ -24,6 +24,15 @@ export default function DebtsPage({ session }) {
   const [phoneInput, setPhoneInput] = useState("");
   // Remind-all queue
   const [queue, setQueue] = useState(null); // { list, idx }
+  const [payModes, setPayModes] = useState([]);
+
+  useEffect(() => {
+    api.get("/api/payment-modes").then((d) => {
+      const modes = (d.modes || []).filter((m) => m.enabled);
+      setPayModes(modes);
+      if (modes.length) setMethod(modes[0].name);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api.get("/api/business")
@@ -198,7 +207,7 @@ export default function DebtsPage({ session }) {
             <div className="field"><div className="row2">
               <div><label>Method</label>
                 <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                  <option value="cash">Cash</option><option value="transfer">Transfer</option><option value="pos">POS</option>
+                  {payModes.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
                 </select>
               </div>
               <div><label>Note</label><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></div>

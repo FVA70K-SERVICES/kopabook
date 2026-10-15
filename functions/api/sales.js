@@ -108,9 +108,22 @@ export async function onRequestPost(context) {
       if (permDenied) return permDenied;
     }
 
+    // Payments: accept a split list [{mode, amount}], or fall back to the
+    // legacy single amountPaid + paymentMethod pair.
+    let payments = [];
+    if (Array.isArray(body.payments) && body.payments.length) {
+      for (const p of body.payments) {
+        const amt = Math.round(Number(p.amount || 0) * 100) / 100;
+        const mode = String(p.mode || "").trim().slice(0, 40);
+        if (amt > 0 && mode) payments.push({ mode, amount: amt });
+      }
+    } else if (Number(amountPaid || 0) > 0) {
+      payments = [{ mode: String(paymentMethod || "cash").slice(0, 40), amount: Math.round(Number(amountPaid) * 100) / 100 }];
+    }
+
     // Overpayment guard: amount paid is capped at the subtotal so balance_due
     // can never go negative. Any excess comes back as change.
-    const tendered = Math.max(0, Number(amountPaid || 0));
+    const tendered = Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100;
     const paid = Math.min(tendered, subtotal);
     const change = Math.round((tendered - paid) * 100) / 100;
     const balanceDue = Math.round((subtotal - paid) * 100) / 100;
@@ -181,7 +194,7 @@ export async function onRequestPost(context) {
         subtotal,
         paid,
         balanceDue,
-        paymentMethod || "cash"
+        payments.length > 1 ? "Split" : payments.length === 1 ? payments[0].mode : paymentMethod || "cash"
       )
     );
     const headerIdx = stmts.length - 1;
@@ -220,13 +233,17 @@ export async function onRequestPost(context) {
       );
     }
 
-    // Payment record (always, even if zero paid)
-    stmts.push(
-      db.prepare(
-        `INSERT INTO payment_records (business_id, sale_id, customer_id, amount, payment_method, recorded_by)
-         VALUES (?, ${S_SALE}, ${S_CUST}, ?, ?, ?)`
-      ).bind(auth.business.id, saleNumber, auth.business.id, saleNumber, auth.business.id, paid, paymentMethod || "cash", auth.user.id)
-    );
+    // Payment records: one row per tender (split payments supported).
+    // Always at least one row, even if zero paid.
+    const payRows = payments.length ? payments : [{ mode: "cash", amount: 0 }];
+    for (const pr of payRows) {
+      stmts.push(
+        db.prepare(
+          `INSERT INTO payment_records (business_id, sale_id, customer_id, amount, payment_method, recorded_by)
+           VALUES (?, ${S_SALE}, ${S_CUST}, ?, ?, ?)`
+        ).bind(auth.business.id, saleNumber, auth.business.id, saleNumber, auth.business.id, pr.amount, pr.mode, auth.user.id)
+      );
+    }
 
     // Debt: unpaid balance becomes customer debt via ledger. balanceDue > 0
     // always implies a customer here (validated above).

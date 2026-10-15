@@ -12,8 +12,8 @@ export default function SalesPage() {
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState([]);
   const [customerName, setCustomerName] = useState("");
-  const [amountPaid, setAmountPaid] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [payments, setPayments] = useState([{ mode: "Cash", amount: "" }]);
+  const [payModes, setPayModes] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(null);
@@ -28,6 +28,11 @@ export default function SalesPage() {
   useEffect(() => {
     api.get("/api/products").then((d) => setProducts(d.products)).catch(() => {});
     api.get("/api/services").then((d) => setServices(d.services)).catch(() => {});
+    api.get("/api/payment-modes").then((d) => {
+      const modes = (d.modes || []).filter((m) => m.enabled);
+      setPayModes(modes);
+      if (modes.length) setPayments([{ mode: modes[0].name, amount: "" }]);
+    }).catch(() => {});
     api.get("/api/business").then((d) => {
       setBizName(d.business?.name || "");
       setBrand({ name: d.business?.name || "", color: d.business?.brand_color || "#166534", tagline: d.business?.tagline || "" });
@@ -95,8 +100,12 @@ export default function SalesPage() {
     }
     setCart(lines);
     if (draft.customerName) setCustomerName(draft.customerName);
-    if (draft.amountPaid !== undefined) setAmountPaid(draft.amountPaid);
-    if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
+    if (draft.amountPaid !== undefined && draft.amountPaid !== "") {
+      const rawMode = String(draft.paymentMethod || "Cash");
+      const matched = payModes.find((m) => m.name.toLowerCase() === rawMode.toLowerCase())
+        || payModes.find((m) => m.name.toLowerCase().includes(rawMode.toLowerCase()));
+      setPayments([{ mode: matched ? matched.name : rawMode, amount: draft.amountPaid }]);
+    }
     setError("");
     salePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     salePanelRef.current?.focus({ preventScroll: true });
@@ -124,8 +133,18 @@ export default function SalesPage() {
   }
 
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
-  const paid = Number(amountPaid || 0);
-  const balance = Math.max(0, total - paid);
+  const paid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+
+  function setPay(i, k, v) {
+    setPayments((ps) => ps.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
+  }
+  function addPay() {
+    setPayments((ps) => [...ps, { mode: payModes[0]?.name || "Cash", amount: "" }]);
+  }
+  function removePay(i) {
+    setPayments((ps) => (ps.length > 1 ? ps.filter((_, j) => j !== i) : ps));
+  }
 
   async function complete() {
     if (cart.length === 0) { setError("Add at least one item."); return; }
@@ -137,13 +156,14 @@ export default function SalesPage() {
           ? { serviceId: l.serviceId, quantity: l.qty, unitPrice: l.unitPrice }
           : { productId: l.productId, quantity: l.qty, unitPrice: l.unitPrice }),
         customerName: customerName.trim() || undefined,
-        amountPaid: paid,
-        paymentMethod,
+        payments: payments
+          .filter((p) => Number(p.amount) > 0 && p.mode)
+          .map((p) => ({ mode: p.mode, amount: Number(p.amount) })),
       });
       setDone(d);
       setDoneItems(cart.map((l) => ({ qty: l.qty, name: l.name, unitPrice: fmt(l.unitPrice) })));
       setDoneCustomer(customerName.trim());
-      setCart([]); setCustomerName(""); setAmountPaid("");
+      setCart([]); setCustomerName(""); setPayments([{ mode: payModes[0]?.name || "Cash", amount: "" }]);
       const pd = await api.get("/api/products"); setProducts(pd.products);
     } catch (e) { setError(e.message); }
     setSaving(false);
@@ -304,14 +324,27 @@ export default function SalesPage() {
                   <label>Customer name (required if not fully paid)</label>
                   <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Walk-in customer name" />
                 </div>
-                <div className="field"><div className="row2">
-                  <div><label>Amount paid</label><input type="number" min="0" step="0.01" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder={String(total)} /></div>
-                  <div><label>Payment method</label>
-                    <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-                      <option value="cash">Cash</option><option value="transfer">Transfer</option><option value="pos">POS</option><option value="credit">Credit</option>
-                    </select>
-                  </div>
-                </div></div>
+                <div className="field" style={{ marginTop: 14 }}>
+                  <label>Payments</label>
+                  {payments.map((p, i) => (
+                    <div key={i} className="row2" style={{ marginBottom: 8 }}>
+                      <div>
+                        <select value={p.mode} onChange={(e) => setPay(i, "mode", e.target.value)} aria-label="Payment mode">
+                          {payModes.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
+                        </select>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input type="number" min="0" step="0.01" value={p.amount} onChange={(e) => setPay(i, "amount", e.target.value)}
+                          placeholder={i === 0 ? String(total) : "0"} aria-label="Payment amount" />
+                        {payments.length > 1 && (
+                          <button className="btn btn-secondary btn-sm" onClick={() => removePay(i)} aria-label="Remove payment">✕</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <button className="btn btn-secondary btn-sm" onClick={addPay}>+ Split payment</button>
+                  {paid > 0 && <p className="hint" style={{ margin: "6px 0 0" }}>Paid so far: <strong>{fmt(paid)}</strong></p>}
+                </div>
                 {balance > 0 && <div className="alert alert-error" style={{ marginBottom: 12 }}>Balance of {fmt(balance)} will be recorded as debt for {customerName || "the customer"}.</div>}
                 <button className="btn btn-primary btn-block" disabled={saving} onClick={complete}>
                   {saving ? "Saving..." : `Complete sale · ${fmt(total)}`}
