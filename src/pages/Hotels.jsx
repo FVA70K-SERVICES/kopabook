@@ -455,6 +455,7 @@ export default function HotelsPage({ session }) {
                   </>
                 )}
                 <button className="btn btn-secondary btn-sm" onClick={closeFolio}>Close</button>
+                <a className="btn btn-secondary btn-sm" href={`/app/receipt/hotel/${folio.booking.id}`} target="_blank" rel="noreferrer">🖨️ Receipt</a>
               </div>
 
               {showCheckout && (
