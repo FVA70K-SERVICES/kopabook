@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, nav } from "../lib/api";
+import { orgTypeFor, NAV_MODULES } from "../lib/businessTypes";
 import SyncStatus from "./SyncStatus.jsx";
 import UsageMeter, { UpgradeNudge } from "./UsageMeter.jsx";
 
-const LINKS = [
+const ALL_LINKS = [
   { to: "/app/dashboard", label: "Dashboard", icon: "📊" },
   { to: "/app/sales", label: "Sales", icon: "🧾" },
   { to: "/app/services", label: "Services", icon: "🛠️" },
@@ -24,6 +25,10 @@ export default function Layout({ session, children }) {
   const [open, setOpen] = useState(false);
   const [billing, setBilling] = useState(null);
   const path = window.location.pathname;
+
+  // Each organization type only sees the service modules that fit it.
+  const org = orgTypeFor(session?.business?.business_type);
+  const LINKS = ALL_LINKS.filter((l) => org.modules.includes(NAV_MODULES[l.to]));
 
   useEffect(() => {
     api.get("/api/billing").then(setBilling).catch(() => {});

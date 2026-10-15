@@ -6,6 +6,8 @@ import {
   HotelsLandingPage, HotelRegisterPage,
 } from "./pages/Marketing";
 import { LoginPage, OwnerSetupPage, ForgotPasswordPage } from "./pages/Auth";
+import RegisterPage from "./pages/Register";
+import { SaleReceiptPage, HotelReceiptPage } from "./pages/Receipt";
 import DashboardPage from "./pages/Dashboard";
 import ProductsPage from "./pages/Products";
 import SalesPage from "./pages/Sales";
@@ -44,7 +46,11 @@ function AppRoute({ session }) {
   if (path === "/hotels") return <HotelsLandingPage />;
   if (path === "/hotels/register") {
     if (session) { nav("/app/hotels"); return null; }
-    return <HotelRegisterPage />;
+    return <RegisterPage preset="hotel" />;
+  }
+  if (path === "/register") {
+    if (session) { nav("/app/dashboard"); return null; }
+    return <RegisterPage />;
   }
   if (path === "/login") {
     if (session) { nav("/app/dashboard"); return null; }
@@ -57,6 +63,15 @@ function AppRoute({ session }) {
   if (path === "/forgot-password") {
     if (session) { nav("/app/dashboard"); return null; }
     return <ForgotPasswordPage />;
+  }
+
+  if (path.startsWith("/app/receipt/sale/")) {
+    if (!session) { nav("/login"); return null; }
+    return <SaleReceiptPage saleId={path.split("/")[4]} />;
+  }
+  if (path.startsWith("/app/receipt/hotel/")) {
+    if (!session) { nav("/login"); return null; }
+    return <HotelReceiptPage bookingId={path.split("/")[4]} />;
   }
 
   if (path.startsWith("/app")) {
