@@ -86,7 +86,7 @@ export default function ExpensesPage({ session }) {
                 <tr key={x.id}>
                   <td>{x.incurred_on}</td>
                   <td>{x.category_name || "—"}</td>
-                  <td>{x.note || "—"}</td>
+                  <td>{x.note || "—"}{x.supplier_name && <span className="pill pill-gold" style={{ marginLeft: 6 }}>{x.supplier_name}</span>}</td>
                   <td className="money">{fmt(x.amount)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {x.receipt_key ? (

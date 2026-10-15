@@ -50,7 +50,7 @@ export default function SuppliersPage({ session }) {
   const [saving, setSaving] = useState(false);
 
   const [purchaseFor, setPurchaseFor] = useState(null);
-  const [pform, setPform] = useState({ amount: "", note: "", date: todayISO() });
+  const [pform, setPform] = useState({ amount: "", note: "", date: todayISO(), asExpense: true });
   const [psaving, setPsaving] = useState(false);
   const [pwarning, setPwarning] = useState("");
 
@@ -138,10 +138,12 @@ export default function SuppliersPage({ session }) {
         amount: Number(pform.amount),
         note: pform.note,
         purchasedOn: pform.date,
+        recordExpense: pform.asExpense,
       });
       if (d.warning) setPwarning(d.message);
-      setNotice(`Purchase of ${fmt(pform.amount)} recorded for "${purchaseFor.name}".`);
+      setNotice(`Purchase of ${fmt(pform.amount)} recorded for "${purchaseFor.name}"${d.expenseRecorded ? " and counted in expenses" : ""}.`);
       setPurchaseFor(null);
+      setPform({ amount: "", note: "", date: todayISO(), asExpense: true });
       load(q);
     } catch (err) {
       setError(err.message);
@@ -259,6 +261,10 @@ export default function SuppliersPage({ session }) {
               <div className="field"><label>Amount (NGN) *</label><input type="number" min="1" step="any" value={pform.amount} onChange={(e) => pset("amount", e.target.value)} required /></div>
               <div className="field"><label>Note</label><input value={pform.note} onChange={(e) => pset("note", e.target.value)} placeholder="What was bought" /></div>
               <div className="field"><label>Date</label><input type="date" value={pform.date} onChange={(e) => pset("date", e.target.value)} /></div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 14 }}>
+                <input type="checkbox" checked={pform.asExpense} onChange={(e) => pset("asExpense", e.target.checked)} />
+                Count this as an expense (recommended)
+              </label>
               <button className="btn btn-primary btn-block" disabled={psaving}>{psaving ? "Saving..." : "Save purchase"}</button>
             </form>
           </div>

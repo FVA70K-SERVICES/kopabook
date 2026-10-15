@@ -11,9 +11,10 @@ export async function onRequestGet(context) {
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
 
-    let sql = `SELECT e.*, c.name AS category_name
+    let sql = `SELECT e.*, c.name AS category_name, s.name AS supplier_name
                FROM expenses e
                LEFT JOIN expense_categories c ON c.id = e.category_id
+               LEFT JOIN suppliers s ON s.id = e.supplier_id
                WHERE e.business_id = ?`;
     const params = [auth.business.id];
     if (from) { sql += ` AND e.incurred_on >= ?`; params.push(from); }
