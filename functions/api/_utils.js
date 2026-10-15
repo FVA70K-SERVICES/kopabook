@@ -50,6 +50,8 @@ function hexToBytes(hex) {
 }
 
 // PBKDF2-SHA256 password hashing (available in Workers / Pages Functions).
+// Note: Cloudflare's WebCrypto caps PBKDF2 at 100,000 iterations, so we use
+// exactly that. verifyPassword reads the count back from the stored hash.
 export async function hashPassword(password) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey(
@@ -60,11 +62,11 @@ export async function hashPassword(password) {
     ["deriveBits"]
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 120000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
     key,
     256
   );
-  return `pbkdf2$120000$${bytesToHex(salt)}$${bytesToHex(bits)}`;
+  return `pbkdf2$100000$${bytesToHex(salt)}$${bytesToHex(bits)}`;
 }
 
 export async function verifyPassword(password, stored) {
