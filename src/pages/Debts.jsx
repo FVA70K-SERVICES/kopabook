@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmt } from "../lib/api";
+import { api, fmt, nav } from "../lib/api";
 import { waLink, fillReminderTemplate } from "../lib/whatsapp";
 
 const DUE_DAYS = 7;
@@ -130,7 +130,7 @@ export default function DebtsPage({ session }) {
                 const due = isDue(d.last_reminded_at);
                 return (
                   <tr key={d.id}>
-                    <td><strong>{d.name}</strong></td>
+                    <td><a href={`/app/customers/${d.id}`} onClick={(e) => { e.preventDefault(); nav(`/app/customers/${d.id}`); }} style={{ fontWeight: 700 }}>{d.name}</a></td>
                     <td>{d.phone || "—"}</td>
                     <td className="money debt-amt">{fmt(d.outstanding)}</td>
                     <td><small>{d.last_activity?.slice(0, 10)}</small></td>

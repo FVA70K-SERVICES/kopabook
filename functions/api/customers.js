@@ -17,7 +17,7 @@ export async function onRequestGet(context) {
                FROM customers c
                WHERE c.business_id = ?`;
     const params = [auth.business.id];
-    if (q) { sql += ` AND (c.name LIKE ? OR c.phone LIKE ?)`; params.push(`%${q}%`, `%${q}%`); }
+    if (q) { sql += ` AND (c.name LIKE ? OR c.phone LIKE ? OR c.tags LIKE ? OR c.notes LIKE ?)`; params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`); }
     sql += ` ORDER BY c.name ASC`;
 
     const result = await context.env.KOPABOOK_DB.prepare(sql).bind(...params).all();
