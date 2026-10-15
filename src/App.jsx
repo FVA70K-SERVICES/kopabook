@@ -5,7 +5,7 @@ import {
   LandingPage, FeaturesPage, PricingPage, WaitlistPage, NotFoundPage,
   HotelsLandingPage,
 } from "./pages/Marketing";
-import { LoginPage, OwnerSetupPage, ForgotPasswordPage } from "./pages/Auth";
+import { LoginPage, OwnerSetupPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/Auth";
 import RegisterPage from "./pages/Register";
 import { SaleReceiptPage, HotelReceiptPage } from "./pages/Receipt";
 import DashboardPage from "./pages/Dashboard";
@@ -63,6 +63,10 @@ function AppRoute({ session }) {
   if (path === "/forgot-password") {
     if (session) { nav("/app/dashboard"); return null; }
     return <ForgotPasswordPage />;
+  }
+  if (path === "/reset-password") {
+    if (session) { nav("/app/dashboard"); return null; }
+    return <ResetPasswordPage />;
   }
 
   if (path.startsWith("/app/receipt/sale/")) {
