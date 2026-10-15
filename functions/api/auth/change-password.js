@@ -1,6 +1,6 @@
 // POST /api/auth/change-password — signed-in user changes their own password.
 // Requires the current password so a stolen session alone cannot lock someone out.
-import { json, getAuthContext, requireAuth, hashPassword, verifyPassword, audit } from "./_utils";
+import { json, getAuthContext, requireAuth, hashPassword, verifyPassword, audit } from "../_utils";
 
 export async function onRequestPost(context) {
   try {

@@ -1,7 +1,7 @@
 // POST /api/auth/recover — reset any account password using the bootstrap key.
 // This is the owner lockout path: only the holder of the Cloudflare Pages
 // secret (the business owner) can use it. Body: { bootstrapKey, email, newPassword }.
-import { json, hashPassword, audit } from "./_utils";
+import { json, hashPassword, audit } from "../_utils";
 
 export async function onRequestPost(context) {
   try {
