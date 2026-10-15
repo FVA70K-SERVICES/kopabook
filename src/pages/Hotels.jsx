@@ -34,7 +34,7 @@ export default function HotelsPage({ session }) {
   const [showBookingForm, setShowBookingForm] = useState(false);
   const [bookingForm, setBookingForm] = useState({
     room_id: "", guest_name: "", guest_phone: "", guest_id_type: "", guest_id_number: "",
-    check_in: todayISO(), check_out: "", adults: "1", children: "0", notes: "",
+    check_in: todayISO(), check_out: "", check_in_time: "14:00", check_out_time: "12:00", adults: "1", children: "0", notes: "",
   });
   const [savingBooking, setSavingBooking] = useState(false);
   const [preselectedRoom, setPreselectedRoom] = useState(null);
@@ -126,7 +126,7 @@ export default function HotelsPage({ session }) {
     setPreselectedRoom(room || null);
     setBookingForm({
       room_id: room ? String(room.id) : "", guest_name: "", guest_phone: "", guest_id_type: "", guest_id_number: "",
-      check_in: todayISO(), check_out: "", adults: "1", children: "0", notes: "",
+      check_in: todayISO(), check_out: "", check_in_time: "14:00", check_out_time: "12:00", adults: "1", children: "0", notes: "",
     });
     setShowBookingForm(true);
   }
@@ -143,6 +143,8 @@ export default function HotelsPage({ session }) {
         guest_id_number: bookingForm.guest_id_number || null,
         check_in: bookingForm.check_in,
         check_out: bookingForm.check_out,
+        check_in_time: bookingForm.check_in_time || null,
+        check_out_time: bookingForm.check_out_time || null,
         adults: Number(bookingForm.adults) || 1,
         children: Number(bookingForm.children) || 0,
         notes: bookingForm.notes || null,
@@ -284,7 +286,7 @@ export default function HotelsPage({ session }) {
                   <tr key={b.id}>
                     <td><strong>{b.guest_name}</strong><br /><small style={{ color: "var(--muted)" }}>{b.guest_phone || ""}</small></td>
                     <td>{b.room_number} <small style={{ color: "var(--muted)" }}>({b.room_type})</small></td>
-                    <td><small>{b.check_in} → {b.check_out}<br />{nightsBetween(b.check_in, b.check_out)} night(s)</small></td>
+                    <td><small>{b.check_in}{b.check_in_time ? ` ${b.check_in_time}` : ""} → {b.check_out}{b.check_out_time ? ` ${b.check_out_time}` : ""}<br />{nightsBetween(b.check_in, b.check_out)} night(s)</small></td>
                     <td><span className="pill pill-green">{b.status.replace("_", " ")}</span></td>
                     <td className="money">{fmt((b.total_charged || 0) - (b.total_paid || 0))}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
@@ -369,8 +371,12 @@ export default function HotelsPage({ session }) {
                 <div><label>ID number</label><input value={bookingForm.guest_id_number} onChange={(e) => setBookingForm({ ...bookingForm, guest_id_number: e.target.value })} /></div>
               </div></div>
               <div className="field"><div className="row2">
-                <div><label>Check-in *</label><input type="date" value={bookingForm.check_in} onChange={(e) => setBookingForm({ ...bookingForm, check_in: e.target.value })} required /></div>
-                <div><label>Check-out *</label><input type="date" value={bookingForm.check_out} onChange={(e) => setBookingForm({ ...bookingForm, check_out: e.target.value })} required /></div>
+                <div><label>Check-in date *</label><input type="date" value={bookingForm.check_in} onChange={(e) => setBookingForm({ ...bookingForm, check_in: e.target.value })} required /></div>
+                <div><label>Time</label><input type="time" value={bookingForm.check_in_time} onChange={(e) => setBookingForm({ ...bookingForm, check_in_time: e.target.value })} /></div>
+              </div></div>
+              <div className="field"><div className="row2">
+                <div><label>Check-out date *</label><input type="date" value={bookingForm.check_out} onChange={(e) => setBookingForm({ ...bookingForm, check_out: e.target.value })} required /></div>
+                <div><label>Time</label><input type="time" value={bookingForm.check_out_time} onChange={(e) => setBookingForm({ ...bookingForm, check_out_time: e.target.value })} /></div>
               </div></div>
               <div className="field"><div className="row2">
                 <div><label>Adults</label><input type="number" min="1" value={bookingForm.adults} onChange={(e) => setBookingForm({ ...bookingForm, adults: e.target.value })} /></div>
@@ -390,7 +396,7 @@ export default function HotelsPage({ session }) {
             {folioLoading ? <div className="loading">Loading folio...</div> : folio && (<>
               <h2>Folio — {folio.booking.guest_name}</h2>
               <p style={{ color: "var(--muted)", marginTop: 0 }}>
-                Room {folio.booking.room_number} · {folio.booking.check_in} → {folio.booking.check_out} · {folio.booking.status.replace("_", " ")}
+                Room {folio.booking.room_number} · {folio.booking.check_in}{folio.booking.check_in_time ? ` ${folio.booking.check_in_time}` : ""} → {folio.booking.check_out}{folio.booking.check_out_time ? ` ${folio.booking.check_out_time}` : ""} · {folio.booking.status.replace("_", " ")}
               </p>
 
               <h3>Charges</h3>

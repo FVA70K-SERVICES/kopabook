@@ -56,6 +56,9 @@ export async function onRequestPost(context) {
     const guest_name = String(body.guest_name || "").trim().slice(0, 80);
     const check_in = String(body.check_in || "").slice(0, 10);
     const check_out = String(body.check_out || "").slice(0, 10);
+    const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+    const check_in_time = timeRe.test(String(body.check_in_time || "")) ? String(body.check_in_time) : null;
+    const check_out_time = timeRe.test(String(body.check_out_time || "")) ? String(body.check_out_time) : null;
     if (!room_id) return json({ ok: false, message: "Room is required." }, 400);
     if (!guest_name) return json({ ok: false, message: "Guest name is required." }, 400);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(check_in) || !/^\d{4}-\d{2}-\d{2}$/.test(check_out)) {
@@ -76,14 +79,14 @@ export async function onRequestPost(context) {
 
     const res = await db.prepare(
       `INSERT INTO hotel_bookings (business_id, room_id, guest_name, guest_phone, guest_id_type, guest_id_number,
-        check_in, check_out, adults, children, status, notes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`
+        check_in, check_out, check_in_time, check_out_time, adults, children, status, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`
     ).bind(
       auth.business.id, room_id, guest_name,
       String(body.guest_phone || "").slice(0, 20) || null,
       String(body.guest_id_type || "").slice(0, 30) || null,
       String(body.guest_id_number || "").slice(0, 40) || null,
-      check_in, check_out,
+      check_in, check_out, check_in_time, check_out_time,
       Math.max(1, Number(body.adults) || 1),
       Math.max(0, Number(body.children) || 0),
       String(body.notes || "").slice(0, 500) || null,
