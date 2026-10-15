@@ -10,6 +10,22 @@ export default function SettingsPage({ session }) {
   const [ok, setOk] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // My profile (own full name)
+  const [myName, setMyName] = useState(session.user?.full_name || "");
+  const [nameStatus, setNameStatus] = useState({ loading: false, error: "", ok: "" });
+
+  async function saveName(e) {
+    e.preventDefault();
+    setNameStatus({ loading: true, error: "", ok: "" });
+    try {
+      const d = await api.patch("/api/auth/me", { fullName: myName });
+      setNameStatus({ loading: false, error: "", ok: d.message || "Profile updated." });
+      window.location.reload();
+    } catch (err) {
+      setNameStatus({ loading: false, error: err.message, ok: "" });
+    }
+  }
+
   // Change password
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [pwStatus, setPwStatus] = useState({ loading: false, error: "", ok: "" });
@@ -68,6 +84,17 @@ export default function SettingsPage({ session }) {
       <div className="page-head"><h1>Settings</h1></div>
       {error && <div className="alert alert-error">{error}</div>}
       {ok && <div className="alert alert-ok">{ok}</div>}
+
+      <div className="card narrow" style={{ margin: "0 0 18px" }}>
+        <h3 style={{ marginTop: 0 }}>My profile</h3>
+        {nameStatus.error && <div className="alert alert-error">{nameStatus.error}</div>}
+        {nameStatus.ok && <div className="alert alert-ok">{nameStatus.ok}</div>}
+        <form onSubmit={saveName}>
+          <div className="field"><label>Full name</label><input value={myName} onChange={(e) => setMyName(e.target.value)} required minLength={2} /></div>
+          <div className="field"><label>Email</label><input value={session.user?.email || ""} disabled /></div>
+          <button className="btn btn-secondary" disabled={nameStatus.loading}>{nameStatus.loading ? "Saving..." : "Save name"}</button>
+        </form>
+      </div>
 
       <div className="card narrow" style={{ margin: 0 }}>
         <h3 style={{ marginTop: 0 }}>Business profile</h3>

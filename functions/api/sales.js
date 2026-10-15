@@ -118,16 +118,11 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "Unpaid balance needs a customer. Add or select one." }, 400);
     }
 
-    // Resolve or create customer
+    // Resolve the customer for validation only. A brand-new customer is created
+    // INSIDE the batch below so a failed sale never leaves orphan rows.
     let custId = customerId ? Number(customerId) : null;
-    if (!custId && customerName) {
-      const ins = await db.prepare(
-        `INSERT INTO customers (business_id, name) VALUES (?, ?)`
-      )
-        .bind(auth.business.id, String(customerName).trim())
-        .run();
-      custId = ins.meta.last_row_id;
-    }
+    const trimmedName = customerName ? String(customerName).trim() : "";
+    const createCustomer = !custId && trimmedName.length > 0;
     if (custId) {
       const owns = await db.prepare(
         `SELECT id FROM customers WHERE id = ? AND business_id = ? LIMIT 1`
@@ -138,21 +133,18 @@ export async function onRequestPost(context) {
     }
 
     const now = toSqliteDate();
-    const saleNumber = `KB-${Date.now().toString(36).toUpperCase()}`;
+    // Random suffix keeps the number unique even for same-millisecond sales.
+    const saleNumber = `KB-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    const saleResult = await db.prepare(
-      `INSERT INTO sales (business_id, staff_user_id, customer_id, sale_number, subtotal, total_amount, amount_paid, balance_due, payment_method, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')`
-    )
-      .bind(
-        auth.business.id, auth.user.id, custId, saleNumber,
-        subtotal, subtotal, paid, balanceDue,
-        paymentMethod || "cash"
-      )
-      .run();
-    const saleId = saleResult.meta.last_row_id;
+    // Subqueries that resolve the sale (and its customer) created earlier in
+    // the SAME batch. Because the batch runs as one transaction, every
+    // statement sees the rows inserted by the statements before it, and no
+    // statement depends on last_insert_rowid() surviving later inserts.
+    const S_SALE = `(SELECT id FROM sales WHERE sale_number = ? AND business_id = ?)`;
+    const S_CUST = `(SELECT customer_id FROM sales WHERE sale_number = ? AND business_id = ?)`;
 
     // Previous ledger balance (read before the batch so the debt entry is correct).
+    // A brand-new customer starts at zero.
     let prevLedgerBalance = 0;
     if (balanceDue > 0 && custId) {
       const lastLedger = await db.prepare(
@@ -163,16 +155,45 @@ export async function onRequestPost(context) {
       prevLedgerBalance = lastLedger ? Number(lastLedger.balance_after) : 0;
     }
 
-    // Every write for this sale goes in ONE batch: all or nothing.
+    // Every write for this sale goes in ONE batch: all or nothing. The sale
+    // header, a new customer, items, stock movements, payment record and debt
+    // entry either all commit together or all roll back.
     const stmts = [];
+    if (createCustomer) {
+      stmts.push(
+        db.prepare(`INSERT INTO customers (business_id, name) VALUES (?, ?)`)
+          .bind(auth.business.id, trimmedName)
+      );
+    }
+
+    // Sale header. For a new customer, last_insert_rowid() is the customer
+    // just inserted by the statement above (nothing runs between them).
+    stmts.push(
+      db.prepare(
+        `INSERT INTO sales (business_id, staff_user_id, customer_id, sale_number, subtotal, total_amount, amount_paid, balance_due, payment_method, status)
+         VALUES (?, ?, ${createCustomer ? "last_insert_rowid()" : "?"}, ?, ?, ?, ?, ?, ?, 'completed')`
+      ).bind(
+        auth.business.id,
+        auth.user.id,
+        ...(createCustomer ? [] : [custId]),
+        saleNumber,
+        subtotal,
+        subtotal,
+        paid,
+        balanceDue,
+        paymentMethod || "cash"
+      )
+    );
+    const headerIdx = stmts.length - 1;
+
     for (const line of lines) {
       if (line.kind === "service") {
         // Service lines: no product, no cost snapshot, no stock deduction.
         stmts.push(
           db.prepare(
             `INSERT INTO sale_items (sale_id, item_type, product_id, service_id, quantity, unit_price, cost_snapshot, line_total)
-             VALUES (?, 'service', NULL, ?, ?, ?, 0, ?)`
-          ).bind(saleId, line.service.id, line.qty, line.unitPrice, line.lineTotal)
+             VALUES (${S_SALE}, 'service', NULL, ?, ?, ?, 0, ?)`
+          ).bind(saleNumber, auth.business.id, line.service.id, line.qty, line.unitPrice, line.lineTotal)
         );
         continue;
       }
@@ -180,8 +201,8 @@ export async function onRequestPost(context) {
       stmts.push(
         db.prepare(
           `INSERT INTO sale_items (sale_id, item_type, product_id, quantity, unit_price, cost_snapshot, line_total)
-           VALUES (?, 'product', ?, ?, ?, ?, ?)`
-        ).bind(saleId, line.product.id, line.qty, line.unitPrice, Number(line.product.cost_price || 0), line.lineTotal)
+           VALUES (${S_SALE}, 'product', ?, ?, ?, ?, ?)`
+        ).bind(saleNumber, auth.business.id, line.product.id, line.qty, line.unitPrice, Number(line.product.cost_price || 0), line.lineTotal)
       );
 
       stmts.push(
@@ -194,8 +215,8 @@ export async function onRequestPost(context) {
       stmts.push(
         db.prepare(
           `INSERT INTO inventory_movements (product_id, movement_type, quantity_delta, source_type, source_id, note, created_by)
-           VALUES (?, 'sale', ?, 'sale', ?, ?, ?)`
-        ).bind(line.product.id, -line.qty, saleId, `Sale ${saleNumber}`, auth.user.id)
+           VALUES (?, 'sale', ?, 'sale', ${S_SALE}, ?, ?)`
+        ).bind(line.product.id, -line.qty, saleNumber, auth.business.id, `Sale ${saleNumber}`, auth.user.id)
       );
     }
 
@@ -203,22 +224,24 @@ export async function onRequestPost(context) {
     stmts.push(
       db.prepare(
         `INSERT INTO payment_records (business_id, sale_id, customer_id, amount, payment_method, recorded_by)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).bind(auth.business.id, saleId, custId, paid, paymentMethod || "cash", auth.user.id)
+         VALUES (?, ${S_SALE}, ${S_CUST}, ?, ?, ?)`
+      ).bind(auth.business.id, saleNumber, auth.business.id, saleNumber, auth.business.id, paid, paymentMethod || "cash", auth.user.id)
     );
 
-    // Debt: unpaid balance becomes customer debt via ledger
-    if (balanceDue > 0 && custId) {
+    // Debt: unpaid balance becomes customer debt via ledger. balanceDue > 0
+    // always implies a customer here (validated above).
+    if (balanceDue > 0) {
       const newBalance = Math.round((prevLedgerBalance + balanceDue) * 100) / 100;
       stmts.push(
         db.prepare(
           `INSERT INTO customer_ledger (customer_id, entry_type, amount_delta, balance_after, source_type, source_id, note)
-           VALUES (?, 'debt', ?, ?, 'sale', ?, ?)`
-        ).bind(custId, balanceDue, newBalance, saleId, `Sale ${saleNumber}`)
+           VALUES (${S_CUST}, 'debt', ?, ?, 'sale', ${S_SALE}, ?)`
+        ).bind(saleNumber, auth.business.id, balanceDue, newBalance, saleNumber, auth.business.id, `Sale ${saleNumber}`)
       );
     }
 
-    await db.batch(stmts);
+    const batchResults = await db.batch(stmts);
+    const saleId = batchResults[headerIdx].meta.last_row_id;
 
     await audit(context, auth, "sale.create", "sale", saleId, { saleNumber, total: subtotal });
     return json({ ok: true, saleId, saleNumber, total: subtotal, paid, change, balanceDue }, 201);
