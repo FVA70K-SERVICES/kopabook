@@ -77,6 +77,24 @@ export function orgTypeFor(key) {
   return ORG_TYPES.find((t) => t.key === key) || ORG_TYPES.find((t) => t.key === "other");
 }
 
+// Sidebar grouping: section label -> module keys in display order.
+export const NAV_GROUPS = [
+  { label: null, modules: ["dashboard"] },
+  { label: "Sales", modules: ["sales", "products", "services"] },
+  { label: "Customers", modules: ["customers", "debts"] },
+  { label: "Stock", modules: ["suppliers", "import", "expenses"] },
+  { label: "Hotels", modules: ["hotels"] },
+  { label: "Insights", modules: ["messages", "reports"] },
+  { label: "Setup", modules: ["staff", "settings"] },
+];
+
+// Mobile bottom-bar priority: most-used modules first per business.
+export const MOBILE_PRIORITY = [
+  "dashboard", "sales", "hotels", "products", "services", "customers",
+  "debts", "expenses", "messages", "reports", "suppliers", "import",
+  "staff", "settings",
+];
+
 // Nav path -> module key used above.
 export const NAV_MODULES = {
   "/app/dashboard": "dashboard",

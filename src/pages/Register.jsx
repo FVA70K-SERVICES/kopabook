@@ -43,20 +43,22 @@ export default function RegisterPage({ preset }) {
         </div>
 
         {!orgKey ? (
-          <>
-            <h1 style={{ textAlign: "center", marginTop: 24 }}>What are you registering?</h1>
-            <p className="hint" style={{ textAlign: "center" }}>Pick your organization type. Your dashboard will carry the tools that fit it.</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, marginTop: 24, maxWidth: 900, marginLeft: "auto", marginRight: "auto" }}>
-              {ORG_TYPES.map((t) => (
-                <button key={t.key} onClick={() => setOrgKey(t.key)} className="card"
-                  style={{ margin: 0, textAlign: "left", cursor: "pointer", background: "var(--surface)" }}>
-                  <div style={{ fontSize: 28 }}>{t.icon}</div>
-                  <div style={{ fontWeight: 700, marginTop: 8 }}>{t.label}</div>
-                  <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>{t.tagline}</div>
-                </button>
-              ))}
+          <div className="form-card">
+            <h1 style={{ marginTop: 0 }}>What are you registering?</h1>
+            <p className="hint">Pick your organization type from the list. Your dashboard will carry the tools that fit it.</p>
+            <div className="field">
+              <label>Organization type *</label>
+              <select value={orgKey} onChange={(e) => setOrgKey(e.target.value)} autoFocus>
+                <option value="">Select your business type...</option>
+                {ORG_TYPES.map((t) => (
+                  <option key={t.key} value={t.key}>{t.icon} {t.label}</option>
+                ))}
+              </select>
             </div>
-          </>
+            <p className="hint" style={{ textAlign: "center", marginTop: 12 }}>
+              Already registered? <a href="/login">Sign in</a>
+            </p>
+          </div>
         ) : (
           <div className="form-card">
             <button className="btn btn-secondary btn-sm" onClick={() => { setOrgKey(""); setStatus({ loading: false, error: "" }); }} style={{ marginBottom: 12 }}>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, nav } from "../lib/api";
-import { orgTypeFor, NAV_MODULES } from "../lib/businessTypes";
+import { orgTypeFor, NAV_MODULES, NAV_GROUPS, MOBILE_PRIORITY } from "../lib/businessTypes";
 import SyncStatus from "./SyncStatus.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import UsageMeter, { UpgradeNudge } from "./UsageMeter.jsx";
@@ -33,6 +33,17 @@ export default function Layout({ session, children }) {
   // Each organization type only sees the service modules that fit it.
   const org = orgTypeFor(session?.business?.business_type);
   const LINKS = ALL_LINKS.filter((l) => org.modules.includes(NAV_MODULES[l.to]));
+  const linkByModule = Object.fromEntries(LINKS.map((l) => [NAV_MODULES[l.to], l]));
+
+  // Sidebar groups, skipping empty ones for this org type.
+  const groups = NAV_GROUPS
+    .map((g) => ({ label: g.label, links: g.modules.map((m) => linkByModule[m]).filter(Boolean) }))
+    .filter((g) => g.links.length > 0);
+
+  // Mobile bottom bar: top priority modules for this org + a More drawer button.
+  const mobileLinks = [...LINKS]
+    .sort((a, b) => MOBILE_PRIORITY.indexOf(NAV_MODULES[a.to]) - MOBILE_PRIORITY.indexOf(NAV_MODULES[b.to]))
+    .slice(0, 4);
 
   useEffect(() => {
     api.get("/api/billing").then(setBilling).catch(() => {});
@@ -63,10 +74,15 @@ export default function Layout({ session, children }) {
         </div>
         <div className="biz">{session.business?.name || "Your business"}</div>
         <nav className="snav">
-          {LINKS.map((l) => (
-            <a key={l.to} href={l.to} className={navCls(l.to)} title={l.label}>
-              <span className="nico">{l.icon}</span><span className="lbl">{l.label}</span>
-            </a>
+          {groups.map((g, gi) => (
+            <div key={gi} className="nav-group">
+              {g.label && <div className="nav-group-label">{g.label}</div>}
+              {g.links.map((l) => (
+                <a key={l.to} href={l.to} className={navCls(l.to)} title={l.label}>
+                  <span className="nico">{l.icon}</span><span className="lbl">{l.label}</span>
+                </a>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="user">
@@ -97,12 +113,16 @@ export default function Layout({ session, children }) {
       </div>
 
       <nav className="mobilebar">
-        {LINKS.slice(0, 5).map((l) => (
+        {mobileLinks.map((l) => (
           <a key={l.to} href={l.to} className={navCls(l.to)}>
             <span className="mi">{l.icon}</span>
             {l.label}
           </a>
         ))}
+        <button className="more-btn" onClick={() => setOpen(true)} aria-label="More menu">
+          <span className="mi">☰</span>
+          More
+        </button>
       </nav>
     </div>
   );
