@@ -168,7 +168,7 @@ export default function ProductsPage({ session }) {
                         <button className="btn btn-secondary btn-sm" onClick={() => setAdjusting(p.id)}>Stock</button>{" "}
                         <button className="btn btn-secondary btn-sm" onClick={() => openHistory(p)}>History</button>{" "}
                         <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Edit</button>{" "}
-                        {session.business?.role === "owner" && (
+                        {["owner", "partner"].includes(session.business?.role) && (
                           <button className="btn btn-danger btn-sm" onClick={() => archive(p)}>Archive</button>
                         )}
                       </>}

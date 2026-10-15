@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, nav } from "../lib/api";
-import { NIGERIAN_STATES } from "../lib/nigeria";
+import { COUNTRIES } from "../lib/businessTypes";
 import ThemeToggle from "../components/ThemeToggle";
 
 function MNav() {
@@ -27,7 +27,7 @@ function MFooter() {
       <div className="wrap">
         <div>
           <div className="brand">Kopa<span>Book</span></div>
-          <p>Simple sales, stock and debt tracking for Nigerian businesses.<br />Owned by Fortune Godson. Built by FVA70K Services.</p>
+          <p>Simple sales, stock and debt tracking for businesses everywhere.<br />Owned by Fortune Godson. Built by FVA70K Services.</p>
         </div>
         <div>
           <a href="/features">Features</a> · <a href="/pricing">Pricing</a> ·{" "}
@@ -44,7 +44,7 @@ export function LandingPage() {
       <MNav />
       <section className="hero">
         <div className="wrap">
-          <span className="eyebrow">Built for Nigerian merchants</span>
+          <span className="eyebrow">Built for local merchants, ready for the world</span>
           <h1>Know your sales, stock and debts.<br />Every single day.</h1>
           <p className="lead">
             KopaBook replaces the notebook and scattered WhatsApp chats with one simple
@@ -120,7 +120,7 @@ export function FeaturesPage() {
       <section className="section">
         <div className="wrap">
           <h2>Everything in KopaBook</h2>
-          <p className="sub">Designed around how Nigerian merchants actually work: transfers, WhatsApp orders, walk-ins and trust-based credit.</p>
+          <p className="sub">Designed around how local merchants actually work: transfers, WhatsApp orders, walk-ins and trust-based credit.</p>
           <div className="grid">
             {feats.map(([icon, title, desc]) => (
               <div className="card" key={title}><div className="icon">{icon}</div><h3>{title}</h3><p>{desc}</p></div>
@@ -231,7 +231,7 @@ export function WaitlistPage() {
           ) : (
             <>
               <h1>Join the waitlist</h1>
-              <p className="hint">Be first in line when KopaBook launches for Nigerian merchants.</p>
+              <p className="hint">Be first in line when KopaBook launches in your country.</p>
               {status.error && <div className="alert alert-error">{status.error}</div>}
               <form onSubmit={submit}>
                 <div className="field"><label>Full name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required placeholder="Your name" /></div>
@@ -241,12 +241,12 @@ export function WaitlistPage() {
                 </div></div>
                 <div className="field"><div className="row2">
                   <div><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} placeholder="Provision store" /></div>
-                  <div><label>State</label><select value={form.state} onChange={(e) => set("state", e.target.value)}>
-                    <option value="">Select state</option>
-                    {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <div><label>Country</label><select value={form.state} onChange={(e) => set("state", e.target.value)}>
+                    <option value="">Select country</option>
+                    {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select></div>
                 </div></div>
-                <div className="field"><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="Asaba" /></div>
+                <div className="field"><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="Your city" /></div>
                 <div className="field"><label>How do you track sales today?</label>
                   <select value={form.currentTool} onChange={(e) => set("currentTool", e.target.value)}>
                     <option value="">Select...</option>
@@ -290,7 +290,7 @@ export function HotelsLandingPage() {
           <h1>Run your whole hotel<br />from one dashboard.</h1>
           <p className="lead">
             Rooms, bookings, guest folios and billing in one simple app your front desk
-            learns in an afternoon. Built for Nigerian hotels, guest houses and lodges.
+            learns in an afternoon. Built for hotels, guest houses and lodges everywhere.
           </p>
           <div className="hero-cta">
             <a href="/hotels/register" className="btn btn-primary">Register your hotel — free</a>
