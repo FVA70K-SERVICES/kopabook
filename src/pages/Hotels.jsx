@@ -50,8 +50,8 @@ export default function HotelsPage({ session }) {
   const [folioBusy, setFolioBusy] = useState(false);
 
   const role = session?.business?.role || "owner";
-  const canManageRooms = ["owner", "hotel_manager"].includes(role);
-  const canFrontdesk = ["owner", "hotel_manager", "receptionist"].includes(role);
+  const canManageRooms = ["owner", "partner", "hotel_manager"].includes(role);
+  const canFrontdesk = ["owner", "partner", "hotel_manager", "receptionist"].includes(role);
   const canHousekeeping = ["owner", "hotel_manager", "housekeeper"].includes(role);
 
   async function load() {
