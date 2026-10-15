@@ -8,7 +8,7 @@ export async function onRequestGet(context) {
     if (denied) return denied;
 
     const members = await context.env.KOPABOOK_DB.prepare(
-      `SELECT u.id, u.full_name, u.email, u.status, bm.role AS business_role, bm.joined_at,
+      `SELECT u.id, u.full_name, u.email, u.status, u.phone, bm.role AS business_role, bm.joined_at,
               bm.can_view_profit, bm.can_discount, bm.can_manage_expenses,
               bm.can_manage_products, bm.commission_percent
        FROM business_members bm
@@ -33,7 +33,7 @@ export async function onRequestPost(context) {
     }
 
     const body = await context.request.json().catch(() => ({}));
-    const { fullName, email, password, role } = body;
+    const { fullName, email, password, role, phone } = body;
     const staffRole = ["manager", "attendant"].includes(role) ? role : "attendant";
 
     if (!fullName || !email || !password) {
@@ -51,9 +51,9 @@ export async function onRequestPost(context) {
     const passwordHash = await hashPassword(String(password));
     const now = toSqliteDate();
     const userResult = await context.env.KOPABOOK_DB.prepare(
-      `INSERT INTO users (full_name, email, password_hash, role, status) VALUES (?, ?, ?, 'staff', 'active')`
+      `INSERT INTO users (full_name, email, password_hash, role, status, phone) VALUES (?, ?, ?, 'staff', 'active', ?)`
     )
-      .bind(String(fullName).trim(), String(email).trim().toLowerCase(), passwordHash)
+      .bind(String(fullName).trim(), String(email).trim().toLowerCase(), passwordHash, phone ? String(phone).trim() : null)
       .run();
 
     await context.env.KOPABOOK_DB.prepare(

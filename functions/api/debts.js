@@ -12,7 +12,10 @@ export async function onRequestGet(context) {
               (SELECT balance_after FROM customer_ledger
                WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS outstanding,
               (SELECT created_at FROM customer_ledger
-               WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS last_activity
+               WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS last_activity,
+              (SELECT created_at FROM reminder_logs
+               WHERE customer_id = c.id AND kind = 'debt'
+               ORDER BY id DESC LIMIT 1) AS last_reminded_at
        FROM customers c
        WHERE c.business_id = ?
        ORDER BY outstanding DESC`

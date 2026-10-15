@@ -29,7 +29,7 @@ export async function onRequestPatch(context) {
     const body = await context.request.json().catch(() => ({}));
     const fields = [];
     const params = [];
-    for (const [key, col] of [["name", "name"], ["businessType", "business_type"], ["state", "state"], ["city", "city"], ["currency", "currency"]]) {
+    for (const [key, col] of [["name", "name"], ["businessType", "business_type"], ["state", "state"], ["city", "city"], ["currency", "currency"], ["brandColor", "brand_color"], ["tagline", "tagline"], ["reminderTemplate", "reminder_template"]]) {
       if (body[key] !== undefined) { fields.push(`${col} = ?`); params.push(String(body[key]).trim() || null); }
     }
     if (fields.length === 0) return json({ ok: false, message: "Nothing to update." }, 400);
