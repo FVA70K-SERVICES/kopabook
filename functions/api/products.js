@@ -52,6 +52,26 @@ export async function onRequestPost(context) {
     const opening = Number(openingQuantity || 0);
     const reorder = Number(lowStockThreshold === undefined ? 5 : lowStockThreshold);
 
+    const db = context.env.KOPABOOK_DB;
+
+    // Every product gets a trackable ID. Auto-generate KB-0001 style codes
+    // per business when the owner leaves the field blank.
+    let finalSku = sku ? String(sku).trim() : null;
+    if (!finalSku) {
+      const countRow = await db.prepare(
+        `SELECT COUNT(*) AS c FROM products WHERE business_id = ?`
+      ).bind(auth.business.id).first();
+      let n = Number(countRow?.c || 0) + 1;
+      for (;;) {
+        const candidate = "KB-" + String(n).padStart(4, "0");
+        const clash = await db.prepare(
+          `SELECT id FROM products WHERE business_id = ? AND sku = ? LIMIT 1`
+        ).bind(auth.business.id, candidate).first();
+        if (!clash) { finalSku = candidate; break; }
+        n++;
+      }
+    }
+
     const result = await context.env.KOPABOOK_DB.prepare(
       `INSERT INTO products (business_id, name, sku, unit_price, cost_price, low_stock_threshold, category, is_active)
        VALUES (?, ?, ?, ?, ?, ?, ?, 1)`
@@ -59,7 +79,7 @@ export async function onRequestPost(context) {
       .bind(
         auth.business.id,
         String(name).trim(),
-        sku ? String(sku).trim() : null,
+        finalSku,
         price,
         Number(costPrice || 0),
         reorder,

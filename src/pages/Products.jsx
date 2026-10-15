@@ -17,6 +17,18 @@ export default function ProductsPage({ session }) {
   const [adjustNote, setAdjustNote] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [historyFor, setHistoryFor] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  async function openHistory(p) {
+    setHistoryFor(p); setHistoryRows([]); setHistoryLoading(true);
+    try {
+      const d = await api.get(`/api/products/${p.id}/movements`);
+      setHistoryRows(d.movements || []);
+    } catch (e) { setError(e.message); }
+    setHistoryLoading(false);
+  }
 
   const canManage = session.perms?.can_manage_products;
 
@@ -144,7 +156,7 @@ export default function ProductsPage({ session }) {
                         <img src={`/api/product-photo?key=${encodeURIComponent(p.photo_key)}`} alt=""
                           style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 8, marginRight: 8, verticalAlign: "middle" }} />
                       )}
-                      <strong>{p.name}</strong><br /><small style={{ color: "var(--muted)" }}>{p.sku || ""}{p.category ? ` · ${p.category}` : ""}</small>
+                      <strong>{p.name}</strong><br /><small style={{ color: "var(--muted)" }}>{p.sku ? <span className="pill pill-gray" style={{ fontSize: 11 }}>ID: {p.sku}</span> : ""}{p.category ? ` · ${p.category}` : ""}</small>
                     </td>
                     <td className="money">{fmt(p.unit_price)}</td>
                     <td>
@@ -154,6 +166,7 @@ export default function ProductsPage({ session }) {
                     <td style={{ whiteSpace: "nowrap" }}>
                       {canManage && <>
                         <button className="btn btn-secondary btn-sm" onClick={() => setAdjusting(p.id)}>Stock</button>{" "}
+                        <button className="btn btn-secondary btn-sm" onClick={() => openHistory(p)}>History</button>{" "}
                         <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Edit</button>{" "}
                         {session.business?.role === "owner" && (
                           <button className="btn btn-danger btn-sm" onClick={() => archive(p)}>Archive</button>
@@ -176,7 +189,7 @@ export default function ProductsPage({ session }) {
             <form onSubmit={save}>
               <div className="field"><label>Name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
               <div className="field"><div className="row2">
-                <div><label>SKU</label><input value={form.sku} onChange={(e) => set("sku", e.target.value)} /></div>
+                <div><label>Product ID (auto if blank)</label><input value={form.sku} onChange={(e) => set("sku", e.target.value)} placeholder="e.g. KB-0001" /></div>
                 <div><label>Category</label><input value={form.category} onChange={(e) => set("category", e.target.value)} /></div>
               </div></div>
               <div className="field"><div className="row2">
@@ -221,6 +234,43 @@ export default function ProductsPage({ session }) {
             <div className="field"><label>Quantity change</label><input type="number" step="0.01" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder="e.g. 10 or -3" /></div>
             <div className="field"><label>Note</label><input value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="Reason for adjustment" /></div>
             <button className="btn btn-primary btn-block" onClick={() => adjust(products.find((p) => p.id === adjusting))}>Apply adjustment</button>
+          </div>
+        </div>
+      )}
+
+      {historyFor && (
+        <div className="modal-back" onClick={() => setHistoryFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Goods tracking</h2>
+            <p style={{ marginTop: 0 }}>
+              <strong>{historyFor.name}</strong>{" "}
+              {historyFor.sku && <span className="pill pill-gray">ID: {historyFor.sku}</span>}
+            </p>
+            {historyLoading ? <p className="hint">Loading movements...</p> : historyRows.length === 0 ? (
+              <p className="empty">No movements recorded yet.</p>
+            ) : (
+              <table className="data" style={{ margin: 0 }}>
+                <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Note</th></tr></thead>
+                <tbody>
+                  {historyRows.map((m) => (
+                    <tr key={m.id}>
+                      <td><small>{m.created_at?.slice(0, 16).replace("T", " ")}</small></td>
+                      <td>
+                        {m.movement_type === "sale" && <span className="pill pill-green">Sold</span>}
+                        {m.movement_type === "opening" && <span className="pill pill-gray">Opening</span>}
+                        {m.movement_type === "adjustment" && <span className="pill pill-gold">Adjusted</span>}
+                        {!["sale", "opening", "adjustment"].includes(m.movement_type) && m.movement_type}
+                      </td>
+                      <td className="money" style={{ color: Number(m.quantity_delta) < 0 ? "var(--danger)" : "var(--brand-dark)" }}>
+                        {Number(m.quantity_delta) > 0 ? "+" : ""}{m.quantity_delta}
+                      </td>
+                      <td><small>{m.note || "—"}</small></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <button className="btn btn-secondary btn-block" style={{ marginTop: 12 }} onClick={() => setHistoryFor(null)}>Close</button>
           </div>
         </div>
       )}
