@@ -9,7 +9,7 @@ const ACTION_LABELS = {
   "debt.add": "Debt added", "debt.payment": "Debt payment recorded", "debt.writeoff": "Debt written off",
   "expense.create": "Expense recorded", "expense.delete": "Expense deleted",
   "supplier.purchase": "Supplier purchase recorded",
-  "staff.invite": "Staff invited", "staff.permissions.update": "Staff permissions changed",
+  "staff.invite": "Staff invited", "staff.edit": "Staff member updated", "staff.remove": "Staff member removed", "staff.permissions.update": "Staff permissions changed",
   "staff.password_reset": "Staff password reset",
   "customer.create": "Customer added", "customer.update": "Customer updated",
   "hotel.booking": "Booking made", "hotel.checkin": "Guest checked in", "hotel.checkout": "Guest checked out",

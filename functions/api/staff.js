@@ -1,11 +1,30 @@
 // /api/staff - GET list members, POST invite (owner/manager only)
 import { json, getAuthContext, requireAuth, hashPassword, audit, toSqliteDate } from "./_utils";
 
+// Default permission flags per role. Partners are co-owners: full access.
+const ROLE_FLAGS = {
+  partner: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
+  manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
+  attendant: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
+  hotel_manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
+  receptionist: { can_view_profit: 0, can_discount: 1, can_manage_expenses: 0, can_manage_products: 0 },
+  housekeeper: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
+};
+
+const VALID_ROLES = Object.keys(ROLE_FLAGS);
+
+function canManageStaff(auth) {
+  return auth.business.role === "owner" || auth.business.role === "partner";
+}
+
 export async function onRequestGet(context) {
   try {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    if (!canManageStaff(auth)) {
+      return json({ ok: false, message: "Only the owner or a partner can view staff." }, 403);
+    }
 
     const members = await context.env.KOPABOOK_DB.prepare(
       `SELECT u.id, u.full_name, u.email, u.status, u.phone, bm.role AS business_role, bm.joined_at,
@@ -44,15 +63,7 @@ export async function onRequestPost(context) {
     }
 
     // Sensible default permission flags per role. Partners are co-owners.
-    const roleFlags = {
-      partner: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
-      manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
-      attendant: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
-      hotel_manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
-      receptionist: { can_view_profit: 0, can_discount: 1, can_manage_expenses: 0, can_manage_products: 0 },
-      housekeeper: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
-    };
-    const flags = roleFlags[staffRole];
+    const flags = ROLE_FLAGS[staffRole];
 
     if (!fullName || !email || !password) {
       return json({ ok: false, message: "Name, email and password are required." }, 400);
@@ -148,5 +159,106 @@ export async function onRequestPatch(context) {
     return json({ ok: true, ...fields });
   } catch (error) {
     return json({ ok: false, message: "Could not update staff permissions.", error: String(error) }, 500);
+  }
+}
+
+// PUT /api/staff - edit a member's name and/or role (owner/partner only).
+// Body: { userId, fullName?, role? }. Changing role resets flags to the role defaults.
+// Only the owner may set or change a partner's role.
+export async function onRequestPut(context) {
+  try {
+    const auth = await getAuthContext(context);
+    const denied = requireAuth(auth);
+    if (denied) return denied;
+    if (!canManageStaff(auth)) {
+      return json({ ok: false, message: "Only the owner or a partner can edit staff." }, 403);
+    }
+    const isOwner = auth.business.role === "owner";
+
+    const body = await context.request.json().catch(() => ({}));
+    const { userId, fullName, role } = body;
+    if (!userId) return json({ ok: false, message: "userId is required." }, 400);
+
+    const member = await context.env.KOPABOOK_DB.prepare(
+      `SELECT business_members.id, business_members.role, business_members.user_id
+       FROM business_members WHERE business_id = ? AND user_id = ? LIMIT 1`
+    ).bind(auth.business.id, userId).first();
+    if (!member) return json({ ok: false, message: "Staff member not found." }, 404);
+    if (member.role === "owner") {
+      return json({ ok: false, message: "The owner's details cannot be changed here." }, 403);
+    }
+    if ((member.role === "partner" || role === "partner") && !isOwner) {
+      return json({ ok: false, message: "Only the owner can change a partner." }, 403);
+    }
+
+    const sets = [];
+    const params = [];
+    if (fullName !== undefined && String(fullName).trim()) {
+      sets.push("full_name = ?"); params.push(String(fullName).trim().slice(0, 120));
+      await context.env.KOPABOOK_DB.prepare(`UPDATE users SET full_name = ? WHERE id = ?`)
+        .bind(String(fullName).trim().slice(0, 120), member.user_id).run();
+    }
+    if (role !== undefined) {
+      if (!VALID_ROLES.includes(role)) return json({ ok: false, message: "Unknown role." }, 400);
+      sets.push("role = ?"); params.push(role);
+      const flags = ROLE_FLAGS[role];
+      sets.push("can_view_profit = ?", "can_discount = ?", "can_manage_expenses = ?", "can_manage_products = ?");
+      params.push(flags.can_view_profit, flags.can_discount, flags.can_manage_expenses, flags.can_manage_products);
+    }
+    if (sets.length === 0) return json({ ok: false, message: "Nothing to update." }, 400);
+
+    await context.env.KOPABOOK_DB.prepare(
+      `UPDATE business_members SET ${sets.join(", ")} WHERE id = ?`
+    ).bind(...params, member.id).run();
+
+    await audit(context, auth, "staff.edit", "business_member", member.id, { userId, fullName, role });
+    return json({ ok: true });
+  } catch (error) {
+    return json({ ok: false, message: "Could not update staff member.", error: String(error) }, 500);
+  }
+}
+
+// DELETE /api/staff?userId= - remove a member from this business (owner/partner only).
+// Their other businesses are untouched; if they belong to no other business,
+// their login is deactivated and their sessions are closed.
+export async function onRequestDelete(context) {
+  try {
+    const auth = await getAuthContext(context);
+    const denied = requireAuth(auth);
+    if (denied) return denied;
+    if (!canManageStaff(auth)) {
+      return json({ ok: false, message: "Only the owner or a partner can remove staff." }, 403);
+    }
+    const isOwner = auth.business.role === "owner";
+
+    const url = new URL(context.request.url);
+    const userId = Number(url.searchParams.get("userId")) || null;
+    if (!userId) return json({ ok: false, message: "userId is required." }, 400);
+    if (userId === auth.user.id) {
+      return json({ ok: false, message: "You cannot remove yourself." }, 400);
+    }
+
+    const db = context.env.KOPABOOK_DB;
+    const member = await db.prepare(
+      `SELECT id, role FROM business_members WHERE business_id = ? AND user_id = ? LIMIT 1`
+    ).bind(auth.business.id, userId).first();
+    if (!member) return json({ ok: false, message: "Staff member not found." }, 404);
+    if (member.role === "owner" || (member.role === "partner" && !isOwner)) {
+      return json({ ok: false, message: "Only the owner can remove an owner or partner." }, 403);
+    }
+
+    await db.prepare(`DELETE FROM business_members WHERE id = ?`).bind(member.id).run();
+    const remaining = await db.prepare(
+      `SELECT COUNT(*) AS c FROM business_members WHERE user_id = ?`
+    ).bind(userId).first();
+    if (!Number(remaining?.c || 0)) {
+      await db.prepare(`UPDATE users SET status = 'inactive' WHERE id = ?`).bind(userId).run();
+    }
+    await db.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
+
+    await audit(context, auth, "staff.remove", "user", userId, { role: member.role });
+    return json({ ok: true });
+  } catch (error) {
+    return json({ ok: false, message: "Could not remove staff member.", error: String(error) }, 500);
   }
 }

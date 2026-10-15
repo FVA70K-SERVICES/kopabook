@@ -1,4 +1,4 @@
-// POST /api/staff/reset-password — owner sets a new password for a staff member.
+// POST /api/staff/reset-password — owner/partner sets a new password for a staff member.
 // Body: { userId, newPassword }. For when staff forget their passwords.
 import { json, getAuthContext, requireAuth, hashPassword, audit } from "../_utils";
 
@@ -7,8 +7,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (auth.business.role !== "owner") {
-      return json({ ok: false, message: "Only the owner can reset staff passwords." }, 403);
+    if (auth.business.role !== "owner" && auth.business.role !== "partner") {
+      return json({ ok: false, message: "Only the owner or a partner can reset staff passwords." }, 403);
     }
 
     const body = await context.request.json().catch(() => ({}));
@@ -21,11 +21,14 @@ export async function onRequestPost(context) {
     }
 
     const member = await context.env.KOPABOOK_DB.prepare(
-      `SELECT user_id FROM business_members WHERE business_id = ? AND user_id = ? LIMIT 1`
+      `SELECT user_id, role FROM business_members WHERE business_id = ? AND user_id = ? LIMIT 1`
     )
       .bind(auth.business.id, Number(userId))
       .first();
     if (!member) return json({ ok: false, message: "Staff member not found." }, 404);
+    if ((member.role === "owner" || member.role === "partner") && auth.business.role !== "owner") {
+      return json({ ok: false, message: "Only the owner can reset an owner's or partner's password." }, 403);
+    }
 
     const passwordHash = await hashPassword(String(newPassword));
     await context.env.KOPABOOK_DB.prepare(
