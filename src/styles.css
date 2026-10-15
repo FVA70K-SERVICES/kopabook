@@ -226,3 +226,26 @@ table.data tr:first-child td { border-top: 0; }
 .faq details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin-bottom: 10px; }
 .faq summary { font-weight: 600; cursor: pointer; font-size: 16px; }
 .faq p { color: var(--muted); margin: 10px 0 0; }
+
+/* ---------- Printable receipts (thermal printers) ---------- */
+.receipt-screen { background: #e5e7eb; min-height: 100vh; padding: 16px 12px 40px; }
+.receipt-toolbar { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; position: sticky; top: 0; padding: 8px 0; }
+.receipt-paper { background: #fff; color: #111; margin: 0 auto; padding: 12px 10px; font-family: "Courier New", Courier, monospace; font-size: 13px; line-height: 1.45; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+.receipt-paper.paper-80 { width: 80mm; max-width: 100%; }
+.receipt-paper.paper-58 { width: 58mm; max-width: 100%; font-size: 12px; }
+.r-center { text-align: center; }
+.r-biz { font-size: 17px; font-weight: 800; letter-spacing: .5px; }
+.r-title { font-weight: 800; margin: 8px 0; letter-spacing: 1px; }
+.r-sub { font-size: 12px; }
+.r-tiny { font-size: 10px; color: #555; margin-top: 4px; }
+.r-line { overflow: hidden; white-space: nowrap; color: #333; margin: 6px 0; }
+.r-row { display: flex; justify-content: space-between; gap: 8px; }
+.r-row span:last-child { text-align: right; white-space: nowrap; }
+.r-bold { font-weight: 800; }
+
+@media print {
+  .noprint { display: none !important; }
+  .receipt-screen { background: #fff; padding: 0; min-height: auto; }
+  .receipt-paper { box-shadow: none; margin: 0; padding: 0; }
+  @page { margin: 3mm; }
+}
