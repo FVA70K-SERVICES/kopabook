@@ -5,7 +5,7 @@ import PaymentModesEditor from "../components/PaymentModesEditor";
 
 export default function SettingsPage({ session }) {
   const [biz, setBiz] = useState(null);
-  const [form, setForm] = useState({ name: "", businessType: "", state: "", city: "", currency: "NGN", brandColor: "#166534", tagline: "", reminderTemplate: "" });
+  const [form, setForm] = useState({ name: "", businessType: "", state: "", city: "", currency: "NGN", brandColor: "#166534", tagline: "", reminderTemplate: "", receiptPhone: "", receiptAddress: "", receiptFooter: "", receiptPaperWidth: "80mm" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
@@ -42,6 +42,8 @@ export default function SettingsPage({ session }) {
           state: d.business.state || "", city: d.business.city || "", currency: d.business.currency || "NGN",
           brandColor: d.business.brand_color || "#166534", tagline: d.business.tagline || "",
           reminderTemplate: d.business.reminder_template || "",
+          receiptPhone: d.business.receipt_phone || "", receiptAddress: d.business.receipt_address || "",
+          receiptFooter: d.business.receipt_footer || "", receiptPaperWidth: d.business.receipt_paper_width || "80mm",
         });
         setLoading(false);
       })
@@ -143,6 +145,35 @@ export default function SettingsPage({ session }) {
           <div className="field"><label>Tagline</label><input value={form.tagline} onChange={(e) => set("tagline", e.target.value)} disabled={!isOwner} placeholder="e.g. Quality you can trust" maxLength={80} /></div>
           {isOwner && <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save branding"}</button>}
         </form>
+      </div>
+
+      <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>🧾 Receipts & printing</h3>
+        <p className="hint">These details print on every sales and hotel receipt. Set your paper size to match your thermal printer.</p>
+        <form onSubmit={save}>
+          <div className="field"><div className="row2">
+            <div><label>Receipt phone</label><input value={form.receiptPhone} onChange={(e) => set("receiptPhone", e.target.value)} disabled={!isOwner} placeholder="080..." /></div>
+            <div><label>Receipt address</label><input value={form.receiptAddress} onChange={(e) => set("receiptAddress", e.target.value)} disabled={!isOwner} placeholder="Shop address" /></div>
+          </div></div>
+          <div className="field"><label>Receipt footer message</label><input value={form.receiptFooter} onChange={(e) => set("receiptFooter", e.target.value)} disabled={!isOwner} placeholder="e.g. Goods sold in good condition are not returnable. Thank you!" maxLength={120} /></div>
+          <div className="field"><label>Paper width</label>
+            <select value={form.receiptPaperWidth} onChange={(e) => set("receiptPaperWidth", e.target.value)} disabled={!isOwner}>
+              <option value="80mm">80mm (standard thermal)</option>
+              <option value="58mm">58mm (small portable)</option>
+            </select>
+          </div>
+          {isOwner && <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save receipt settings"}</button>}
+        </form>
+        <div style={{ marginTop: 16, padding: 12, background: "var(--bg)", borderRadius: 10 }}>
+          <strong>Connect your printer</strong>
+          <ol style={{ margin: "8px 0", paddingLeft: 20, color: "var(--muted)", fontSize: 14 }}>
+            <li>Put your Bluetooth thermal printer in pairing mode.</li>
+            <li>On your phone, go to Settings → Bluetooth and pair the printer.</li>
+            <li>Open any receipt in KopaBook and tap Print, then choose your printer.</li>
+            <li>For WiFi printers, join the same WiFi network, then print the same way.</li>
+          </ol>
+          <button className="btn btn-secondary btn-sm" onClick={() => window.open("/app/receipt/sale/0", "_blank")}>Print test page</button>
+        </div>
       </div>
 
       <div className="card narrow" style={{ marginTop: 18 }}>
