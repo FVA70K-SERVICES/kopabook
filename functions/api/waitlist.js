@@ -4,7 +4,7 @@ import { json } from "./_utils";
 export async function onRequestPost(context) {
   try {
     const body = await context.request.json().catch(() => ({}));
-    const { name, phone, email, businessType, city, monthlyTransactions, currentTool, consent } = body;
+    const { name, phone, email, businessType, state, city, monthlyTransactions, currentTool, consent } = body;
 
     if (!name) {
       return json({ ok: false, message: "Name is required." }, 400);
@@ -12,14 +12,15 @@ export async function onRequestPost(context) {
 
     await context.env.KOPABOOK_DB.prepare(
       `INSERT INTO waitlist_signups
-         (name, phone, email, business_type, city, monthly_transactions, current_tool, consent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         (name, phone, email, business_type, state, city, monthly_transactions, current_tool, consent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         String(name).trim(),
         phone ? String(phone).trim() : null,
         email ? String(email).trim().toLowerCase() : null,
         businessType || null,
+        state || null,
         city || null,
         monthlyTransactions || null,
         currentTool || null,

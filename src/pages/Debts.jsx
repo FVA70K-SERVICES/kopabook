@@ -42,10 +42,14 @@ export default function DebtsPage() {
     if (!amt || amt <= 0) return;
     setSaving(true);
     try {
-      await api.post("/api/debts/payment", {
+      const d = await api.post("/api/debts/payment", {
         customerId: paying.id, amount: amt, paymentMethod: method, note: note || undefined,
       });
       setPaying(null); setAmount(""); setNote("");
+      if (d.change > 0) {
+        setError("");
+        alert(`Repayment recorded. Change to give back: ${fmt(d.change)}`);
+      }
       load();
     } catch (e) { setError(e.message); }
     setSaving(false);

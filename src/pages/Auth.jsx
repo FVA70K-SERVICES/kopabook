@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, nav } from "../lib/api";
+import { NIGERIAN_STATES } from "../lib/nigeria";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
@@ -46,7 +47,7 @@ export function LoginPage() {
 export function OwnerSetupPage() {
   const [form, setForm] = useState({
     bootstrapKey: "", fullName: "", email: "", password: "",
-    businessName: "", businessType: "", city: "",
+    businessName: "", businessType: "", state: "", city: "",
   });
   const [status, setStatus] = useState({ loading: false, error: "" });
 
@@ -81,8 +82,12 @@ export function OwnerSetupPage() {
               <div><label>Password *</label><input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} /></div>
             </div></div>
             <div className="field"><label>Business name *</label><input value={form.businessName} onChange={(e) => set("businessName", e.target.value)} required placeholder="e.g. Chidi Provisions" /></div>
+            <div className="field"><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} placeholder="Provision store" /></div>
             <div className="field"><div className="row2">
-              <div><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} placeholder="Provision store" /></div>
+              <div><label>State</label><select value={form.state} onChange={(e) => set("state", e.target.value)}>
+                <option value="">Select state</option>
+                {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select></div>
               <div><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="Asaba" /></div>
             </div></div>
             <button className="btn btn-primary btn-block" disabled={status.loading}>

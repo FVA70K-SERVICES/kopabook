@@ -54,7 +54,7 @@ function AppRoute({ session }) {
     else if (path === "/app/services") page = <ServicesPage session={session} />;
     else if (path === "/app/suppliers") page = <SuppliersPage session={session} />;
     else if (path === "/app/import") page = <ImportPage />;
-    else if (path === "/app/expenses") page = <ExpensesPage />;
+    else if (path === "/app/expenses") page = <ExpensesPage session={session} />;
     else if (path === "/app/customers") page = <CustomersPage />;
     else if (path === "/app/debts") page = <DebtsPage />;
     else if (path === "/app/reports") page = <ReportsPage />;

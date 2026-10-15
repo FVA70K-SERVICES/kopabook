@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, fmt, todayISO } from "../lib/api";
 
-export default function ExpensesPage() {
+export default function ExpensesPage({ session }) {
+  const canManageExpenses = session?.perms?.can_manage_expenses;
   const [expenses, setExpenses] = useState([]);
   const [categories, setCategories] = useState([]);
   const [total, setTotal] = useState(0);
@@ -48,7 +49,7 @@ export default function ExpensesPage() {
     <>
       <div className="page-head">
         <h1>Expenses</h1>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Add expense</button>
+        {canManageExpenses && <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Add expense</button>}
       </div>
 
       <div className="toolbar">
