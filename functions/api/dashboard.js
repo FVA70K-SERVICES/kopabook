@@ -10,14 +10,16 @@ export async function onRequestGet(context) {
     const db = context.env.KOPABOOK_DB;
     const bid = auth.business.id;
 
+    // "Today" follows West Africa Time (UTC+1, no daylight saving), the
+    // timezone KopaBook businesses operate in, not server UTC.
     const todaySales = await db.prepare(
       `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count
-       FROM sales WHERE business_id = ? AND date(created_at) = date('now')`
+       FROM sales WHERE business_id = ? AND date(created_at, '+1 hour') = date('now', '+1 hour')`
     ).bind(bid).first();
 
     const todayExpenses = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count
-       FROM expenses WHERE business_id = ? AND incurred_on = date('now')`
+       FROM expenses WHERE business_id = ? AND incurred_on = date('now', '+1 hour')`
     ).bind(bid).first();
 
     const debtRows = await db.prepare(
