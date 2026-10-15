@@ -28,24 +28,29 @@ export async function onRequestPost(context) {
       .bind(Number(customerId))
       .first();
     const prevBalance = lastLedger ? Number(lastLedger.balance_after) : 0;
-    const newBalance = Math.round((prevBalance - amt) * 100) / 100;
+
+    // Overpayment guard: a repayment can never push the balance below zero.
+    // Any excess comes back as change instead of creating a negative balance.
+    const applied = Math.min(amt, Math.max(0, prevBalance));
+    const change = Math.round((amt - applied) * 100) / 100;
+    const newBalance = Math.round((prevBalance - applied) * 100) / 100;
 
     const payResult = await context.env.KOPABOOK_DB.prepare(
       `INSERT INTO payment_records (business_id, customer_id, amount, payment_method, recorded_by)
        VALUES (?, ?, ?, ?, ?)`
     )
-      .bind(auth.business.id, Number(customerId), amt, paymentMethod || "cash", auth.user.id)
+      .bind(auth.business.id, Number(customerId), applied, paymentMethod || "cash", auth.user.id)
       .run();
 
     await context.env.KOPABOOK_DB.prepare(
       `INSERT INTO customer_ledger (customer_id, entry_type, amount_delta, balance_after, source_type, source_id, note)
        VALUES (?, 'payment', ?, ?, 'payment', ?, ?)`
     )
-      .bind(Number(customerId), -amt, newBalance, payResult.meta.last_row_id, note ? String(note).trim() : null)
+      .bind(Number(customerId), -applied, newBalance, payResult.meta.last_row_id, note ? String(note).trim() : null)
       .run();
 
-    await audit(context, auth, "debt.payment", "customer", Number(customerId), { amount: amt });
-    return json({ ok: true, newBalance }, 201);
+    await audit(context, auth, "debt.payment", "customer", Number(customerId), { amount: applied, change });
+    return json({ ok: true, newBalance, applied, change }, 201);
   } catch (error) {
     return json({ ok: false, message: "Could not record payment.", error: String(error) }, 500);
   }

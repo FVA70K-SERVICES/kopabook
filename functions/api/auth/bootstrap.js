@@ -11,7 +11,7 @@ import {
 export async function onRequestPost(context) {
   try {
     const body = await context.request.json().catch(() => ({}));
-    const { bootstrapKey, fullName, email, password, businessName, businessType, city } = body;
+    const { bootstrapKey, fullName, email, password, businessName, businessType, state, city } = body;
 
     const expected = context.env.BOOTSTRAP_KEY;
     if (!expected || bootstrapKey !== expected) {
@@ -44,10 +44,10 @@ export async function onRequestPost(context) {
     const userId = userResult.meta.last_row_id;
 
     const bizResult = await context.env.KOPABOOK_DB.prepare(
-      `INSERT INTO businesses (owner_user_id, name, business_type, city, currency, plan_tier)
-       VALUES (?, ?, ?, ?, 'NGN', 'free')`
+      `INSERT INTO businesses (owner_user_id, name, business_type, state, city, currency, plan_tier)
+       VALUES (?, ?, ?, ?, ?, 'NGN', 'free')`
     )
-      .bind(userId, businessName.trim(), businessType || null, city || null)
+      .bind(userId, businessName.trim(), businessType || null, state || null, city || null)
       .run();
     const businessId = bizResult.meta.last_row_id;
 

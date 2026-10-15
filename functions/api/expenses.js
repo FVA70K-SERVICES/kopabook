@@ -1,5 +1,5 @@
 // /api/expenses — GET list, POST create
-import { json, getAuthContext, requireAuth, audit } from "./_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit } from "./_utils";
 
 export async function onRequestGet(context) {
   try {
@@ -47,6 +47,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const permDenied = requirePerm(auth, "can_manage_expenses", "Only staff with expense permission can record expenses.");
+    if (permDenied) return permDenied;
 
     const body = await context.request.json().catch(() => ({}));
     const { amount, categoryId, categoryName, note, incurredOn } = body;

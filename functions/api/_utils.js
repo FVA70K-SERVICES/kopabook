@@ -124,6 +124,8 @@ export async function getAuthContext(context) {
 
   const membership = await context.env.KOPABOOK_DB.prepare(
     `SELECT business_members.business_id, business_members.role AS business_role,
+            business_members.can_view_profit, business_members.can_discount,
+            business_members.can_manage_expenses, business_members.can_manage_products,
             businesses.name AS business_name, businesses.currency
      FROM business_members
      INNER JOIN businesses ON businesses.id = business_members.business_id
@@ -134,6 +136,7 @@ export async function getAuthContext(context) {
     .bind(user.id)
     .first();
 
+  const isOwner = membership && membership.business_role === "owner";
   return {
     user: {
       id: user.id,
@@ -150,6 +153,13 @@ export async function getAuthContext(context) {
           role: membership.business_role,
         }
       : null,
+    // Granular staff permission flags. Owners always have full access.
+    perms: {
+      can_view_profit: isOwner || Number(membership?.can_view_profit || 0) === 1,
+      can_discount: isOwner || Number(membership?.can_discount || 0) === 1,
+      can_manage_expenses: isOwner || Number(membership?.can_manage_expenses || 0) === 1,
+      can_manage_products: isOwner || Number(membership?.can_manage_products || 0) === 1,
+    },
   };
 }
 
@@ -162,6 +172,18 @@ export function requireAuth(auth) {
 
 export function canManage(auth) {
   return auth.business.role === "owner" || auth.business.role === "manager";
+}
+
+// Granular staff permission gate. Owners always pass; managers and attendants
+// need the flag on their membership. Returns a 403 JSON response when denied,
+// or null when allowed.
+export function requirePerm(auth, flag, message) {
+  if (!auth) return json({ ok: false, message: "Not signed in." }, 401);
+  if (auth.perms && auth.perms[flag]) return null;
+  return json(
+    { ok: false, message: message || "You don't have permission for this action. Ask the business owner to grant it." },
+    403
+  );
 }
 
 export async function audit(context, auth, actionType, entityType, entityId, metadata) {
