@@ -71,10 +71,10 @@ export async function onRequestPost(context) {
     const token = newSessionToken();
     const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000);
     await context.env.KOPABOOK_DB.prepare(
-      `INSERT INTO sessions (user_id, session_token, expires_at, last_seen_at)
-       VALUES (?, ?, ?, ?)`
+      `INSERT INTO sessions (user_id, session_token, expires_at, last_seen_at, business_id)
+       VALUES (?, ?, ?, ?, ?)`
     )
-      .bind(userId, token, toSqliteDate(expires), now)
+      .bind(userId, token, toSqliteDate(expires), now, typeof businessId !== "undefined" ? businessId : null)
       .run();
 
     return json(

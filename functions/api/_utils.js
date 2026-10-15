@@ -100,14 +100,55 @@ export function toSqliteDate(date = new Date()) {
   return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
+// Minutes that a timezone is ahead of UTC at a given instant (handles DST).
+function tzOffsetMinutes(zone, date) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).formatToParts(date).map((p) => [p.type, p.value])
+  );
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second);
+  return Math.round((asUtc - date.getTime()) / 60000);
+}
+
+// "Today" in the business's own timezone. Returns the local date (YYYY-MM-DD)
+// plus the matching UTC window for comparing created_at timestamps.
+// Pure Intl, no library needed, works on Cloudflare Workers.
+export function businessDay(tz) {
+  const zone = tz || "Africa/Lagos";
+  let date;
+  try {
+    date = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+  } catch {
+    date = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+  }
+  // Find UTC start of that local day via two refinement passes.
+  let guess = Date.parse(date + "T00:00:00Z");
+  for (let i = 0; i < 2; i++) {
+    let offset;
+    try { offset = tzOffsetMinutes(zone, new Date(guess)); }
+    catch { offset = 60; }
+    guess = Date.parse(date + "T00:00:00Z") - offset * 60000;
+  }
+  const start = new Date(guess);
+  const end = new Date(guess + 24 * 3600 * 1000);
+  return { date, startUtc: toSqliteDate(start), endUtc: toSqliteDate(end) };
+}
+
 // Returns { user, business, membership } or null.
 export async function getAuthContext(context) {
   const token = getCookie(context.request, "kopabook_session");
   if (!token) return null;
   const now = toSqliteDate();
 
-  const user = await context.env.KOPABOOK_DB.prepare(
-    `SELECT users.id, users.full_name, users.email, users.role, users.status
+  const sessionRow = await context.env.KOPABOOK_DB.prepare(
+    `SELECT sessions.user_id, sessions.business_id AS session_business_id,
+            users.id, users.full_name, users.email, users.role, users.status
      FROM sessions
      INNER JOIN users ON users.id = sessions.user_id
      WHERE sessions.session_token = ? AND sessions.expires_at > ?
@@ -116,6 +157,7 @@ export async function getAuthContext(context) {
     .bind(token, now)
     .first();
 
+  const user = sessionRow;
   if (!user || user.status !== "active") return null;
 
   await context.env.KOPABOOK_DB.prepare(
@@ -124,21 +166,39 @@ export async function getAuthContext(context) {
     .bind(now, token)
     .run();
 
-  const membership = await context.env.KOPABOOK_DB.prepare(
-    `SELECT business_members.business_id, business_members.role AS business_role,
+  const memberCols = `business_members.business_id, business_members.role AS business_role,
             business_members.can_view_profit, business_members.can_discount,
             business_members.can_manage_expenses, business_members.can_manage_products,
-            businesses.name AS business_name, businesses.currency, businesses.business_type
-     FROM business_members
+            businesses.name AS business_name, businesses.currency, businesses.business_type,
+            businesses.timezone, businesses.country`;
+  const memberFrom = `FROM business_members
      INNER JOIN businesses ON businesses.id = business_members.business_id
-     WHERE business_members.user_id = ?
-     ORDER BY business_members.id ASC
-     LIMIT 1`
-  )
-    .bind(user.id)
-    .first();
+     WHERE business_members.user_id = ?`;
+
+  // The session remembers which business is active. Fall back to the first
+  // membership for older sessions, then pin it.
+  let membership = null;
+  if (sessionRow.session_business_id) {
+    membership = await context.env.KOPABOOK_DB.prepare(
+      `SELECT ${memberCols} ${memberFrom} AND business_members.business_id = ? LIMIT 1`
+    ).bind(user.id, sessionRow.session_business_id).first();
+  }
+  if (!membership) {
+    membership = await context.env.KOPABOOK_DB.prepare(
+      `SELECT ${memberCols} ${memberFrom} ORDER BY business_members.id ASC LIMIT 1`
+    ).bind(user.id).first();
+    if (membership) {
+      await context.env.KOPABOOK_DB.prepare(
+        `UPDATE sessions SET business_id = ? WHERE session_token = ?`
+      ).bind(membership.business_id, token).run();
+    }
+  }
 
   const isOwner = membership && membership.business_role === "owner";
+  const isPartner = membership && membership.business_role === "partner";
+  // Partners are co-owners: full access like the owner. Destructive owner-only
+  // actions (removing the owner, deleting the business) still check isOwner.
+  const fullAccess = isOwner || isPartner;
   return {
     user: {
       id: user.id,
@@ -154,14 +214,16 @@ export async function getAuthContext(context) {
           currency: membership.currency || "NGN",
           role: membership.business_role,
           business_type: membership.business_type || "other",
+          timezone: membership.timezone || "Africa/Lagos",
+          country: membership.country || "Nigeria",
         }
       : null,
-    // Granular staff permission flags. Owners always have full access.
+    // Granular staff permission flags. Owners and partners always have full access.
     perms: {
-      can_view_profit: isOwner || Number(membership?.can_view_profit || 0) === 1,
-      can_discount: isOwner || Number(membership?.can_discount || 0) === 1,
-      can_manage_expenses: isOwner || Number(membership?.can_manage_expenses || 0) === 1,
-      can_manage_products: isOwner || Number(membership?.can_manage_products || 0) === 1,
+      can_view_profit: fullAccess || Number(membership?.can_view_profit || 0) === 1,
+      can_discount: fullAccess || Number(membership?.can_discount || 0) === 1,
+      can_manage_expenses: fullAccess || Number(membership?.can_manage_expenses || 0) === 1,
+      can_manage_products: fullAccess || Number(membership?.can_manage_products || 0) === 1,
     },
   };
 }
@@ -220,7 +282,7 @@ export const HOTEL_ROLES = {
 
 export function requireHotelRole(auth, allowedRoles) {
   const role = auth && auth.business && auth.business.role;
-  if (role === "owner" || allowedRoles.includes(role)) return null;
+  if (role === "owner" || role === "partner" || allowedRoles.includes(role)) return null;
   return json(
     { ok: false, message: "Your staff role does not allow this action." },
     403

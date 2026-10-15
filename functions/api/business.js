@@ -22,14 +22,14 @@ export async function onRequestPatch(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (auth.business.role !== "owner") {
-      return json({ ok: false, message: "Only the owner can change business settings." }, 403);
+    if (auth.business.role !== "owner" && auth.business.role !== "partner") {
+      return json({ ok: false, message: "Only the owner or a partner can change business settings." }, 403);
     }
 
     const body = await context.request.json().catch(() => ({}));
     const fields = [];
     const params = [];
-    for (const [key, col] of [["name", "name"], ["businessType", "business_type"], ["state", "state"], ["city", "city"], ["currency", "currency"], ["brandColor", "brand_color"], ["tagline", "tagline"], ["reminderTemplate", "reminder_template"], ["receiptPhone", "receipt_phone"], ["receiptAddress", "receipt_address"], ["receiptFooter", "receipt_footer"], ["receiptPaperWidth", "receipt_paper_width"]]) {
+    for (const [key, col] of [["name", "name"], ["businessType", "business_type"], ["customType", "custom_type"], ["state", "state"], ["city", "city"], ["country", "country"], ["timezone", "timezone"], ["currency", "currency"], ["brandColor", "brand_color"], ["tagline", "tagline"], ["reminderTemplate", "reminder_template"], ["receiptPhone", "receipt_phone"], ["receiptAddress", "receipt_address"], ["receiptFooter", "receipt_footer"], ["receiptPaperWidth", "receipt_paper_width"]]) {
       if (body[key] !== undefined) { fields.push(`${col} = ?`); params.push(String(body[key]).trim() || null); }
     }
     if (fields.length === 0) return json({ ok: false, message: "Nothing to update." }, 400);

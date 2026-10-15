@@ -28,17 +28,24 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (auth.business.role !== "owner") {
-      return json({ ok: false, message: "Only the owner can invite staff." }, 403);
+    const isOwner = auth.business.role === "owner";
+    const isPartner = auth.business.role === "partner";
+    if (!isOwner && !isPartner) {
+      return json({ ok: false, message: "Only the owner or a partner can invite staff." }, 403);
     }
 
     const body = await context.request.json().catch(() => ({}));
     const { fullName, email, password, role, phone } = body;
-    const staffRole = ["manager", "attendant", "hotel_manager", "receptionist", "housekeeper"].includes(role)
+    const staffRole = ["partner", "manager", "attendant", "hotel_manager", "receptionist", "housekeeper"].includes(role)
       ? role : "attendant";
+    // Risk control: only the original owner can create another partner.
+    if (staffRole === "partner" && !isOwner) {
+      return json({ ok: false, message: "Only the owner can invite a partner." }, 403);
+    }
 
-    // Sensible default permission flags per role.
+    // Sensible default permission flags per role. Partners are co-owners.
     const roleFlags = {
+      partner: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
       manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
       attendant: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
       hotel_manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
@@ -91,8 +98,10 @@ export async function onRequestPatch(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (auth.business.role !== "owner") {
-      return json({ ok: false, message: "Only the owner can change staff permissions." }, 403);
+    const isOwner = auth.business.role === "owner";
+    const isPartner = auth.business.role === "partner";
+    if (!isOwner && !isPartner) {
+      return json({ ok: false, message: "Only the owner or a partner can change staff permissions." }, 403);
     }
 
     const body = await context.request.json().catch(() => ({}));
@@ -100,9 +109,13 @@ export async function onRequestPatch(context) {
     if (!userId) return json({ ok: false, message: "userId is required." }, 400);
 
     const member = await context.env.KOPABOOK_DB.prepare(
-      `SELECT id FROM business_members WHERE business_id = ? AND user_id = ? LIMIT 1`
+      `SELECT id, role FROM business_members WHERE business_id = ? AND user_id = ? LIMIT 1`
     ).bind(auth.business.id, userId).first();
     if (!member) return json({ ok: false, message: "Staff member not found." }, 404);
+    // Risk control: only the original owner can change an owner or partner.
+    if ((member.role === "owner" || member.role === "partner") && !isOwner) {
+      return json({ ok: false, message: "Only the owner can change an owner's or partner's access." }, 403);
+    }
 
     const bool = (v) => (v ? 1 : 0);
     let commission = Number(body.commission_percent ?? 0);

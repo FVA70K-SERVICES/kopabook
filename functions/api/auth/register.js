@@ -24,7 +24,7 @@ const DEFAULT_CATEGORIES = ["Stock / Purchases", "Transport", "Rent", "Salaries"
 export async function onRequestPost(context) {
   try {
     const body = await context.request.json().catch(() => ({}));
-    const { fullName, email, password, phone, businessName, businessType, state, city } = body;
+    const { fullName, email, password, phone, businessName, businessType, customType, state, city, country, currency, timezone } = body;
 
     if (!fullName || !email || !password || !businessName) {
       return json({ ok: false, message: "Your name, email, password and business name are required." }, 400);
@@ -53,9 +53,9 @@ export async function onRequestPost(context) {
     const userId = userResult.meta.last_row_id;
 
     const bizResult = await db.prepare(
-      `INSERT INTO businesses (owner_user_id, name, business_type, state, city, currency, plan_tier)
-       VALUES (?, ?, ?, ?, ?, 'NGN', 'free')`
-    ).bind(userId, businessName.trim(), businessType || "general", state || null, city || null).run();
+      `INSERT INTO businesses (owner_user_id, name, business_type, custom_type, state, city, country, currency, timezone, plan_tier)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'free')`
+    ).bind(userId, businessName.trim(), businessType || "general", businessType === "other" && customType ? String(customType).trim().slice(0, 60) : null, state || null, city || null, String(country || "Nigeria").slice(0, 60), /^[A-Z]{3}$/.test(String(currency)) ? currency : "NGN", String(timezone || "Africa/Lagos").slice(0, 60)).run();
     const businessId = bizResult.meta.last_row_id;
 
     await db.prepare(
@@ -77,9 +77,9 @@ export async function onRequestPost(context) {
     const token = newSessionToken();
     const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000);
     await db.prepare(
-      `INSERT INTO sessions (user_id, session_token, expires_at, last_seen_at)
-       VALUES (?, ?, ?, ?)`
-    ).bind(userId, token, toSqliteDate(expires), now).run();
+      `INSERT INTO sessions (user_id, session_token, expires_at, last_seen_at, business_id)
+       VALUES (?, ?, ?, ?, ?)`
+    ).bind(userId, token, toSqliteDate(expires), now, businessId).run();
 
     await audit(context,
       { user: { id: Number(userId) }, business: { id: Number(businessId) } },

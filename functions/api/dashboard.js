@@ -1,5 +1,5 @@
 // GET /api/dashboard — live totals from real data
-import { json, getAuthContext, requireAuth } from "./_utils";
+import { json, getAuthContext, requireAuth, businessDay } from "./_utils";
 
 export async function onRequestGet(context) {
   try {
@@ -10,17 +10,17 @@ export async function onRequestGet(context) {
     const db = context.env.KOPABOOK_DB;
     const bid = auth.business.id;
 
-    // "Today" follows West Africa Time (UTC+1, no daylight saving), the
-    // timezone KopaBook businesses operate in, not server UTC.
+    // "Today" follows the business's own timezone, not server UTC.
+    const day = businessDay(auth.business.timezone);
     const todaySales = await db.prepare(
       `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count
-       FROM sales WHERE business_id = ? AND date(created_at, '+1 hour') = date('now', '+1 hour')`
-    ).bind(bid).first();
+       FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?`
+    ).bind(bid, day.startUtc, day.endUtc).first();
 
     const todayExpenses = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count
-       FROM expenses WHERE business_id = ? AND incurred_on = date('now', '+1 hour')`
-    ).bind(bid).first();
+       FROM expenses WHERE business_id = ? AND incurred_on = ?`
+    ).bind(bid, day.date).first();
 
     const debtRows = await db.prepare(
       `SELECT c.id,
