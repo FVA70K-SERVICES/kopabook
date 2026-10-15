@@ -9,6 +9,7 @@ function MNav() {
         <a href="/" className="brand">Kopa<span>Book</span></a>
         <nav className="mnav-links">
           <a href="/features" className="hide-m">Features</a>
+          <a href="/hotels" className="hide-m">Hotels</a>
           <a href="/pricing" className="hide-m">Pricing</a>
           <a href="/login">Sign in</a>
           <a href="/waitlist" className="btn btn-primary btn-sm">Join waitlist</a>
@@ -273,6 +274,126 @@ export function NotFoundPage() {
         <a href="/" className="btn btn-primary">Back home</a>
       </div>
       <MFooter />
+    </div>
+  );
+}
+
+export function HotelsLandingPage() {
+  return (
+    <div className="page">
+      <MNav />
+      <section className="hero">
+        <div className="wrap">
+          <span className="eyebrow">KopaBook for Hotels</span>
+          <h1>Run your whole hotel<br />from one dashboard.</h1>
+          <p className="lead">
+            Rooms, bookings, guest folios and billing in one simple app your front desk
+            learns in an afternoon. Built for Nigerian hotels, guest houses and lodges.
+          </p>
+          <div className="hero-cta">
+            <a href="/hotels/register" className="btn btn-primary">Register your hotel — free</a>
+            <a href="/login" className="btn btn-secondary">Sign in</a>
+          </div>
+          <p className="hero-proof">Free to start. Your data stays yours, backed up to your own storage.</p>
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="wrap">
+          <h2>Full hotel operations, without the complexity</h2>
+          <p className="sub">Everything the front desk needs, nothing it does not.</p>
+          <div className="grid">
+            <div className="card"><div className="icon">🛏️</div><h3>Room board</h3><p>See every room at a glance: vacant, occupied, reserved or under maintenance. One tap to book or service a room.</p></div>
+            <div className="card"><div className="icon">📅</div><h3>Bookings that protect you</h3><p>Reservations with guest details and ID. Double bookings are blocked automatically.</p></div>
+            <div className="card"><div className="icon">🧾</div><h3>Guest folios</h3><p>Room charges post automatically. Add restaurant, bar, laundry and transport, then take payments against the bill.</p></div>
+            <div className="card"><div className="icon">💳</div><h3>Checkout in seconds</h3><p>Settle the balance with any payment mode — cash, transfer, POS — and the room frees up instantly.</p></div>
+            <div className="card"><div className="icon">📊</div><h3>Know your occupancy</h3><p>Live occupancy rate, arrivals and departures today, in-house guests and cash collected.</p></div>
+            <div className="card"><div className="icon">💾</div><h3>Backups included</h3><p>One-tap full backups of your entire hotel data to your own cloud storage.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="section" style={{ background: "#fff", borderTop: "1px solid var(--line)" }}>
+        <div className="wrap">
+          <h2>Get running today</h2>
+          <div className="steps narrow" style={{ margin: "30px auto" }}>
+            <div className="step"><div className="n">1</div><div><strong>Register your hotel.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Hotel name, your details, done in two minutes.</p></div></div>
+            <div className="step"><div className="n">2</div><div><strong>Add your rooms.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Room numbers, types and nightly rates.</p></div></div>
+            <div className="step"><div className="n">3</div><div><strong>Take bookings.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Check guests in, post charges, check out. That is the whole job.</p></div></div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <a href="/hotels/register" className="btn btn-primary">Register your hotel — free</a>
+          </div>
+        </div>
+      </section>
+      <MFooter />
+    </div>
+  );
+}
+
+export function HotelRegisterPage() {
+  const [form, setForm] = useState({
+    fullName: "", email: "", phone: "", password: "",
+    businessName: "", state: "", city: "",
+  });
+  const [status, setStatus] = useState({ loading: false, error: "" });
+
+  function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
+
+  async function submit(e) {
+    e.preventDefault();
+    setStatus({ loading: true, error: "" });
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ ...form, businessType: "hotel" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(data.message || "Registration failed.");
+      nav("/app/hotels");
+    } catch (err) {
+      setStatus({ loading: false, error: err.message });
+    }
+  }
+
+  return (
+    <div className="page" style={{ background: "var(--bg)" }}>
+      <div className="wrap">
+        <div style={{ textAlign: "center", marginTop: 40 }}>
+          <a href="/hotels" className="brand">Kopa<span>Book</span> <span style={{ fontWeight: 400 }}>for Hotels</span></a>
+        </div>
+        <div className="form-card">
+          <h1>Register your hotel</h1>
+          <p className="hint">Free to start. Your hotel gets its own private dashboard, rooms and bookings.</p>
+          {status.error && <div className="alert alert-error">{status.error}</div>}
+          <form onSubmit={submit}>
+            <div className="field"><label>Hotel name *</label><input value={form.businessName} onChange={(e) => set("businessName", e.target.value)} required placeholder="e.g. Grand Palace Hotel" /></div>
+            <div className="field"><div className="row2">
+              <div><label>Your full name *</label><input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} required placeholder="Your name" /></div>
+              <div><label>Phone</label><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="080..." /></div>
+            </div></div>
+            <div className="field"><div className="row2">
+              <div><label>Email *</label><input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} required /></div>
+              <div><label>Password *</label><input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} placeholder="8+ characters" /></div>
+            </div></div>
+            <div className="field"><div className="row2">
+              <div><label>State</label><select value={form.state} onChange={(e) => set("state", e.target.value)}>
+                <option value="">Select...</option>
+                {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select></div>
+              <div><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="e.g. Asaba" /></div>
+            </div></div>
+            <button className="btn btn-primary btn-block" disabled={status.loading}>
+              {status.loading ? "Creating your hotel..." : "Create my hotel account"}
+            </button>
+          </form>
+          <p className="hint" style={{ textAlign: "center", marginTop: 12 }}>
+            Already registered? <a href="/login">Sign in</a>
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
