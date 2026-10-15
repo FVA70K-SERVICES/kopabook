@@ -49,3 +49,14 @@ export function debtReminderText({ debtorName, amount, businessName }) {
     `Please pay at your earliest convenience. Thank you.`
   );
 }
+
+// Fill a custom reminder template. Placeholders: {name}, {amount}, {business}.
+// Falls back to debtReminderText when the template is empty.
+export function fillReminderTemplate(template, { debtorName, amount, businessName }) {
+  const t = String(template || "").trim();
+  if (!t) return debtReminderText({ debtorName, amount, businessName });
+  return t
+    .replace(/\{name\}/g, debtorName || "valued customer")
+    .replace(/\{amount\}/g, amount || "")
+    .replace(/\{business\}/g, businessName || "us");
+}
