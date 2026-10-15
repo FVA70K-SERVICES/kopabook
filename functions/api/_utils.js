@@ -128,7 +128,7 @@ export async function getAuthContext(context) {
     `SELECT business_members.business_id, business_members.role AS business_role,
             business_members.can_view_profit, business_members.can_discount,
             business_members.can_manage_expenses, business_members.can_manage_products,
-            businesses.name AS business_name, businesses.currency
+            businesses.name AS business_name, businesses.currency, businesses.business_type
      FROM business_members
      INNER JOIN businesses ON businesses.id = business_members.business_id
      WHERE business_members.user_id = ?
@@ -153,6 +153,7 @@ export async function getAuthContext(context) {
           name: membership.business_name,
           currency: membership.currency || "NGN",
           role: membership.business_role,
+          business_type: membership.business_type || "other",
         }
       : null,
     // Granular staff permission flags. Owners always have full access.
