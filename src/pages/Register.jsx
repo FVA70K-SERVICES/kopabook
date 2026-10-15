@@ -49,7 +49,7 @@ export default function RegisterPage({ preset }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, marginTop: 24, maxWidth: 900, marginLeft: "auto", marginRight: "auto" }}>
               {ORG_TYPES.map((t) => (
                 <button key={t.key} onClick={() => setOrgKey(t.key)} className="card"
-                  style={{ margin: 0, textAlign: "left", cursor: "pointer", background: "#fff" }}>
+                  style={{ margin: 0, textAlign: "left", cursor: "pointer", background: "var(--surface)" }}>
                   <div style={{ fontSize: 28 }}>{t.icon}</div>
                   <div style={{ fontWeight: 700, marginTop: 8 }}>{t.label}</div>
                   <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>{t.tagline}</div>

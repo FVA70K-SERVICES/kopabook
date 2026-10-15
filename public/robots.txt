@@ -1,0 +1,9 @@
+# KopaBook robots.txt — marketing pages are public, the app is private.
+# Careful: never allow crawlers into signed-in or auth routes.
+User-agent: *
+Disallow: /app/
+Disallow: /login
+Disallow: /owner-setup
+Disallow: /forgot-password
+
+# Marketing pages stay crawlable: /, /features, /pricing, /hotels, /register, /waitlist

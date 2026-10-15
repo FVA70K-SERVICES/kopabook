@@ -2,6 +2,11 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import App from './App.jsx'
+import { initTheme } from './lib/theme'
+
+// Apply the saved theme before first paint (the index.html inline script
+// usually beats this; this is the fallback).
+initTheme()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
