@@ -21,6 +21,7 @@ export default function DebtsPage({ session }) {
   const [method, setMethod] = useState("cash");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [paidMsg, setPaidMsg] = useState("");
   const [biz, setBiz] = useState({ name: "", reminderTemplate: "" });
   const [askPhone, setAskPhone] = useState(null);
   const [phoneInput, setPhoneInput] = useState("");
@@ -76,19 +77,26 @@ export default function DebtsPage({ session }) {
   }
   useEffect(() => { load(); }, []);
 
+  function openPaying(d) {
+    setPaying(d); setAmount(""); setNote(""); setPaidMsg("");
+  }
+
   async function recordPayment() {
     const amt = Number(amount);
     if (!amt || amt <= 0) return;
-    setSaving(true);
+    setSaving(true); setPaidMsg("");
     try {
       const d = await api.post("/api/debts/payment", {
         customerId: paying.id, amount: amt, paymentMethod: method, note: note || undefined,
       });
-      setPaying(null); setAmount(""); setNote("");
-      if (d.change > 0) {
-        setError("");
-        alert(`Repayment recorded. Change to give back: ${fmt(d.change)}`);
-      }
+      const remaining = d.newBalance;
+      setPaying({ ...paying, outstanding: remaining });
+      setAmount(""); setNote("");
+      setPaidMsg(d.change > 0
+        ? `Recorded ${fmt(d.applied)}. Debt cleared, give back ${fmt(d.change)} change.`
+        : remaining > 0
+          ? `Recorded ${fmt(d.applied)}. ${fmt(remaining)} still owed.`
+          : `Recorded ${fmt(d.applied)}. Debt fully cleared.`);
       load();
     } catch (e) { setError(e.message); }
     setSaving(false);
@@ -156,7 +164,7 @@ export default function DebtsPage({ session }) {
                     </td>
                     <td>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <button className="btn btn-primary btn-sm" onClick={() => setPaying(d)}>Record payment</button>
+                        <button className="btn btn-primary btn-sm" onClick={() => openPaying(d)}>Record payment</button>
                         {d.phone
                           ? <button className="btn btn-secondary btn-sm" onClick={() => openReminder(d, d.phone)}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>
                           : <button className="btn btn-secondary btn-sm" onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>}
@@ -209,7 +217,13 @@ export default function DebtsPage({ session }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>Record payment</h2>
             <p>{paying.name} owes <strong className="debt-amt money">{fmt(paying.outstanding)}</strong></p>
-            <div className="field"><label>Amount received *</label><input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+            {paidMsg && <div className="alert alert-ok" style={{ marginBottom: 12 }}>{paidMsg}</div>}
+            <div className="field"><label>Amount received *</label><input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 5000" /></div>
+            {paying.outstanding > 0 && (
+              <button className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }} onClick={() => setAmount(String(paying.outstanding))}>
+                Pay full {fmt(paying.outstanding)}
+              </button>
+            )}
             <div className="field"><div className="row2">
               <div><label>Method</label>
                 <select value={method} onChange={(e) => setMethod(e.target.value)}>
@@ -221,6 +235,7 @@ export default function DebtsPage({ session }) {
             <button className="btn btn-primary btn-block" disabled={saving} onClick={recordPayment}>
               {saving ? "Saving..." : "Save payment"}
             </button>
+            <button className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => setPaying(null)}>Done</button>
           </div>
         </div>
       )}
