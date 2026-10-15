@@ -22,7 +22,7 @@ export default function CustomerDetailPage({ customerId }) {
   async function load() {
     setLoading(true);
     try {
-      const d = await api.get(`/api/customers/${customerId}`);
+      const d = await api.get(`/api/customer-profile?id=${customerId}`);
       setData(d);
       setForm({ name: d.customer.name || "", phone: d.customer.phone || "", notes: d.customer.notes || "", tags: d.customer.tags || "" });
       setError("");
@@ -39,7 +39,7 @@ export default function CustomerDetailPage({ customerId }) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.patch(`/api/customers/${customerId}`, form);
+      await api.patch(`/api/customer-profile?id=${customerId}`, form);
       setEditing(false);
       load();
     } catch (err) { setError(err.message); }
