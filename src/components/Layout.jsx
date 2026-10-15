@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, nav } from "../lib/api";
-import { orgTypeFor, NAV_MODULES, NAV_GROUPS, MOBILE_PRIORITY } from "../lib/businessTypes";
+import { orgTypeFor, NAV_MODULES, NAV_GROUPS, MOBILE_PRIORITY, modulesForRole } from "../lib/businessTypes";
 import BusinessSwitcher from "./BusinessSwitcher";
 import SyncStatus from "./SyncStatus.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
@@ -35,7 +35,10 @@ export default function Layout({ session, children }) {
   // Each organization type only sees the service modules that fit it.
   const org = orgTypeFor(session?.business?.business_type);
   const LINKS = ALL_LINKS.filter((l) => org.modules.includes(NAV_MODULES[l.to]));
-  const linkByModule = Object.fromEntries(LINKS.map((l) => [NAV_MODULES[l.to], l]));
+  // Staff see only their role's workspace; owners and partners see everything.
+  const roleModules = modulesForRole(session.business?.role);
+  const VISIBLE = roleModules ? LINKS.filter((l) => roleModules.includes(NAV_MODULES[l.to])) : LINKS;
+  const linkByModule = Object.fromEntries(VISIBLE.map((l) => [NAV_MODULES[l.to], l]));
 
   // Sidebar groups, skipping empty ones for this org type.
   const groups = NAV_GROUPS
@@ -43,7 +46,7 @@ export default function Layout({ session, children }) {
     .filter((g) => g.links.length > 0);
 
   // Mobile bottom bar: top priority modules for this org + a More drawer button.
-  const mobileLinks = [...LINKS]
+  const mobileLinks = [...VISIBLE]
     .sort((a, b) => MOBILE_PRIORITY.indexOf(NAV_MODULES[a.to]) - MOBILE_PRIORITY.indexOf(NAV_MODULES[b.to]))
     .slice(0, 4);
 

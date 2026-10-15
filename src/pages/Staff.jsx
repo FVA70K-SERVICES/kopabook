@@ -64,12 +64,19 @@ export default function StaffPage({ session }) {
 
   const role = session.business?.role;
   const isOwner = role === "owner";
-  const isManager = role === "manager";
+  const isPartner = role === "partner";
+  const canManageStaff = isOwner || isPartner;
   const rolesForType = staffRolesFor(session.business?.business_type);
   const defaultRole = rolesForType[rolesForType.length - 1].key;
-  const manage = isOwner || isManager;
+  // Roles the current user may assign: only the owner can make someone a partner.
+  const assignableRoles = isOwner ? rolesForType : rolesForType.filter((r) => r.key !== "partner");
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({ fullName: "", role: "" });
+  const [deleting, setDeleting] = useState(null);
+  const manage = canManageStaff;
 
   async function load() {
+    if (!canManageStaff) { setLoading(false); return; }
     setLoading(true);
     try { const d = await api.get("/api/staff"); setMembers(d.members); setError(""); }
     catch (e) { setError(e.message); }
@@ -136,6 +143,31 @@ export default function StaffPage({ session }) {
     }
   }
 
+  async function saveEdit(e) {
+    e.preventDefault(); setSaving(true); setError("");
+    try {
+      await api.put("/api/staff", {
+        userId: editing.id,
+        fullName: editForm.fullName.trim(),
+        role: editForm.role,
+      });
+      setEditing(null);
+      load();
+    } catch (err) { setError(err.message); }
+    setSaving(false);
+  }
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    setSaving(true); setError("");
+    try {
+      await api.del(`/api/staff?userId=${deleting.id}`);
+      setDeleting(null);
+      load();
+    } catch (err) { setError(err.message); }
+    setSaving(false);
+  }
+
   async function clockAction() {
     setClockBusy(true);
     try {
@@ -188,7 +220,7 @@ export default function StaffPage({ session }) {
     <>
       <div className="page-head">
         <h1>Staff</h1>
-        {isOwner && <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Invite staff</button>}
+        {canManageStaff && <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Invite staff</button>}
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -227,7 +259,7 @@ export default function StaffPage({ session }) {
             <h3 style={{ marginTop: 0 }}>Permissions and commission</h3>
             <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
               {isOwner
-                ? "Toggle what each staff member can do, and set their commission rate. Owners always keep full access."
+                ? "Toggle what each staff member can do, and set their commission rate. Owners and partners always keep full access."
                 : "Set by the business owner (read only)."}
             </p>
             {members.filter((m) => m.business_role !== "owner").map((m) => (
@@ -242,7 +274,7 @@ export default function StaffPage({ session }) {
                       <input
                         type="checkbox"
                         checked={!!m[p.key]}
-                        disabled={!isOwner}
+                        disabled={!canManageStaff || (m.business_role === "partner" && !isOwner)}
                         onChange={() => togglePerm(m, p.key)}
                       />
                       {p.label}
@@ -258,7 +290,7 @@ export default function StaffPage({ session }) {
                     step={0.5}
                     defaultValue={m.commission_percent ?? 0}
                     key={`${m.id}-${m.commission_percent}`}
-                    disabled={!isOwner}
+                    disabled={!canManageStaff || (m.business_role === "partner" && !isOwner)}
                     onBlur={(e) => {
                       const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
                       if (v !== Number(m.commission_percent || 0)) {
@@ -267,13 +299,26 @@ export default function StaffPage({ session }) {
                     }}
                   />
                 </div>
-                {isOwner && (
-                  <div style={{ marginTop: 8 }}>
+                {canManageStaff && (isOwner || m.business_role !== "partner") && (
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => { setEditing(m); setEditForm({ fullName: m.full_name, role: m.business_role }); }}
+                    >
+                      Edit
+                    </button>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => { setResetFor(m); setResetPw(""); setResetStatus({ loading: false, error: "", ok: "" }); }}
                     >
                       Reset password
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ color: "var(--danger, #b91c1c)" }}
+                      onClick={() => setDeleting(m)}
+                    >
+                      Remove
                     </button>
                   </div>
                 )}
@@ -384,6 +429,41 @@ export default function StaffPage({ session }) {
               <div className="field"><label>New temporary password *</label><input type="password" value={resetPw} onChange={(e) => setResetPw(e.target.value)} required minLength={8} placeholder="At least 8 characters" /></div>
               <button className="btn btn-primary btn-block" disabled={resetStatus.loading}>{resetStatus.loading ? "Resetting..." : "Set new password"}</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <div className="modal-back" onClick={() => setEditing(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Edit staff member</h2>
+            <p className="hint">{editing.email}</p>
+            <form onSubmit={saveEdit}>
+              <div className="field"><label>Full name *</label><input value={editForm.fullName} onChange={(e) => setEditForm((f) => ({ ...f, fullName: e.target.value }))} required /></div>
+              <div className="field"><label>Role</label>
+                <select value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
+                  {assignableRoles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                </select>
+                <p className="hint" style={{ marginTop: 6 }}>Changing the role resets their permissions to the {assignableRoles.find((r) => r.key === editForm.role)?.label || "role"} defaults.</p>
+              </div>
+              <button className="btn btn-primary btn-block" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="modal-back" onClick={() => setDeleting(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Remove staff member</h2>
+            <p>Remove <strong>{deleting.full_name}</strong> ({deleting.email}) from {session.business?.name || "this business"}?</p>
+            <p className="hint">They will lose access to this business immediately. Their other businesses are not affected.</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setDeleting(null)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 1, background: "var(--danger, #b91c1c)" }} disabled={saving} onClick={confirmDelete}>
+                {saving ? "Removing..." : "Remove"}
+              </button>
+            </div>
           </div>
         </div>
       )}

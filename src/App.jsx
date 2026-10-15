@@ -24,6 +24,7 @@ import ReportsPage from "./pages/Reports";
 import StaffPage from "./pages/Staff";
 import SettingsPage from "./pages/Settings";
 import ActivityPage from "./pages/Activity";
+import { NAV_MODULES, modulesForRole } from "./lib/businessTypes";
 
 function useSession() {
   const [state, setState] = useState({ loading: true, session: null });
@@ -102,6 +103,19 @@ function AppRoute({ session }) {
     else if (path === "/app/staff") page = <StaffPage session={session} />;
     else if (path === "/app/settings") page = <SettingsPage session={session} />;
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
+    // Staff see only their role's workspace, even by direct link.
+    const roleModules = modulesForRole(session.business?.role);
+    if (roleModules) {
+      const mod = NAV_MODULES[Object.keys(NAV_MODULES).find((p) => path === p || path.startsWith(p + "/")) || ""];
+      if (mod && !roleModules.includes(mod)) {
+        page = (
+          <div className="card">
+            <h2>Not available for your role</h2>
+            <p className="hint">Your role ({session.business?.role}) does not include this section. Ask the business owner if you need access.</p>
+          </div>
+        );
+      }
+    }
     return <Layout session={session}>{page}</Layout>;
   }
 

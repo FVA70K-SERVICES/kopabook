@@ -158,5 +158,25 @@ export const NAV_MODULES = {
   "/app/messages": "messages",
   "/app/reports": "reports",
   "/app/staff": "staff",
+  "/app/activity": "activity",
   "/app/settings": "settings",
 };
+
+// Modules each staff role may see. Owners and partners see everything.
+// Everyone else sees only their role's workspace.
+export const ROLE_MODULES = {
+  owner: null,
+  partner: null,
+  // Everyone keeps the staff page for their own shift clock; management
+  // sections inside it are owner/partner only.
+  manager: ["dashboard", "sales", "services", "products", "suppliers", "import", "expenses", "customers", "hotels", "debts", "messages", "reports", "staff"],
+  attendant: ["dashboard", "sales", "services", "products", "customers", "debts", "messages", "staff"],
+  hotel_manager: ["dashboard", "hotels", "customers", "debts", "expenses", "messages", "reports", "staff"],
+  receptionist: ["dashboard", "hotels", "customers", "messages", "staff"],
+  housekeeper: ["dashboard", "hotels", "staff"],
+};
+
+export function modulesForRole(role) {
+  if (!(role in ROLE_MODULES)) return ROLE_MODULES.attendant;
+  return ROLE_MODULES[role]; // null = all modules
+}
