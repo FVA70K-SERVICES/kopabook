@@ -305,8 +305,8 @@ export function HotelsLandingPage() {
           <div className="grid">
             <div className="card"><div className="icon">🛏️</div><h3>Room board</h3><p>See every room at a glance: vacant, occupied, reserved or under maintenance. One tap to book or service a room.</p></div>
             <div className="card"><div className="icon">📅</div><h3>Bookings that protect you</h3><p>Reservations with guest details and ID. Double bookings are blocked automatically.</p></div>
-            <div className="card"><div className="icon">🧾</div><h3>Guest folios</h3><p>Room charges post automatically. Add restaurant, bar, laundry and transport, then take payments against the bill.</p></div>
-            <div className="card"><div className="icon">💳</div><h3>Checkout in seconds</h3><p>Settle the balance with any payment mode — cash, transfer, POS — and the room frees up instantly.</p></div>
+            <div className="card"><div className="icon">🧾</div><h3>Guest folios</h3><p>Room charges post automatically. Add restaurant, bar, laundry and transport, then record payments against the bill.</p></div>
+            <div className="card"><div className="icon">💳</div><h3>Checkout in seconds</h3><p>Record the balance as it is settled by cash, transfer or POS, and the room frees up instantly. KopaBook never touches the money, it only keeps the record.</p></div>
             <div className="card"><div className="icon">📊</div><h3>Know your occupancy</h3><p>Live occupancy rate, arrivals and departures today, in-house guests and cash collected.</p></div>
             <div className="card"><div className="icon">💾</div><h3>Backups included</h3><p>One-tap full backups of your entire hotel data to your own cloud storage.</p></div>
           </div>
