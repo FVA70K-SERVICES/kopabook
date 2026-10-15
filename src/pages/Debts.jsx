@@ -22,6 +22,18 @@ export default function DebtsPage({ session }) {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [paidMsg, setPaidMsg] = useState("");
+  const [customers, setCustomers] = useState([]);
+  // Add debt modal
+  const [addingDebt, setAddingDebt] = useState(false);
+  const [debtCustomer, setDebtCustomer] = useState("");
+  const [debtName, setDebtName] = useState("");
+  const [debtAmount, setDebtAmount] = useState("");
+  const [debtNote, setDebtNote] = useState("");
+  const [debtSaving, setDebtSaving] = useState(false);
+  // Per-debtor history
+  const [expandedId, setExpandedId] = useState(null);
+  const [histEntries, setHistEntries] = useState([]);
+  const [histLoading, setHistLoading] = useState(false);
   const [biz, setBiz] = useState({ name: "", reminderTemplate: "" });
   const [askPhone, setAskPhone] = useState(null);
   const [phoneInput, setPhoneInput] = useState("");
@@ -77,6 +89,50 @@ export default function DebtsPage({ session }) {
   }
   useEffect(() => { load(); }, []);
 
+  function openAddingDebt() {
+    setAddingDebt(true); setDebtCustomer(""); setDebtName("");
+    setDebtAmount(""); setDebtNote("");
+    api.get("/api/customers").then((d) => setCustomers(d.customers || [])).catch(() => {});
+  }
+
+  async function saveDebt() {
+    const amt = Number(debtAmount);
+    if (!amt || amt <= 0) { setError("Enter a valid amount."); return; }
+    const newName = debtCustomer === "new" ? debtName.trim() : "";
+    if (!debtCustomer) { setError("Pick a customer or add a new one."); return; }
+    if (debtCustomer === "new" && !newName) { setError("Enter the debtor's name."); return; }
+    setDebtSaving(true); setError("");
+    try {
+      await api.post("/api/debts/add", {
+        customerId: debtCustomer !== "new" ? Number(debtCustomer) : undefined,
+        customerName: newName || undefined,
+        amount: amt, note: debtNote || undefined,
+      });
+      setAddingDebt(false);
+      load();
+    } catch (e) { setError(e.message); }
+    setDebtSaving(false);
+  }
+
+  async function toggleHistory(d) {
+    if (expandedId === d.id) { setExpandedId(null); return; }
+    setExpandedId(d.id); setHistLoading(true); setHistEntries([]);
+    try {
+      const r = await api.get(`/api/debts/history?customerId=${d.id}`);
+      setHistEntries(r.entries || []);
+    } catch (e) { setError(e.message); }
+    setHistLoading(false);
+  }
+
+  async function writeOff(d) {
+    if (!window.confirm(`Write off ${d.name}'s ${fmt(d.outstanding)} as bad debt? This clears the balance.`)) return;
+    try {
+      await api.post("/api/debts/writeoff", { customerId: d.id });
+      setExpandedId(null);
+      load();
+    } catch (e) { setError(e.message); }
+  }
+
   function openPaying(d) {
     setPaying(d); setAmount(""); setNote(""); setPaidMsg("");
   }
@@ -124,6 +180,7 @@ export default function DebtsPage({ session }) {
         <h1>Debts</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <ChannelPicker value={channel} onChange={setChannel} />
+          <button className="btn btn-primary btn-sm" onClick={openAddingDebt}>＋ Add debt</button>
           {dueDebtors.length > 0 && (
             <button className="btn btn-primary btn-sm" onClick={startQueue}>
               Remind all due ({dueDebtors.filter((d) => d.phone).length})
@@ -152,6 +209,7 @@ export default function DebtsPage({ session }) {
               {data.debtors.map((d) => {
                 const due = isDue(d.last_reminded_at);
                 return (
+                  <>
                   <tr key={d.id}>
                     <td><a href={`/app/customers/${d.id}`} onClick={(e) => { e.preventDefault(); nav(`/app/customers/${d.id}`); }} style={{ fontWeight: 700 }}>{d.name}</a></td>
                     <td>{d.phone || "—"}</td>
@@ -165,6 +223,9 @@ export default function DebtsPage({ session }) {
                     <td>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         <button className="btn btn-primary btn-sm" onClick={() => openPaying(d)}>Record payment</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => toggleHistory(d)}>
+                          {expandedId === d.id ? "Hide" : "History"}
+                        </button>
                         {d.phone
                           ? <button className="btn btn-secondary btn-sm" onClick={() => openReminder(d, d.phone)}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>
                           : <button className="btn btn-secondary btn-sm" onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>}
@@ -183,6 +244,41 @@ export default function DebtsPage({ session }) {
                       )}
                     </td>
                   </tr>
+                  {expandedId === d.id && (
+                    <tr key={d.id + "-hist"}>
+                      <td colSpan={6} style={{ background: "var(--bg)" }}>
+                        {histLoading ? <p className="hint">Loading history...</p> : histEntries.length === 0 ? (
+                          <p className="empty">No entries yet.</p>
+                        ) : (
+                          <table className="data" style={{ margin: 0 }}>
+                            <thead><tr><th>Date</th><th>Entry</th><th>Amount</th><th>Balance after</th><th>Note</th></tr></thead>
+                            <tbody>
+                              {histEntries.map((h) => (
+                                <tr key={h.id}>
+                                  <td><small>{h.created_at?.slice(0, 10)}</small></td>
+                                  <td>
+                                    {h.entry_type === "debt" && <span className="pill pill-red">Debt</span>}
+                                    {h.entry_type === "payment" && <span className="pill pill-green">Paid</span>}
+                                    {h.entry_type === "writeoff" && <span className="pill pill-gold">Written off</span>}
+                                    {!["debt", "payment", "writeoff"].includes(h.entry_type) && h.entry_type}
+                                  </td>
+                                  <td className="money">{h.amount_delta > 0 ? "+" : ""}{fmt(h.amount_delta)}</td>
+                                  <td className="money">{fmt(h.balance_after)}</td>
+                                  <td><small>{h.note || "—"}</small></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                        {!histLoading && (
+                          <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => writeOff(d)}>
+                            Write off {fmt(d.outstanding)} as bad debt
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </>
                 );
               })}
             </tbody>
@@ -236,6 +332,41 @@ export default function DebtsPage({ session }) {
               {saving ? "Saving..." : "Save payment"}
             </button>
             <button className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => setPaying(null)}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {addingDebt && (
+        <div className="modal-back" onClick={() => setAddingDebt(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Add debt</h2>
+            <p className="hint">Money lent or goods given on credit, outside a sale.</p>
+            <div className="field"><label>Customer</label>
+              <select value={debtCustomer} onChange={(e) => setDebtCustomer(e.target.value)}>
+                <option value="">Select customer...</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}{c.phone ? ` — ${c.phone}` : ""}</option>
+                ))}
+                <option value="new">＋ New debtor...</option>
+              </select>
+            </div>
+            {debtCustomer === "new" && (
+              <div className="field"><label>Debtor name *</label>
+                <input value={debtName} onChange={(e) => setDebtName(e.target.value)} placeholder="Name" />
+              </div>
+            )}
+            <div className="field"><div className="row2">
+              <div><label>Amount owed *</label>
+                <input type="number" min="0" step="0.01" value={debtAmount} onChange={(e) => setDebtAmount(e.target.value)} placeholder="e.g. 10000" />
+              </div>
+              <div><label>Note</label>
+                <input value={debtNote} onChange={(e) => setDebtNote(e.target.value)} placeholder="What is it for?" />
+              </div>
+            </div></div>
+            <button className="btn btn-primary btn-block" disabled={debtSaving} onClick={saveDebt}>
+              {debtSaving ? "Saving..." : "Save debt"}
+            </button>
+            <button className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => setAddingDebt(false)}>Cancel</button>
           </div>
         </div>
       )}
