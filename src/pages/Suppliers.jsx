@@ -55,6 +55,7 @@ export default function SuppliersPage({ session }) {
   const [pwarning, setPwarning] = useState("");
 
   const canManage = session.business?.role === "owner" || session.business?.role === "manager";
+  const canManageExpenses = session.perms?.can_manage_expenses;
   const isOwner = session.business?.role === "owner";
 
   async function load(search) {
@@ -198,9 +199,11 @@ export default function SuppliersPage({ session }) {
               </div>
 
               <div className="row2" style={{ marginTop: 10 }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => openPurchase(s)}>
-                  Record purchase
-                </button>
+                {canManageExpenses && (
+                  <button className="btn btn-secondary btn-sm" onClick={() => openPurchase(s)}>
+                    Record purchase
+                  </button>
+                )}
                 {isOwner && (
                   <button className="btn btn-secondary btn-sm" onClick={() => remove(s)}>
                     Delete

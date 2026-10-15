@@ -14,7 +14,7 @@ export default function ServicesPage({ session }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
-  const canManage = ["owner", "manager"].includes(session.business?.role);
+  const canManage = session.perms?.can_manage_products;
 
   async function load() {
     setLoading(true);

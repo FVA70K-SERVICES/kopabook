@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { NIGERIAN_STATES } from "../lib/nigeria";
 
 export default function SettingsPage({ session }) {
   const [biz, setBiz] = useState(null);
-  const [form, setForm] = useState({ name: "", businessType: "", city: "", currency: "NGN" });
+  const [form, setForm] = useState({ name: "", businessType: "", state: "", city: "", currency: "NGN" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
@@ -17,7 +18,7 @@ export default function SettingsPage({ session }) {
         setBiz(d.business);
         setForm({
           name: d.business.name || "", businessType: d.business.business_type || "",
-          city: d.business.city || "", currency: d.business.currency || "NGN",
+          state: d.business.state || "", city: d.business.city || "", currency: d.business.currency || "NGN",
         });
         setLoading(false);
       })
@@ -49,8 +50,12 @@ export default function SettingsPage({ session }) {
           <div className="field"><label>Business name</label><input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={!isOwner} /></div>
           <div className="field"><div className="row2">
             <div><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} disabled={!isOwner} /></div>
-            <div><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} disabled={!isOwner} /></div>
+            <div><label>State</label><select value={form.state} onChange={(e) => set("state", e.target.value)} disabled={!isOwner}>
+              <option value="">Select state</option>
+              {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select></div>
           </div></div>
+          <div className="field"><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} disabled={!isOwner} /></div>
           <div className="field"><label>Currency</label>
             <select value={form.currency} onChange={(e) => set("currency", e.target.value)} disabled={!isOwner}>
               <option value="NGN">NGN — Nigerian Naira</option>
