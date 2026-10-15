@@ -63,8 +63,20 @@ export default function SalesPage() {
 
   function useMessageDraft(draft) {
     const byId = new Map(products.map((p) => [p.id, p]));
+    const svcById = new Map(services.map((s) => [s.id, s]));
     const lines = [];
     for (const it of draft.items) {
+      if (it.serviceId) {
+        const s = svcById.get(it.serviceId);
+        if (!s) continue;
+        lines.push({
+          serviceId: s.id,
+          name: s.name,
+          unitPrice: Number(it.unitPrice),
+          qty: Math.max(1, Number(it.quantity) || 1),
+        });
+        continue;
+      }
       const p = byId.get(it.productId);
       if (!p) continue;
       lines.push({
@@ -77,6 +89,8 @@ export default function SalesPage() {
     }
     setCart(lines);
     if (draft.customerName) setCustomerName(draft.customerName);
+    if (draft.amountPaid !== undefined) setAmountPaid(draft.amountPaid);
+    if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
     setError("");
     salePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     salePanelRef.current?.focus({ preventScroll: true });
@@ -200,7 +214,7 @@ export default function SalesPage() {
         </>
       ) : (
         <>
-          <MessageSale products={products} onUseDraft={useMessageDraft} />
+          <MessageSale products={products} services={services} onUseDraft={useMessageDraft} />
           <div className="toolbar">
             <button className={"btn btn-sm " + (catalog === "products" ? "btn-primary" : "btn-secondary")} onClick={() => setCatalog("products")}>Products</button>
             <button className={"btn btn-sm " + (catalog === "services" ? "btn-primary" : "btn-secondary")} onClick={() => setCatalog("services")}>Services</button>
