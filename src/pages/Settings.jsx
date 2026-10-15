@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api, nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
+import { WORLD_CURRENCIES, WORLD_TIMEZONES, COUNTRIES } from "../lib/businessTypes";
 import PaymentModesEditor from "../components/PaymentModesEditor";
 
 export default function SettingsPage({ session }) {
@@ -31,7 +32,7 @@ export default function SettingsPage({ session }) {
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [pwStatus, setPwStatus] = useState({ loading: false, error: "", ok: "" });
 
-  const isOwner = session.business?.role === "owner";
+  const isOwner = ["owner", "partner"].includes(session.business?.role);
 
   useEffect(() => {
     api.get("/api/business")
@@ -39,7 +40,9 @@ export default function SettingsPage({ session }) {
         setBiz(d.business);
         setForm({
           name: d.business.name || "", businessType: d.business.business_type || "",
-          state: d.business.state || "", city: d.business.city || "", currency: d.business.currency || "NGN",
+          customType: d.business.custom_type || "",
+          state: d.business.state || "", city: d.business.city || "", country: d.business.country || "Nigeria",
+          timezone: d.business.timezone || "Africa/Lagos", currency: d.business.currency || "NGN",
           brandColor: d.business.brand_color || "#166534", tagline: d.business.tagline || "",
           reminderTemplate: d.business.reminder_template || "",
           receiptPhone: d.business.receipt_phone || "", receiptAddress: d.business.receipt_address || "",
@@ -107,23 +110,40 @@ export default function SettingsPage({ session }) {
           <div className="field"><label>Business name</label><input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={!isOwner} /></div>
           <div className="field"><div className="row2">
             <div><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} disabled={!isOwner} /></div>
-            <div><label>State</label><select value={form.state} onChange={(e) => set("state", e.target.value)} disabled={!isOwner}>
-              <option value="">Select state</option>
-              {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {form.businessType === "other" && (
+              <div><label>Custom type</label><input value={form.customType} onChange={(e) => set("customType", e.target.value)} disabled={!isOwner} placeholder="e.g. Logistics company" /></div>
+            )}
+            <div><label>Country</label><select value={form.country} onChange={(e) => set("country", e.target.value)} disabled={!isOwner}>
+              {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select></div>
           </div></div>
-          <div className="field"><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} disabled={!isOwner} /></div>
-          <div className="field"><label>Currency</label>
+          <div className="field"><div className="row2">
+            <div><label>{form.country === "Nigeria" ? "State" : "State / region"}</label>
+            {form.country === "Nigeria" ? (
+              <select value={form.state} onChange={(e) => set("state", e.target.value)} disabled={!isOwner}>
+                <option value="">Select state</option>
+                {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            ) : (
+              <input value={form.state} onChange={(e) => set("state", e.target.value)} disabled={!isOwner} placeholder="State or region" />
+            )}</div>
+            <div><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} disabled={!isOwner} /></div>
+          </div></div>
+          <div className="field"><div className="row2">
+          <div><label>Currency</label>
             <select value={form.currency} onChange={(e) => set("currency", e.target.value)} disabled={!isOwner}>
-              <option value="NGN">NGN — Nigerian Naira</option>
-              <option value="GHS">GHS — Ghanaian Cedi</option>
-              <option value="KES">KES — Kenyan Shilling</option>
-              <option value="USD">USD — US Dollar</option>
+              {WORLD_CURRENCIES.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
             </select>
           </div>
+          <div><label>Timezone</label>
+            <select value={form.timezone} onChange={(e) => set("timezone", e.target.value)} disabled={!isOwner}>
+              {WORLD_TIMEZONES.map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+            </select>
+          </div>
+          </div></div>
           {isOwner
             ? <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
-            : <p style={{ color: "var(--muted)" }}>Only the owner can change business settings.</p>}
+            : <p style={{ color: "var(--muted)" }}>Only the owner or a partner can change business settings.</p>}
         </form>
       </div>
 
@@ -193,6 +213,14 @@ export default function SettingsPage({ session }) {
           {isOwner && <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save template"}</button>}
         </form>
       </div>
+
+      {isOwner && (
+        <div className="card narrow" style={{ marginTop: 18 }}>
+          <h3 style={{ marginTop: 0 }}>🕒 Activity & security</h3>
+          <p className="hint">See every important action in this business, who did it and when. The log is permanent and cannot be edited.</p>
+          <button className="btn btn-secondary" onClick={() => nav("/app/activity")}>View activity log</button>
+        </div>
+      )}
 
       <div className="card narrow" style={{ marginTop: 18 }}>
         <h3 style={{ marginTop: 0 }}>Change password</h3>

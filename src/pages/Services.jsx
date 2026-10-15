@@ -104,7 +104,7 @@ export default function ServicesPage({ session }) {
                     {canManage && <>
                       <button className="btn btn-secondary btn-sm" onClick={() => openEdit(s)}>Edit</button>{" "}
                       {Number(s.is_active) === 1
-                        ? (session.business?.role === "owner" && (
+                        ? (["owner", "partner"].includes(session.business?.role) && (
                             <button className="btn btn-danger btn-sm" onClick={() => deactivate(s)}>Deactivate</button>
                           ))
                         : <button className="btn btn-secondary btn-sm" onClick={() => reactivate(s)}>Reactivate</button>}
