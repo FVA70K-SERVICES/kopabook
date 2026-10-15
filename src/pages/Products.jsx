@@ -16,7 +16,7 @@ export default function ProductsPage({ session }) {
   const [adjustQty, setAdjustQty] = useState("");
   const [adjustNote, setAdjustNote] = useState("");
 
-  const canManage = ["owner", "manager"].includes(session.business?.role);
+  const canManage = session.perms?.can_manage_products;
 
   async function load(search) {
     setLoading(true);

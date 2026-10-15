@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, nav } from "../lib/api";
+import { NIGERIAN_STATES } from "../lib/nigeria";
 
 function MNav() {
   return (
@@ -197,7 +198,7 @@ export function PricingPage() {
 }
 
 export function WaitlistPage() {
-  const [form, setForm] = useState({ name: "", phone: "", email: "", businessType: "", city: "", monthlyTransactions: "", currentTool: "", consent: true });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", businessType: "", state: "", city: "", monthlyTransactions: "", currentTool: "", consent: true });
   const [status, setStatus] = useState({ loading: false, error: "", ok: false });
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
@@ -237,8 +238,12 @@ export function WaitlistPage() {
                 </div></div>
                 <div className="field"><div className="row2">
                   <div><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} placeholder="Provision store" /></div>
-                  <div><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="Asaba" /></div>
+                  <div><label>State</label><select value={form.state} onChange={(e) => set("state", e.target.value)}>
+                    <option value="">Select state</option>
+                    {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select></div>
                 </div></div>
+                <div className="field"><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="Asaba" /></div>
                 <div className="field"><label>How do you track sales today?</label>
                   <select value={form.currentTool} onChange={(e) => set("currentTool", e.target.value)}>
                     <option value="">Select...</option>

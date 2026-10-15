@@ -138,6 +138,9 @@ export default function SalesPage() {
           {done.balanceDue > 0
             ? <p className="debt-amt">Balance of {fmt(done.balanceDue)} recorded as debt.</p>
             : <p style={{ color: "var(--brand-dark)" }}>Fully paid. Stock updated.</p>}
+          {done.change > 0 && (
+            <p style={{ color: "var(--muted)", marginTop: 4 }}>Change to give: <strong>{fmt(done.change)}</strong></p>
+          )}
           <div className="field" style={{ marginTop: 12, textAlign: "left" }}>
             <label>Customer WhatsApp number (optional)</label>
             <input value={receiptPhone} onChange={(e) => setReceiptPhone(e.target.value)} placeholder="080..." />

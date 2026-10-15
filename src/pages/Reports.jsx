@@ -37,7 +37,9 @@ export default function ReportsPage() {
             <div className="metric-card"><span>Sales</span><strong>{fmt(data.totals.salesTotal)}</strong></div>
             <div className="metric-card"><span>Transactions</span><strong>{data.totals.salesCount}</strong></div>
             <div className="metric-card"><span>Expenses</span><strong>{fmt(data.totals.expenseTotal)}</strong></div>
-            <div className="metric-card"><span>Net</span><strong style={{ color: data.totals.profit >= 0 ? "var(--brand-dark)" : "var(--danger)" }}>{fmt(data.totals.profit)}</strong></div>
+            {data.totals.profit !== null && data.totals.profit !== undefined && (
+              <div className="metric-card"><span>Net</span><strong style={{ color: data.totals.profit >= 0 ? "var(--brand-dark)" : "var(--danger)" }}>{fmt(data.totals.profit)}</strong></div>
+            )}
           </div>
 
           <div className="dash-grid">
