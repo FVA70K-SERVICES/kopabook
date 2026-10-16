@@ -16,10 +16,19 @@ export async function onRequestGet(context) {
       return json({ ok: false, message: "Only the owner or a partner can manage API keys." }, 403);
     }
     const db = context.env.KOPABOOK_DB;
-    const rows = await db.prepare(
-      `SELECT id, name, key_prefix, scopes, status, last_used_at, created_at
-       FROM api_keys WHERE business_id = ? ORDER BY id DESC`
-    ).bind(auth.business.id).all();
+    // website_url column needs migration 0040; fall back without it.
+    let rows;
+    try {
+      rows = await db.prepare(
+        `SELECT id, name, website_url, key_prefix, scopes, status, last_used_at, created_at
+         FROM api_keys WHERE business_id = ? ORDER BY id DESC`
+      ).bind(auth.business.id).all();
+    } catch (e) {
+      rows = await db.prepare(
+        `SELECT id, name, key_prefix, scopes, status, last_used_at, created_at
+         FROM api_keys WHERE business_id = ? ORDER BY id DESC`
+      ).bind(auth.business.id).all();
+    }
     return json({ ok: true, keys: rows.results || [] });
   } catch (e) {
     return json({ ok: false, message: "Could not load API keys." }, 500);
@@ -36,6 +45,8 @@ export async function onRequestPost(context) {
     }
     const body = await context.request.json().catch(() => ({}));
     const name = String(body.name || "").slice(0, 80) || "Untitled key";
+    let websiteUrl = String(body.website_url || "").trim().slice(0, 200);
+    if (websiteUrl && !/^https?:\/\//i.test(websiteUrl)) websiteUrl = "https://" + websiteUrl;
 
     const db = context.env.KOPABOOK_DB;
     const count = await db.prepare(
@@ -47,10 +58,19 @@ export async function onRequestPost(context) {
 
     const key = newApiKey();
     const hash = await sha256hex(key);
-    const r = await db.prepare(
-      `INSERT INTO api_keys (business_id, user_id, name, key_hash, key_prefix, scopes, status)
-       VALUES (?, ?, ?, ?, ?, 'read', 'active')`
-    ).bind(auth.business.id, auth.user.id, name, hash, key.slice(0, 14)).run();
+    // website_url needs migration 0040; fall back without it.
+    let r;
+    try {
+      r = await db.prepare(
+        `INSERT INTO api_keys (business_id, user_id, name, website_url, key_hash, key_prefix, scopes, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'read', 'active')`
+      ).bind(auth.business.id, auth.user.id, name, websiteUrl, hash, key.slice(0, 14)).run();
+    } catch (e) {
+      r = await db.prepare(
+        `INSERT INTO api_keys (business_id, user_id, name, key_hash, key_prefix, scopes, status)
+         VALUES (?, ?, ?, ?, ?, 'read', 'active')`
+      ).bind(auth.business.id, auth.user.id, name, hash, key.slice(0, 14)).run();
+    }
 
     return json({
       ok: true,

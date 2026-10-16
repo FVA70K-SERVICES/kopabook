@@ -98,6 +98,11 @@ export const KOPABOOK_KNOWLEDGE = [
     quickReplies: ['Pricing', 'Talk to human']
   },
   {
+    patterns: ['connect website', 'connect my website', 'link website', 'website connect', 'my website'],
+    answer: 'You can link your website to KopaBook in Settings, under Connected websites (on desktop). Add your website name and URL, copy the API key, and paste our small snippet on your site. Your website can then show live products, stock, and sales from KopaBook. It is read-only, so your records are always safe.',
+    quickReplies: ['Pricing', 'Talk to human']
+  },
+  {
     patterns: ['hotel', 'rooms', 'guest house', 'booking'],
     answer: 'KopaBook has a hotel section for guest houses: manage rooms and bookings right inside the app. It appears automatically when your business type is set to Hotel or Guest House.',
     quickReplies: ['Features', 'Pricing']

@@ -103,11 +103,37 @@ const HANDLERS = {
   expenses: handleExpenses,
 };
 
+// Any website can connect: allow cross-origin browser calls to this
+// read-only API. Keys stay secret because they live in the site owner's
+// own backend or are restricted to public (non-sensitive) reads.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+function corsJson(data, status = 200) {
+  const res = json(data, status);
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
+  return new Response(res.body, { status: res.status, headers });
+}
+
+export async function onRequestOptions() {
+  return new Response(null, { status: 204, headers: CORS });
+}
+
 export async function onRequestGet(context) {
   try {
     const auth = await getApiKeyAuth(context);
     const denied = requireApiKey(auth);
-    if (denied) return denied;
+    if (denied) {
+      const res = denied;
+      const headers = new Headers(res.headers);
+      for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
+      return new Response(res.body, { status: res.status, headers });
+    }
 
     const url = new URL(context.request.url);
     // [[resource]] captures the path after /api/v1/
@@ -115,11 +141,14 @@ export async function onRequestGet(context) {
     const resource = m ? m[1] : "";
     const handler = HANDLERS[resource];
     if (!handler) {
-      return json({ ok: false, error: "unknown-resource",
+      return corsJson({ ok: false, error: "unknown-resource",
         message: "Available resources: business, dashboard, sales, products, debts, expenses." }, 404);
     }
-    return handler(context.env.KOPABOOK_DB, auth, url);
+    const res = await handler(context.env.KOPABOOK_DB, auth, url);
+    const headers = new Headers(res.headers);
+    for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
+    return new Response(res.body, { status: res.status, headers });
   } catch (e) {
-    return json({ ok: false, error: "server-error" }, 500);
+    return corsJson({ ok: false, error: "server-error" }, 500);
   }
 }
