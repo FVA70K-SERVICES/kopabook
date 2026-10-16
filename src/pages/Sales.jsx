@@ -256,7 +256,7 @@ export default function SalesPage({ session }) {
             <input type="date" className="search" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
           </div>          <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>Sale</th><th>Customer</th><th>Total</th><th>Paid</th><th>Balance</th><th>Time</th><th></th></tr></thead>
+              <thead><tr><th>Sale</th><th>Customer</th><th>Total</th><th>Paid</th><th>Change</th><th>Balance</th><th>Time</th><th></th></tr></thead>
               <tbody>
                 {history.map((s) => (
                   <tr key={s.id}>
@@ -264,6 +264,9 @@ export default function SalesPage({ session }) {
                     <td>{s.customer_name || "Walk-in"}</td>
                     <td className="money">{fmt(s.total_amount)}</td>
                     <td className="money">{fmt(s.amount_paid)}</td>
+                    <td className="money" style={{ color: Number(s.change_given) > 0 ? "var(--gold, #b45309)" : "var(--muted)" }}>
+                      {Number(s.change_given) > 0 ? fmt(s.change_given) : "—"}
+                    </td>
                     <td className={Number(s.balance_due) > 0 ? "money debt-amt" : "money"}>{fmt(s.balance_due)}</td>
                     <td><small>{s.created_at?.slice(11, 16)}</small></td>
                     <td style={{ whiteSpace: "nowrap" }}>
