@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api, nav } from "../lib/api";
 import { COUNTRIES } from "../lib/businessTypes";
 import ThemeToggle from "../components/ThemeToggle";
@@ -34,7 +34,11 @@ function MFooter() {
         <div>
           <a href="/features">Features</a> · <a href="/pricing">Pricing</a> ·{" "}
           <a href="/about">About</a> · <a href="/faq">FAQ</a> ·{" "}
-          <a href="/waitlist">Waitlist</a> · <a href="/login">Sign in</a>
+          <a href="/login">Sign in</a>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <a href="/terms">Terms of Service</a> · <a href="/privacy">Privacy Policy</a> ·{" "}
+          <a href="/refund">Refund Policy</a>
         </div>
       </div>
     </footer>
@@ -150,6 +154,12 @@ export function FeaturesPage() {
 }
 
 export function PricingPage() {
+  const [prices, setPrices] = useState(null);
+  useEffect(() => {
+    fetch("/api/plans").then((r) => r.json()).then((d) => setPrices(d.plans || {})).catch(() => {});
+  }, []);
+  const price = (tier, cycle, fallback) =>
+    prices?.[tier]?.[cycle]?.label || fallback;
   return (
     <div className="page">
       <MNav />
@@ -173,8 +183,8 @@ export function PricingPage() {
             </div>
             <div className="card price-card">
               <div className="tier">Starter</div>
-              <div className="amount">NGN 1,000</div>
-              <p style={{ color: "var(--muted)" }}>Per month, or NGN 10,000 per year (2 months free). For growing shops with attendants.</p>
+              <div className="amount">{price("starter", "monthly", "NGN 1,000")}</div>
+              <p style={{ color: "var(--muted)" }}>Per month, or {price("starter", "yearly", "NGN 10,000")} per year (2 months free). For growing shops with attendants.</p>
               <ul>
                 <li>5 businesses</li>
                 <li>1,000 sales per week, per business</li>
@@ -187,8 +197,8 @@ export function PricingPage() {
             </div>
             <div className="card price-card">
               <div className="tier">Pro</div>
-              <div className="amount">NGN 2,500</div>
-              <p style={{ color: "var(--muted)" }}>Per month, or NGN 25,000 per year (2 months free). For bigger businesses running multiple shops.</p>
+              <div className="amount">{price("pro", "monthly", "NGN 2,500")}</div>
+              <p style={{ color: "var(--muted)" }}>Per month, or {price("pro", "yearly", "NGN 25,000")} per year (2 months free). For bigger businesses running multiple shops.</p>
               <ul>
                 <li>Unlimited businesses</li>
                 <li>Unlimited sales and products</li>
