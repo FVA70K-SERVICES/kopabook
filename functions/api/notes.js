@@ -31,14 +31,27 @@ export async function onRequestGet(context) {
     }
 
     const db = context.env.KOPABOOK_DB;
-    const rows = await db.prepare(
-      `SELECT n.id, n.title, n.content, n.visibility, n.color, n.pinned, n.user_id, n.created_at, n.updated_at,
-              u.full_name AS author_name
-       FROM notes n
-       LEFT JOIN users u ON u.id = n.user_id
-       WHERE ${conds.join(" AND ")}
-       ORDER BY n.pinned DESC, n.updated_at DESC LIMIT 200`
-    ).bind(...params).all();
+    // Try the upgraded columns first; fall back if migration 0039 is not applied yet.
+    let rows;
+    try {
+      rows = await db.prepare(
+        `SELECT n.id, n.title, n.content, n.visibility, n.color, n.pinned, n.user_id, n.created_at, n.updated_at,
+                u.full_name AS author_name
+         FROM notes n
+         LEFT JOIN users u ON u.id = n.user_id
+         WHERE ${conds.join(" AND ")}
+         ORDER BY n.pinned DESC, n.updated_at DESC LIMIT 200`
+      ).bind(...params).all();
+    } catch (e) {
+      rows = await db.prepare(
+        `SELECT n.id, n.title, n.content, n.visibility, n.user_id, n.created_at, n.updated_at,
+                u.full_name AS author_name
+         FROM notes n
+         LEFT JOIN users u ON u.id = n.user_id
+         WHERE ${conds.join(" AND ")}
+         ORDER BY n.updated_at DESC LIMIT 200`
+      ).bind(...params).all();
+    }
 
     return json({ ok: true, notes: rows.results || [] });
   } catch (e) {
@@ -63,9 +76,17 @@ export async function onRequestPost(context) {
     }
 
     const db = context.env.KOPABOOK_DB;
-    const r = await db.prepare(
-      `INSERT INTO notes (business_id, user_id, title, content, visibility, color, pinned) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(auth.business.id, auth.user.id, title, content, visibility, color, pinned).run();
+    // Upgraded columns first; fall back if migration 0039 is not applied yet.
+    let r;
+    try {
+      r = await db.prepare(
+        `INSERT INTO notes (business_id, user_id, title, content, visibility, color, pinned) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(auth.business.id, auth.user.id, title, content, visibility, color, pinned).run();
+    } catch (e) {
+      r = await db.prepare(
+        `INSERT INTO notes (business_id, user_id, title, content, visibility) VALUES (?, ?, ?, ?, ?)`
+      ).bind(auth.business.id, auth.user.id, title, content, visibility).run();
+    }
 
     return json({ ok: true, id: Number(r.meta.last_row_id) });
   } catch (e) {
@@ -99,9 +120,16 @@ export async function onRequestPut(context) {
     const color = NOTE_COLORS.includes(body.color) ? body.color : (note.color || "default");
     const pinned = body.pinned === undefined ? (note.pinned || 0) : (body.pinned ? 1 : 0);
 
-    await db.prepare(
-      `UPDATE notes SET title = ?, content = ?, visibility = ?, color = ?, pinned = ?, updated_at = datetime('now') WHERE id = ?`
-    ).bind(title, content, visibility, color, pinned, id).run();
+    // Upgraded columns first; fall back if migration 0039 is not applied yet.
+    try {
+      await db.prepare(
+        `UPDATE notes SET title = ?, content = ?, visibility = ?, color = ?, pinned = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(title, content, visibility, color, pinned, id).run();
+    } catch (e) {
+      await db.prepare(
+        `UPDATE notes SET title = ?, content = ?, visibility = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(title, content, visibility, id).run();
+    }
 
     return json({ ok: true });
   } catch (e) {
