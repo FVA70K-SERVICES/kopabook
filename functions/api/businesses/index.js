@@ -1,6 +1,6 @@
 // /api/businesses — GET list my businesses, POST create a new one.
 // One owner account can own and switch between many businesses.
-import { json, getAuthContext, requireAuth, toSqliteDate, audit } from "./_utils";
+import { json, getAuthContext, requireAuth, toSqliteDate, audit } from "../_utils";
 
 const DEFAULT_MODES = [
   ["Cash", 1],
