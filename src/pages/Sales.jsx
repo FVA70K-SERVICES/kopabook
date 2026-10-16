@@ -3,6 +3,7 @@ import { api, fmt, todayISO } from "../lib/api";
 import { waLink, receiptText } from "../lib/whatsapp";
 import { receiptCardUrl, shareCard } from "../lib/shareCards";
 import MessageSale from "../components/MessageSale";
+import { ShipmentModal, ShipmentsTab } from "../components/Shipments";
 
 export default function SalesPage({ session }) {
   const canVoid = ["owner", "partner"].includes(session?.business?.role);
@@ -24,6 +25,7 @@ export default function SalesPage({ session }) {
   const [doneCustomer, setDoneCustomer] = useState("");
   const [history, setHistory] = useState([]);
   const [dateFilter, setDateFilter] = useState(todayISO());
+  const [shipFor, setShipFor] = useState(null);
   const [receiptPhone, setReceiptPhone] = useState("");
   const [bizName, setBizName] = useState("");
   const salePanelRef = useRef(null);
@@ -242,6 +244,7 @@ export default function SalesPage({ session }) {
         <div style={{ display: "flex", gap: 8 }}>
           <button className={"btn btn-sm " + (view === "new" ? "btn-primary" : "btn-secondary")} onClick={() => setView("new")}>New sale</button>
           <button className={"btn btn-sm " + (view === "history" ? "btn-primary" : "btn-secondary")} onClick={() => setView("history")}>History</button>
+          <button className={"btn btn-sm " + (view === "shipments" ? "btn-primary" : "btn-secondary")} onClick={() => setView("shipments")}>Shipments</button>
         </div>
       </div>
 
@@ -251,8 +254,7 @@ export default function SalesPage({ session }) {
         <>
           <div className="toolbar">
             <input type="date" className="search" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-          </div>
-          <div className="table-wrap">
+          </div>          <div className="table-wrap">
             <table className="data">
               <thead><tr><th>Sale</th><th>Customer</th><th>Total</th><th>Paid</th><th>Balance</th><th>Time</th><th></th></tr></thead>
               <tbody>
@@ -266,6 +268,13 @@ export default function SalesPage({ session }) {
                     <td><small>{s.created_at?.slice(11, 16)}</small></td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <a className="btn btn-secondary btn-sm" href={`/app/receipt/sale/${s.id}`} target="_blank" rel="noreferrer">🧾</a>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => setShipFor(s)}
+                      >
+                        Ship
+                      </button>
                       {canVoid && (
                         <button
                           className="btn btn-secondary btn-sm"
@@ -285,6 +294,8 @@ export default function SalesPage({ session }) {
             {history.length === 0 && <p className="empty">No sales on this date.</p>}
           </div>
         </>
+      ) : view === "shipments" ? (
+        <ShipmentsTab />
       ) : (
         <>
           <MessageSale products={products} services={services} onUseDraft={useMessageDraft} />
@@ -397,6 +408,13 @@ export default function SalesPage({ session }) {
           </div>
           </div>
         </>
+      )}
+      {shipFor && (
+        <ShipmentModal
+          sale={shipFor}
+          onClose={() => setShipFor(null)}
+          onCreated={() => setView("shipments")}
+        />
       )}
     </>
   );
