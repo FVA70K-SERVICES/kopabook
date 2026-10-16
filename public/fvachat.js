@@ -217,7 +217,26 @@
       typingTimeout = setTimeout(() => sendTyping(false), 2000);
     });
 
+    loadHistory();
     poll();
+  }
+
+  // Load full chat history on open
+  async function loadHistory() {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(API + '/poll?sessionId=' + sessionId + '&since=0');
+      const data = await res.json();
+      (data.messages || []).forEach(m => {
+        if (m.id > lastMsgId) {
+          lastMsgId = m.id;
+          appendMsg(m.sender, m.message, m.created_at, null, true);
+        }
+      });
+      // Scroll to bottom
+      const msgs = body.querySelector('.fva-messages');
+      if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    } catch (e) {}
   }
 
   function sendTyping(typing) {

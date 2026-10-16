@@ -89,6 +89,11 @@
         <button data-filter="mine">Mine</button>
         <button data-filter="unassigned">Unassigned</button>
       </div>
+      <div style="padding:10px 16px;border-bottom:1px solid #e5e7eb;">
+        <input id="historySearch" placeholder="Search chat history..." oninput="searchHistory(this.value)"
+          style="width:100%;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;">
+        <div id="searchResults" style="display:none;max-height:200px;overflow-y:auto;margin-top:8px;"></div>
+      </div>
       <div class="chats" id="chats"></div>
     </div>
 
@@ -303,6 +308,30 @@ function useSuggestion(i) {
     document.getElementById('suggestions').style.display = 'none';
     document.getElementById('replyInput').focus();
   }
+}
+
+let searchTimeout;
+async function searchHistory(q) {
+  clearTimeout(searchTimeout);
+  const box = document.getElementById('searchResults');
+  if (!q || q.trim().length < 3) { box.style.display = 'none'; return; }
+  searchTimeout = setTimeout(async () => {
+    try {
+      const data = await fetch(`/api/chat/admin/chats?search=${encodeURIComponent(q.trim())}`).then(r => r.json());
+      const results = data.sessions || [];
+      if (results.length === 0) {
+        box.innerHTML = '<p style="padding:8px;color:#9ca3af;font-size:12px;">No matches</p>';
+      } else {
+        box.innerHTML = results.slice(0, 10).map(s => `
+          <div onclick="openChat('${s.id}');document.getElementById('searchResults').style.display='none';document.getElementById('historySearch').value='';"
+            style="padding:8px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px;">
+            <strong>${escapeHtml(s.visitor_name || 'Visitor')}</strong>
+            <span style="color:#6b7280;">${escapeHtml((s.last_message || '').slice(0, 50))}</span>
+          </div>`).join('');
+      }
+      box.style.display = 'block';
+    } catch { box.style.display = 'none'; }
+  }, 400);
 }
 
 document.querySelectorAll('.filter-tabs button').forEach(b => {
