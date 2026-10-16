@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat Center | KopaBook</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; }
+
+  /* Centered layout */
+  .center-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .chat-center { width: 100%; max-width: 900px; height: calc(100vh - 40px); max-height: 800px; background: white; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.15); display: flex; overflow: hidden; }
+
+  /* Left: chat list */
+  .chat-list { width: 300px; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; background: #fafbfc; }
+  .list-header { padding: 20px; border-bottom: 1px solid #e5e7eb; }
+  .list-header h2 { font-size: 18px; margin-bottom: 4px; }
+  .list-header p { font-size: 13px; color: #6b7280; }
+  .filter-tabs { display: flex; gap: 6px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+  .filter-tabs button { flex: 1; padding: 8px; border: 1px solid #e5e7eb; background: white; border-radius: 8px; font-size: 12px; cursor: pointer; }
+  .filter-tabs button.active { background: #15803d; color: white; border-color: #15803d; }
+  .chats { flex: 1; overflow-y: auto; }
+  .chat-item { padding: 14px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+  .chat-item:hover { background: white; }
+  .chat-item.active { background: white; border-left: 3px solid #15803d; }
+  .chat-item .visitor { font-weight: 600; font-size: 14px; }
+  .chat-item .preview { font-size: 13px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .chat-item .meta { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .badge.bot { background: #dbeafe; color: #1d4ed8; }
+  .badge.human { background: #fef3c7; color: #d97706; }
+  .badge.needs-human { background: #fee2e2; color: #dc2626; }
+  .badge.assigned { background: #e0e7ff; color: #4338ca; }
+  .unread { background: #dc2626; color: white; font-size: 11px; border-radius: 10px; padding: 2px 8px; margin-left: auto; }
+
+  /* Center: chat thread */
+  .chat-main { flex: 1; display: flex; flex-direction: column; }
+  .chat-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 12px; }
+  .chat-header .avatar { width: 40px; height: 40px; background: #15803d; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .chat-header .info { flex: 1; }
+  .chat-header .info .name { font-weight: 700; }
+  .chat-header .info .status { font-size: 12px; color: #6b7280; }
+
+  /* Staff controls bar */
+  .staff-bar { display: flex; gap: 8px; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; background: #f8fafc; flex-wrap: wrap; align-items: center; }
+  .staff-bar select { padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 13px; }
+  .staff-bar button { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid #e5e7eb; background: white; }
+  .staff-bar button.primary { background: #15803d; color: white; border-color: #15803d; }
+  .staff-bar button.warn { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+  .staff-bar .handler-label { font-size: 13px; color: #6b7280; }
+
+  .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 75%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.5; }
+  .msg.visitor { background: #f3f4f6; align-self: flex-start; }
+  .msg.agent { background: #15803d; color: white; align-self: flex-end; }
+  .msg.bot { background: #eff6ff; border: 1px solid #bfdbfe; align-self: flex-start; }
+  .msg.system { background: transparent; color: #9ca3af; font-size: 12px; text-align: center; align-self: center; font-style: italic; }
+  .msg .sender-tag { font-size: 11px; font-weight: 700; opacity: 0.7; display: block; margin-bottom: 2px; }
+  .msg .time { font-size: 11px; opacity: 0.6; margin-top: 4px; }
+
+  .input-bar { display: flex; gap: 10px; padding: 16px 20px; border-top: 1px solid #e5e7eb; }
+  .input-bar input { flex: 1; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 24px; font-size: 14px; outline: none; }
+  .input-bar input:focus { border-color: #15803d; }
+  .input-bar button { width: 48px; height: 48px; border-radius: 50%; background: #15803d; color: white; border: none; cursor: pointer; font-size: 18px; }
+
+  .empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; flex-direction: column; gap: 12px; }
+  .empty .icon { font-size: 48px; }
+
+  @media (max-width: 768px) {
+    .chat-center { flex-direction: column; height: calc(100vh - 20px); }
+    .chat-list { width: 100%; max-height: 40%; border-right: none; border-bottom: 1px solid #e5e7eb; }
+    .chat-list.collapsed { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="center-wrap">
+  <div class="chat-center">
+    <!-- Chat list -->
+    <div class="chat-list" id="chatList">
+      <div class="list-header">
+        <h2>Chat Center</h2>
+        <p id="staffInfo">Loading...</p>
+      </div>
+      <div class="filter-tabs">
+        <button class="active" data-filter="all">All</button>
+        <button data-filter="needs-human">Needs You</button>
+        <button data-filter="mine">Mine</button>
+        <button data-filter="unassigned">Unassigned</button>
+      </div>
+      <div class="chats" id="chats"></div>
+    </div>
+
+    <!-- Chat thread (centered) -->
+    <div class="chat-main" id="chatMain">
+      <div class="empty" id="emptyState">
+        <div class="icon">💬</div>
+        <p>Select a chat to start helping</p>
+      </div>
+      <div id="activeChat" style="display:none; flex-direction:column; height:100%;">
+        <div class="chat-header">
+          <div class="avatar" id="visitorAvatar">?</div>
+          <div class="info">
+            <div class="name" id="visitorName">Visitor</div>
+            <div class="status" id="visitorStatus">Online</div>
+          </div>
+        </div>
+        <div class="staff-bar" id="staffBar">
+          <span class="handler-label">Handled by: <strong id="handlerLabel">Kopa Bot</strong></span>
+          <select id="assignSelect"><option value="">Assign to...</option></select>
+          <button class="primary" onclick="takeover()">Take Over</button>
+          <button class="warn" onclick="releaseToBot()">Back to Bot</button>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="input-bar">
+          <input type="text" id="replyInput" placeholder="Type your reply..." onkeypress="if(event.key==='Enter')sendReply()">
+          <button onclick="sendReply()">➤</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let sessions = [], staff = [], activeSession = null, myEmail = '', filter = 'all';
+
+async function init() {
+  // Get current user
+  try {
+    const me = await fetch('/api/auth/me').then(r => r.json());
+    myEmail = me.user?.email || '';
+    document.getElementById('staffInfo').textContent = me.user?.name || myEmail;
+  } catch {}
+
+  await loadStaff();
+  await loadChats();
+  setInterval(loadChats, 5000);
+  setInterval(() => { if (activeSession) loadMessages(activeSession.id); }, 3000);
+}
+
+async function loadStaff() {
+  try {
+    const data = await fetch('/api/chat/admin/staff').then(r => r.json());
+    staff = data.staff || [];
+    const sel = document.getElementById('assignSelect');
+    sel.innerHTML = '<option value="">Assign to...</option>';
+    staff.forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.email;
+      o.textContent = `${s.name} (${s.active_chats} active)`;
+      sel.appendChild(o);
+    });
+    sel.onchange = () => { if (sel.value && activeSession) assignChat(activeSession.id, sel.value); sel.value = ''; };
+  } catch {}
+}
+
+async function loadChats() {
+  try {
+    const data = await fetch('/api/chat/admin/chats').then(r => r.json());
+    sessions = data.sessions || data.chats || [];
+    renderList();
+  } catch {}
+}
+
+function renderList() {
+  const el = document.getElementById('chats');
+  let filtered = sessions;
+  if (filter === 'needs-human') filtered = sessions.filter(s => s.needs_human);
+  if (filter === 'mine') filtered = sessions.filter(s => s.assigned_to === myEmail);
+  if (filter === 'unassigned') filtered = sessions.filter(s => !s.assigned_to);
+
+  el.innerHTML = filtered.map(s => `
+    <div class="chat-item ${activeSession?.id === s.id ? 'active' : ''}" onclick="openChat('${s.id}')">
+      <div class="visitor">${escapeHtml(s.visitor_name || 'Visitor')}</div>
+      <div class="preview">${escapeHtml(s.last_message || 'No messages yet')}</div>
+      <div class="meta">
+        ${s.needs_human ? '<span class="badge needs-human">Needs human</span>' : ''}
+        ${s.handled_by === 'human' ? '<span class="badge human">Human</span>' : '<span class="badge bot">Bot</span>'}
+        ${s.assigned_to ? `<span class="badge assigned">${escapeHtml(s.assigned_to.split('@')[0])}</span>` : ''}
+        ${s.unread_count > 0 ? `<span class="unread">${s.unread_count}</span>` : ''}
+      </div>
+    </div>
+  `).join('') || '<p style="padding:20px;color:#9ca3af;text-align:center;">No chats</p>';
+}
+
+async function openChat(id) {
+  activeSession = sessions.find(s => s.id === id);
+  if (!activeSession) return;
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('activeChat').style.display = 'flex';
+  document.getElementById('visitorName').textContent = activeSession.visitor_name || 'Visitor';
+  document.getElementById('visitorAvatar').textContent = (activeSession.visitor_name || 'V')[0].toUpperCase();
+  document.getElementById('handlerLabel').textContent =
+    activeSession.assigned_to || (activeSession.handled_by === 'human' ? 'Staff' : 'Kopa Bot');
+  renderList();
+  await loadMessages(id);
+}
+
+async function loadMessages(id) {
+  try {
+    const data = await fetch(`/api/chat/admin/messages?session_id=${id}`).then(r => r.json());
+    const msgs = data.messages || [];
+    document.getElementById('messages').innerHTML = msgs.map(m => `
+      <div class="msg ${m.sender}">
+        ${m.sender === 'bot' ? '<span class="sender-tag">Kopa Bot</span>' : ''}
+        ${m.sender === 'agent' ? `<span class="sender-tag">${escapeHtml(m.sender_name || 'Staff')}</span>` : ''}
+        ${escapeHtml(m.message)}
+        <div class="time">${new Date(m.created_at).toLocaleTimeString()}</div>
+      </div>
+    `).join('');
+    const box = document.getElementById('messages');
+    box.scrollTop = box.scrollHeight;
+  } catch {}
+}
+
+async function sendReply() {
+  const input = document.getElementById('replyInput');
+  const text = input.value.trim();
+  if (!text || !activeSession) return;
+  input.value = '';
+  await fetch('/api/chat/admin/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: activeSession.id, message: text })
+  });
+  await loadMessages(activeSession.id);
+}
+
+async function assignChat(sessionId, email) {
+  await fetch('/api/chat/admin/staff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'assign', session_id: sessionId, assign_to: email })
+  });
+  document.getElementById('handlerLabel').textContent = email;
+  await loadChats();
+}
+
+async function takeover() {
+  if (!activeSession) return;
+  await fetch('/api/chat/admin/staff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'takeover', session_id: activeSession.id })
+  });
+  document.getElementById('handlerLabel').textContent = myEmail || 'You';
+  await loadMessages(activeSession.id);
+  await loadChats();
+}
+
+async function releaseToBot() {
+  if (!activeSession) return;
+  await fetch('/api/chat/admin/staff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'release', session_id: activeSession.id })
+  });
+  document.getElementById('handlerLabel').textContent = 'Kopa Bot';
+  await loadMessages(activeSession.id);
+  await loadChats();
+}
+
+function escapeHtml(t) {
+  const d = document.createElement('div');
+  d.textContent = t || '';
+  return d.innerHTML;
+}
+
+document.querySelectorAll('.filter-tabs button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.filter-tabs button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    filter = b.dataset.filter;
+    renderList();
+  };
+});
+
+init();
+</script>
+</body>
+</html>

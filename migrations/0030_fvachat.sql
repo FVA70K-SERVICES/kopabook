@@ -67,3 +67,8 @@ VALUES (
   'internal',
   strftime('%s', 'now') * 1000
 );
+
+-- Staff assignment for chats (owner center + staff control)
+ALTER TABLE chat_sessions ADD COLUMN assigned_to TEXT;
+ALTER TABLE chat_sessions ADD COLUMN assigned_at TEXT;
+ALTER TABLE chat_sessions ADD COLUMN handled_by TEXT DEFAULT 'bot';
