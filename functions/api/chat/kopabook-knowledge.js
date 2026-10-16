@@ -84,7 +84,7 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['notebook', 'notes', 'note '],
-    answer: 'The Notebook (under Tools in the app) keeps your business thinking in one place. Private notes are only for your eyes, not even the business owner can see them. Shared notes everyone in the business can read, and owners or partners can edit them.',
+    answer: 'The Notebook (under Tools in the app) keeps your business thinking in one place. Give notes colors, pin important ones to the top, and search everything instantly. Private notes are only for your eyes, not even the business owner can see them. Shared notes everyone in the business can read, and owners or partners can edit them.',
     quickReplies: ['Features', 'How to start']
   },
   {

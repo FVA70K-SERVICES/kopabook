@@ -3,6 +3,8 @@
 //             'shared'  = everyone in the business (owners, managers, staff) can see it.
 import { json, getAuthContext, requireAuth } from "./_utils.js";
 
+const NOTE_COLORS = ["default", "butter", "mint", "sky", "blush", "lavender"];
+
 function canSee(auth, note) {
   if (note.business_id !== auth.business.id) return false;
   if (note.visibility === "shared") return true;
@@ -30,12 +32,12 @@ export async function onRequestGet(context) {
 
     const db = context.env.KOPABOOK_DB;
     const rows = await db.prepare(
-      `SELECT n.id, n.title, n.content, n.visibility, n.user_id, n.created_at, n.updated_at,
+      `SELECT n.id, n.title, n.content, n.visibility, n.color, n.pinned, n.user_id, n.created_at, n.updated_at,
               u.full_name AS author_name
        FROM notes n
        LEFT JOIN users u ON u.id = n.user_id
        WHERE ${conds.join(" AND ")}
-       ORDER BY n.updated_at DESC LIMIT 200`
+       ORDER BY n.pinned DESC, n.updated_at DESC LIMIT 200`
     ).bind(...params).all();
 
     return json({ ok: true, notes: rows.results || [] });
@@ -54,14 +56,16 @@ export async function onRequestPost(context) {
     const title = String(body.title || "").slice(0, 120);
     const content = String(body.content || "").slice(0, 20000);
     const visibility = body.visibility === "shared" ? "shared" : "private";
+    const color = NOTE_COLORS.includes(body.color) ? body.color : "default";
+    const pinned = body.pinned ? 1 : 0;
     if (!title && !content) {
       return json({ ok: false, message: "Write something first." }, 400);
     }
 
     const db = context.env.KOPABOOK_DB;
     const r = await db.prepare(
-      `INSERT INTO notes (business_id, user_id, title, content, visibility) VALUES (?, ?, ?, ?, ?)`
-    ).bind(auth.business.id, auth.user.id, title, content, visibility).run();
+      `INSERT INTO notes (business_id, user_id, title, content, visibility, color, pinned) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(auth.business.id, auth.user.id, title, content, visibility, color, pinned).run();
 
     return json({ ok: true, id: Number(r.meta.last_row_id) });
   } catch (e) {
@@ -92,10 +96,12 @@ export async function onRequestPut(context) {
     const content = String(body.content ?? note.content).slice(0, 20000);
     const visibility = body.visibility === "shared" || body.visibility === "private"
       ? body.visibility : note.visibility;
+    const color = NOTE_COLORS.includes(body.color) ? body.color : (note.color || "default");
+    const pinned = body.pinned === undefined ? (note.pinned || 0) : (body.pinned ? 1 : 0);
 
     await db.prepare(
-      `UPDATE notes SET title = ?, content = ?, visibility = ?, updated_at = datetime('now') WHERE id = ?`
-    ).bind(title, content, visibility, id).run();
+      `UPDATE notes SET title = ?, content = ?, visibility = ?, color = ?, pinned = ?, updated_at = datetime('now') WHERE id = ?`
+    ).bind(title, content, visibility, color, pinned, id).run();
 
     return json({ ok: true });
   } catch (e) {

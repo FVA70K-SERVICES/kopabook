@@ -28,7 +28,7 @@ INSERT OR IGNORE INTO bot_knowledge (topic, patterns, answer, quick_replies, pri
  'Getting started is easy:\n1. Create your free account\n2. Add your business\n3. Start recording sales\n\nNo card needed for the free plan. Want me to guide you?',
  '["Yes, guide me","Pricing","Talk to human"]', 90, unixepoch()),
 ('notebook', '["notebook","notes","note "]',
- 'The Notebook (under Tools in the app) keeps your business thinking in one place. Private notes are only for your eyes, not even the business owner can see them. Shared notes everyone in the business can read, and owners or partners can edit them.',
+ 'The Notebook (under Tools in the app) keeps your business thinking in one place. Give notes colors, pin important ones to the top, and search everything instantly. Private notes are only for your eyes, not even the business owner can see them. Shared notes everyone in the business can read, and owners or partners can edit them.',
  '["Features","How to start"]', 80, unixepoch()),
 ('calculator', '["calculator","change due"]',
  'There is a built-in calculator under Tools in the app. It has a change-due helper: enter the total and what the customer gave you, and it tells you the exact change. No more wrong change at the till!',

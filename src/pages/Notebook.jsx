@@ -1,5 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+
+const COLORS = {
+  default:  { bg: "#ffffff", border: "#e8e8e8", label: "White" },
+  butter:   { bg: "#fff8e1", border: "#f0e0b0", label: "Butter" },
+  mint:     { bg: "#e9f7ef", border: "#bfe3cd", label: "Mint" },
+  sky:      { bg: "#e8f1fd", border: "#bcd4f5", label: "Sky" },
+  blush:    { bg: "#fdeef2", border: "#f3c6d3", label: "Blush" },
+  lavender: { bg: "#f0ebfd", border: "#d3c8f2", label: "Lavender" },
+};
 
 function fmtDate(s) {
   const d = new Date(String(s).replace(" ", "T") + "Z");
@@ -12,11 +21,14 @@ export default function NotebookPage({ session }) {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [visibility, setVisibility] = useState("shared");
+  const [color, setColor] = useState("default");
+  const [pinned, setPinned] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const myId = session.user?.id;
@@ -32,15 +44,26 @@ export default function NotebookPage({ session }) {
     setLoading(false);
   }
 
-  useEffect(() => { load(tab); }, [tab]);
+  useEffect(() => { load(tab); setSearch(""); }, [tab]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return notes;
+    return notes.filter((n) =>
+      (n.title || "").toLowerCase().includes(q) || (n.content || "").toLowerCase().includes(q)
+    );
+  }, [notes, search]);
 
   function openNew() {
-    setEditing(null); setTitle(""); setContent(""); setVisibility(tab === "private" ? "private" : "shared");
+    setEditing(null); setTitle(""); setContent("");
+    setVisibility(tab === "private" ? "private" : "shared");
+    setColor("default"); setPinned(false);
     setShowForm(true);
   }
 
   function openEdit(n) {
-    setEditing(n); setTitle(n.title || ""); setContent(n.content || ""); setVisibility(n.visibility);
+    setEditing(n); setTitle(n.title || ""); setContent(n.content || "");
+    setVisibility(n.visibility); setColor(n.color || "default"); setPinned(!!n.pinned);
     setShowForm(true);
   }
 
@@ -49,11 +72,9 @@ export default function NotebookPage({ session }) {
     if (!title.trim() && !content.trim()) return;
     setSaving(true);
     try {
-      if (editing) {
-        await api.put("/api/notes", { id: editing.id, title: title.trim(), content: content.trim(), visibility });
-      } else {
-        await api.post("/api/notes", { title: title.trim(), content: content.trim(), visibility });
-      }
+      const payload = { title: title.trim(), content: content.trim(), visibility, color, pinned };
+      if (editing) await api.put("/api/notes", { id: editing.id, ...payload });
+      else await api.post("/api/notes", payload);
       setShowForm(false);
       load(tab);
     } catch (err) { setError(err.message); }
@@ -68,6 +89,13 @@ export default function NotebookPage({ session }) {
     } catch (e) { setError(e.message); }
   }
 
+  async function togglePin(n) {
+    try {
+      await api.put("/api/notes", { id: n.id, pinned: !n.pinned });
+      load(tab);
+    } catch (e) { setError(e.message); }
+  }
+
   function canEdit(n) {
     if (n.user_id === myId) return true;
     return n.visibility === "shared" && canModerate;
@@ -75,59 +103,93 @@ export default function NotebookPage({ session }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Notebook</h2>
         <button className="btn btn-primary btn-sm" onClick={openNew}>+ New note</button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <button className={"btn btn-sm " + (tab === "shared" ? "btn-primary" : "btn-secondary")}
           onClick={() => setTab("shared")}>Shared with everyone</button>
         <button className={"btn btn-sm " + (tab === "private" ? "btn-primary" : "btn-secondary")}
           onClick={() => setTab("private")}>My private notes</button>
       </div>
-      <p className="hint" style={{ marginTop: -8, marginBottom: 16 }}>
+      <p className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
         {tab === "shared"
           ? "Everyone in this business (owners, managers and staff) can read these."
           : "Only you can see these. Not even the owner."}
       </p>
 
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search notes..."
+        style={{
+          width: "100%", padding: "10px 14px", borderRadius: 12, border: "1px solid #ddd",
+          marginBottom: 14, fontSize: 15, boxSizing: "border-box",
+        }}
+      />
+
       {error && <div className="alert alert-error">{error}</div>}
       {loading && <div className="loading">Loading notes...</div>}
 
-      {!loading && notes.length === 0 && (
-        <div className="card" style={{ textAlign: "center", color: "#666" }}>
-          No {tab === "shared" ? "shared" : "private"} notes yet. Tap "+ New note" to write one.
+      {!loading && visible.length === 0 && (
+        <div className="card" style={{ textAlign: "center", color: "#666", borderRadius: 14 }}>
+          {search ? `No notes match "${search}".` : `No ${tab === "shared" ? "shared" : "private"} notes yet. Tap "+ New note" to write one.`}
         </div>
       )}
 
-      <div style={{ display: "grid", gap: 12 }}>
-        {notes.map((n) => (
-          <div className="card" key={n.id} style={{ margin: 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-              <div>
-                {n.title && <h4 style={{ margin: "0 0 4px" }}>{n.title}</h4>}
-                <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
-                  {n.author_name || "Someone"} · {fmtDate(n.updated_at)}
-                  {n.visibility === "private" ? " · 🔒 Only you" : " · 👥 Shared"}
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
+        {visible.map((n) => {
+          const c = COLORS[n.color] || COLORS.default;
+          return (
+            <div key={n.id} style={{
+              margin: 0, background: c.bg, border: `1px solid ${c.border}`,
+              borderRadius: 14, padding: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              display: "flex", flexDirection: "column",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  {n.title && <h4 style={{ margin: "0 0 4px", fontSize: 16 }}>{n.title}</h4>}
+                  <div style={{ fontSize: 11.5, color: "#8a8a8a", marginBottom: 8 }}>
+                    {n.pinned ? "📌 " : ""}{n.author_name || "Someone"} · {fmtDate(n.updated_at)}
+                  </div>
                 </div>
+                <button
+                  onClick={() => togglePin(n)}
+                  title={n.pinned ? "Unpin" : "Pin to top"}
+                  style={{
+                    border: "none", background: "transparent", cursor: "pointer", fontSize: 17,
+                    opacity: n.pinned ? 1 : 0.35, padding: 2, flexShrink: 0,
+                  }}>
+                  📌
+                </button>
               </div>
-              {canEdit(n) && (
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <button className="btn btn-secondary btn-sm" onClick={() => openEdit(n)}>Edit</button>
-                  <button className="btn btn-secondary btn-sm" onClick={() => remove(n)}>Delete</button>
-                </div>
-              )}
+              <div style={{ whiteSpace: "pre-wrap", fontSize: 14.5, lineHeight: 1.55, flex: 1 }}>{n.content}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20,
+                  background: n.visibility === "private" ? "#2d2d2d" : "#e8f5e9",
+                  color: n.visibility === "private" ? "#fff" : "#1a6b3c",
+                }}>
+                  {n.visibility === "private" ? "🔒 Only you" : "👥 Shared"}
+                </span>
+                {canEdit(n) && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => openEdit(n)}>Edit</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => remove(n)}>Delete</button>
+                  </div>
+                )}
+              </div>
             </div>
-            <div style={{ whiteSpace: "pre-wrap", fontSize: 15 }}>{n.content}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{editing ? "Edit note" : "New note"}</h3>
+            <h3 style={{ marginTop: 0 }}>{editing ? "Edit note" : "New note"}</h3>
             <form onSubmit={save}>
               <label>Title
                 <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120}
@@ -136,6 +198,24 @@ export default function NotebookPage({ session }) {
               <label>Note
                 <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={6}
                   placeholder="Write it down..." required />
+              </label>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Color</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {Object.entries(COLORS).map(([key, c]) => (
+                    <button type="button" key={key} title={c.label}
+                      onClick={() => setColor(key)}
+                      style={{
+                        width: 34, height: 34, borderRadius: "50%", cursor: "pointer",
+                        background: c.bg, border: color === key ? "3px solid #1a6b3c" : `2px solid ${c.border}`,
+                      }} />
+                  ))}
+                </div>
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)}
+                  style={{ width: 18, height: 18 }} />
+                <span style={{ fontSize: 14 }}>📌 Pin this note to the top</span>
               </label>
               <label>Who can see this?
                 <select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
