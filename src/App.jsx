@@ -3,7 +3,7 @@ import Layout from "./components/Layout";
 import { api, nav, setCurrency } from "./lib/api";
 import {
   LandingPage, FeaturesPage, PricingPage, WaitlistPage, NotFoundPage,
-  HotelsLandingPage,
+  HotelsLandingPage, AboutPage, FaqPage,
 } from "./pages/Marketing";
 import { LoginPage, OwnerSetupPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/Auth";
 import RegisterPage from "./pages/Register";
@@ -49,6 +49,8 @@ function AppRoute({ session }) {
   if (path === "/") return <LandingPage />;
   if (path === "/features") return <FeaturesPage />;
   if (path === "/pricing") return <PricingPage />;
+  if (path === "/about") return <AboutPage />;
+  if (path === "/faq") return <FaqPage />;
   if (path === "/waitlist") return <WaitlistPage />;
   if (path === "/hotels") return <HotelsLandingPage />;
   if (path === "/hotels/register") {

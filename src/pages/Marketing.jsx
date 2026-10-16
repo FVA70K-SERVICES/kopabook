@@ -12,6 +12,8 @@ function MNav() {
           <a href="/features" className="hide-m">Features</a>
           <a href="/hotels" className="hide-m">Hotels</a>
           <a href="/pricing" className="hide-m">Pricing</a>
+          <a href="/about" className="hide-m">About</a>
+          <a href="/faq" className="hide-m">FAQ</a>
           <a href="/login">Sign in</a>
           <ThemeToggle />
           <a href="/waitlist" className="btn btn-primary btn-sm">Join waitlist</a>
@@ -31,6 +33,7 @@ function MFooter() {
         </div>
         <div>
           <a href="/features">Features</a> · <a href="/pricing">Pricing</a> ·{" "}
+          <a href="/about">About</a> · <a href="/faq">FAQ</a> ·{" "}
           <a href="/waitlist">Waitlist</a> · <a href="/login">Sign in</a>
         </div>
       </div>
@@ -95,6 +98,10 @@ export function LandingPage() {
             <details><summary>Will it work on my phone?</summary><p>Yes. KopaBook is mobile-first and designed to be light on data.</p></details>
             <details><summary>What happens when a customer does not pay in full?</summary><p>The unpaid balance automatically becomes a debt on that customer's ledger, so you never lose track.</p></details>
             <details><summary>Can my shop attendant use it?</summary><p>Yes. Staff roles let attendants record sales while you keep control of products, settings and reports.</p></details>
+            <details><summary>Does KopaBook take my money?</summary><p>Never. KopaBook is a record keeper, not a payment processor. Every payment is a record of money exchanged outside the app.</p></details>
+          </div>
+          <div style={{ textAlign: "center", marginTop: 24 }}>
+            <a href="/faq" className="btn btn-secondary">See all questions</a>
           </div>
         </div>
       </section>
@@ -106,13 +113,19 @@ export function LandingPage() {
 export function FeaturesPage() {
   const feats = [
     ["🧾", "Sales in seconds", "A fast cart builder with product search, quantity steppers and payment methods. Under 5 taps from open to saved."],
+    ["🛠️", "Products and services", "Sell physical products with automatic stock control, and services priced per job or per hour, in the same sale."],
     ["📦", "Automatic stock control", "Every sale deducts stock instantly. Manual adjustments and opening balances are all written to an immutable movement ledger."],
-    ["📒", "Customer debts and ledgers", "Partial payments auto-create debts. Every customer gets a running-balance ledger showing debts, payments and history."],
+    ["📒", "Customer debts and ledgers", "Partial payments auto-create debts. Customers can pay bit by bit, and overpayments come back as change, never negative debt."],
+    ["🚚", "Shipment tracking", "Generate a tracking number when a sold product ships. Move it from pending to shipped to delivered, and share the number with your customer."],
     ["💸", "Expense capture", "Log daily expenses by category in seconds and review where money leaves the business."],
-    ["📊", "Live dashboard", "Today's sales, today's expenses, outstanding debts, low-stock alerts and recent sales, computed from real data."],
+    ["📊", "Live dashboard", "Today's sales, today's expenses, change given, outstanding debts, low-stock alerts and recent sales, computed from real data in your timezone."],
     ["📈", "Daily summaries and reports", "Date-range sales totals, top products, expense breakdowns and debtor lists, ready to review or export."],
-    ["🧑‍💼", "Staff roles", "Owner, manager and attendant roles with sensible permissions. Attendants record sales; owners keep control."],
-    ["🔒", "Secure by design", "Password hashing, secure httpOnly sessions, and audit logs for sensitive actions."],
+    ["🧑‍💼", "Full staff control", "Partner, manager, accountant, cashier, storekeeper, attendant, and hotel roles. Discount limits, commissions, suspend or remove, each role sees only its own workspace."],
+    ["🏢", "Many businesses, one account", "Own and manage multiple businesses. Switch between them instantly; each keeps its own staff, sales, stock, and records."],
+    ["🧾", "Thermal receipts", "Printable receipts for 58mm and 80mm printers, with your business name, phone, address, and custom footer."],
+    ["💬", "WhatsApp friendly", "Share receipts, send debt reminders, and broadcast promos straight to WhatsApp."],
+    ["🏨", "Hotel module", "Rooms, bookings, guest folios, charges, and payments for hotels, guest houses, and lodges."],
+    ["🔒", "Secure by design", "Password hashing, secure httpOnly sessions, role-based access, and audit logs for sensitive actions."],
   ];
   return (
     <div className="page">
@@ -275,6 +288,164 @@ export function NotFoundPage() {
         <p style={{ color: "var(--muted)" }}>The page you are looking for does not exist.</p>
         <a href="/" className="btn btn-primary">Back home</a>
       </div>
+      <MFooter />
+    </div>
+  );
+}
+
+export function AboutPage() {
+  return (
+    <div className="page">
+      <MNav />
+      <section className="section">
+        <div className="wrap narrow" style={{ margin: "0 auto" }}>
+          <span className="eyebrow">About KopaBook</span>
+          <h1>The record book for<br />everyday business.</h1>
+          <p className="lead">
+            KopaBook is a simple, free record keeper for local businesses everywhere.
+            Shops, hotels, restaurants, salons, pharmacies, artisans. If you sell something,
+            KopaBook keeps your books straight.
+          </p>
+          <h2>Why it exists</h2>
+          <p>
+            Most small businesses run on memory, paper notebooks, or chat messages.
+            Money goes missing, debts get forgotten, and stock counts never add up.
+            KopaBook replaces all of that with one simple app that works on the phone
+            already in your pocket.
+          </p>
+          <h2>What it is, and what it is not</h2>
+          <p>
+            KopaBook is a <strong>record keeper, not a payment processor</strong>. It never
+            touches your money. Every payment in the app is a record of money that changed
+            hands outside it, through cash, bank transfer, or POS. There is no gateway,
+            no wallet, no card charging. Your money stays yours.
+          </p>
+          <h2>Built for the real world</h2>
+          <ul>
+            <li><strong>Worldwide.</strong> Your country, currency, and timezone, set at signup and changeable anytime.</li>
+            <li><strong>Any business type.</strong> Hotels get rooms and folios. Restaurants, pharmacies, salons, and artisans each get a workspace shaped for them.</li>
+            <li><strong>Staff that fits.</strong> Partners, managers, cashiers, storekeepers, accountants, attendants, and hotel roles, each seeing only their own workspace.</li>
+            <li><strong>WhatsApp friendly.</strong> Share receipts, debt reminders, and promos straight to WhatsApp.</li>
+            <li><strong>Free core.</strong> Recording sales is free and always will be. Limits never block you from recording a sale.</li>
+          </ul>
+          <h2>Who builds it</h2>
+          <p>
+            KopaBook is built by <strong>FVA70K Services</strong>, founded by Fortune Godson.
+            It is designed with real merchants, for real merchants, one honest feature at a time.
+          </p>
+          <div style={{ marginTop: 32 }}>
+            <a href="/waitlist" className="btn btn-primary">Join the waitlist</a>{" "}
+            <a href="/faq" className="btn btn-secondary">Read the FAQ</a>
+          </div>
+        </div>
+      </section>
+      <MFooter />
+    </div>
+  );
+}
+
+const FAQS = [
+  {
+    q: "What is KopaBook?",
+    a: "KopaBook is a free record-keeping app for small businesses. It records your sales, tracks stock, manages customer debts, logs expenses, and shows you how the business is doing, all from your phone.",
+  },
+  {
+    q: "Does KopaBook take or process payments?",
+    a: "No. KopaBook never touches your money. Every payment in the app is a record of money exchanged outside it, through cash, bank transfer, or POS terminal. There is no payment gateway and no card charging.",
+  },
+  {
+    q: "Is it really free?",
+    a: "The core record keeping is free: record sales, manage stock, track debts, and add staff. Paid plans exist for larger teams and higher volumes, but the free tier never blocks you from recording a sale.",
+  },
+  {
+    q: "Which countries does it work in?",
+    a: "KopaBook is built to be usable worldwide. You set your country, currency, and timezone at signup, and money shows in your own currency with dates in your own timezone.",
+  },
+  {
+    q: "What types of business can use it?",
+    a: "Shops, supermarkets, pharmacies, restaurants, hotels, salons, fashion stores, electronics shops, artisans, and more. Hotels get rooms, bookings, and guest folios. Every type gets a workspace shaped for how it works.",
+  },
+  {
+    q: "Can my staff use it?",
+    a: "Yes. Invite staff by email and give each person a role: partner, manager, accountant, cashier, storekeeper, attendant, or hotel roles. Everyone signs in on the same login page, but each role sees only its own workspace. You can set discount limits, commissions, suspend access, or remove staff anytime.",
+  },
+  {
+    q: "What is a Partner?",
+    a: "A Partner is a co-owner with full access to the business, just like you. Only the true owner can invite a partner or change a partner's access, so your ownership is always protected.",
+  },
+  {
+    q: "Can I run more than one business?",
+    a: "Yes. One account can own and manage many businesses. Switch between them from the business switcher. Each business keeps its own staff, sales, stock, and records, completely separate.",
+  },
+  {
+    q: "How do customer debts work?",
+    a: "When a sale is not fully paid, the unpaid balance automatically becomes a debt on the customer's ledger. Customers can pay bit by bit, and every payment updates the running balance. If a customer overpays, the extra is shown as change to give back, never as negative debt.",
+  },
+  {
+    q: "How does stock control work?",
+    a: "Every product sale deducts stock instantly. You get low-stock alerts, a full movement history for each product, and manual adjustments are all recorded. Services are sold without touching stock.",
+  },
+  {
+    q: "Can I sell services, not just products?",
+    a: "Yes. Add services with a price per job or per hour, and record them in the same sale as products. Service sales never affect stock.",
+  },
+  {
+    q: "What is shipment tracking?",
+    a: "When you sell a product that needs to be shipped, generate a tracking number from the sale. Move it through pending, shipped, and delivered, and share the number with your customer.",
+  },
+  {
+    q: "Can I print receipts?",
+    a: "Yes. Every sale has a printable receipt formatted for 58mm and 80mm thermal printers. Add your business phone, address, and a custom footer in Settings.",
+  },
+  {
+    q: "Does it work with WhatsApp?",
+    a: "Yes. Share receipts, send debt reminders, and broadcast promos straight to WhatsApp. Every send opens WhatsApp with the message ready.",
+  },
+  {
+    q: "What happens if I void a sale?",
+    a: "Voiding a sale restores the stock, removes the payment records, and recomputes the customer's debt balance so later payments stay correct. Voids are logged in the activity trail.",
+  },
+  {
+    q: "Can I delete records?",
+    a: "Expenses and customers with no history can be deleted. Customers with sales or debt history are protected and cannot be deleted, so your books always stay consistent. Sales are voided rather than deleted, keeping the audit trail intact.",
+  },
+  {
+    q: "Can I close a business?",
+    a: "Yes. Owners can close a business from Settings. All records are kept, staff lose access, and you can reopen it anytime from the business switcher.",
+  },
+  {
+    q: "Is my data safe?",
+    a: "Passwords are hashed, sessions are secure, and sensitive actions are written to an audit log you can review. You can export a full backup of your data from Settings anytime.",
+  },
+  {
+    q: "How do I get started?",
+    a: "Join the waitlist, then register your business in minutes: name, business type, country, currency, and timezone. Add your products, invite your staff, and record your first sale.",
+  },
+];
+
+export function FaqPage() {
+  const [open, setOpen] = useState(-1);
+  return (
+    <div className="page">
+      <MNav />
+      <section className="section">
+        <div className="wrap narrow" style={{ margin: "0 auto" }}>
+          <span className="eyebrow">FAQ</span>
+          <h1>Questions, answered.</h1>
+          <p className="lead">Everything merchants ask about KopaBook, in one place.</p>
+          <div className="faq">
+            {FAQS.map((f, i) => (
+              <details key={i} open={open === i} onToggle={(e) => setOpen(e.target.open ? i : -1)}>
+                <summary>{f.q}</summary>
+                <p>{f.a}</p>
+              </details>
+            ))}
+          </div>
+          <div style={{ marginTop: 32, textAlign: "center" }}>
+            <a href="/waitlist" className="btn btn-primary">Join the waitlist</a>
+          </div>
+        </div>
+      </section>
       <MFooter />
     </div>
   );
