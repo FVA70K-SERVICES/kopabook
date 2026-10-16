@@ -209,6 +209,21 @@ export function PricingPage() {
               </ul>
               <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
             </div>
+            <div className="card price-card" style={{ border: "2px solid #7c3aed" }}>
+              <div className="tier">Solo <span style={{ fontSize: 12, background: "#7c3aed", color: "#fff", padding: "2px 8px", borderRadius: 12 }}>AI</span></div>
+              <div className="amount">{price("solo", "monthly", "NGN 5,000")}</div>
+              <p style={{ color: "var(--muted)" }}>Per month, or {price("solo", "yearly", "NGN 50,000")} per year (2 months free). Your AI business assistant.</p>
+              <ul>
+                <li>1 business</li>
+                <li>500 products and services</li>
+                <li>3 staff accounts</li>
+                <li>AI business copilot (Kopa Bot)</li>
+                <li>Smart briefings and reminders</li>
+                <li>Targets and goal tracking</li>
+                <li>Everything in Pro, for one business</li>
+              </ul>
+              <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
+            </div>
           </div>
           <div className="card" style={{ marginTop: 24 }}>
             <h3>How upgrading works</h3>
