@@ -100,7 +100,13 @@ export function LandingPage() {
             <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
               <iframe src="https://www.youtube.com/embed/nJeMpDLDKUo" title="KopaBook: How It Works - The Free Record Book for Your Business" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
             </div>
-            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Watch the full 3-minute tour of KopaBook.</p>
+            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Part 1: the full 3-minute tour of KopaBook.</p>
+          </div>
+          <div style={{ maxWidth: 760, margin: "0 auto 30px" }}>
+            <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
+              <iframe src="https://www.youtube.com/embed/ZlytQSNBwnk" title="KopaBook: How It Works Part 2 - Kopa Bot, Shipments, API and More" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
+            </div>
+            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Part 2: Kopa Bot, customers, shipments, the API and everything else, in 2 minutes.</p>
           </div>
           <div className="steps narrow" style={{ margin: "30px auto" }}>
             <div className="step"><div className="n">1</div><div><strong>Add your products once.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Name, price, opening stock. Done in minutes.</p></div></div>
