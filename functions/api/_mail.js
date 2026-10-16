@@ -79,23 +79,44 @@ export async function sendMail(env, { to, subject, html, text }) {
   return res.json().catch(() => ({}));
 }
 
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
 export function resetPasswordEmail({ resetUrl, businessName, userName }) {
   const subject = `Reset your KopaBook password`;
+  const name = userName && String(userName).trim() ? String(userName).trim() : "there";
+  const cleanBiz = businessName && String(businessName).trim() ? String(businessName).trim() : "";
+  // Never print "your KopaBook account at KopaBook" when the business name is just the app name.
+  const showBiz = cleanBiz && cleanBiz.toLowerCase() !== "kopabook";
+  const bizText = showBiz ? ` for ${cleanBiz}` : "";
+  const bizHtml = showBiz ? ` for <strong>${escapeHtml(cleanBiz)}</strong>` : "";
   const text =
-    `Hello ${userName || "there"},\n\n` +
-    `Someone asked to reset the password for your KopaBook account` +
-    `${businessName ? ` at ${businessName}` : ""}.\n\n` +
-    `Reset it here (valid for 1 hour, one-time use):\n${resetUrl}\n\n` +
-    `If you did not ask for this, just ignore this email.\n\n` +
-    `- KopaBook`;
+    `Hello ${name},\n\n` +
+    `Someone asked to reset the password for your KopaBook account${bizText}.\n\n` +
+    `Choose a new password here (works once, expires in 1 hour):\n${resetUrl}\n\n` +
+    `If you did not ask for this, just ignore this email. Your password will stay the same.\n\n` +
+    `- KopaBook\nkopabook.com`;
   const html = `
-    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
-      <h2 style="color: #166534;">Reset your KopaBook password</h2>
-      <p>Hello ${userName || "there"},</p>
-      <p>Someone asked to reset the password for your KopaBook account${businessName ? ` at <strong>${businessName}</strong>` : ""}.</p>
-      <p><a href="${resetUrl}" style="display: inline-block; background: #166534; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Reset password</a></p>
-      <p style="color: #666; font-size: 13px;">This link works once and expires in 1 hour. If you did not ask for this, just ignore this email.</p>
-      <p style="color: #666; font-size: 13px;">If the button does not work, copy this link:<br>${resetUrl}</p>
+    <div style="font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f3f6f3; padding: 32px 16px;">
+      <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e5e7eb;">
+        <div style="padding: 24px 24px 8px; text-align: center; border-bottom: 3px solid #166534;">
+          <img src="https://kopabook.com/logo.png" alt="KopaBook" width="170" style="display: block; margin: 0 auto; max-width: 170px;" />
+        </div>
+        <div style="padding: 24px 28px 8px;">
+          <h2 style="color: #14532d; margin: 0 0 12px; font-size: 20px;">Reset your password</h2>
+          <p style="color: #374151; font-size: 15px; line-height: 1.6; margin: 0 0 12px;">Hello ${escapeHtml(name)},</p>
+          <p style="color: #374151; font-size: 15px; line-height: 1.6; margin: 0 0 20px;">Someone asked to reset the password for your KopaBook account${bizHtml}. Tap the button below to choose a new one.</p>
+          <p style="text-align: center; margin: 0 0 20px;"><a href="${resetUrl}" style="display: inline-block; background: #166534; color: #ffffff; padding: 14px 36px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 16px;">Reset password</a></p>
+          <p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 10px;">This link works once and expires in 1 hour. If you did not ask for this, just ignore this email, your password will stay the same.</p>
+          <p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 20px; word-break: break-all;">Button not working? Copy this link:<br><a href="${resetUrl}" style="color: #166534;">${resetUrl}</a></p>
+        </div>
+        <div style="background: #f9fafb; padding: 16px 28px; border-top: 1px solid #e5e7eb;">
+          <p style="color: #9ca3af; font-size: 12px; margin: 0; line-height: 1.6;">KopaBook, the free record book for your business.<br><a href="https://kopabook.com" style="color: #166534;">kopabook.com</a></p>
+        </div>
+      </div>
     </div>`;
   return { subject, text, html };
 }
