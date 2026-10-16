@@ -6,6 +6,7 @@ import { DEFAULT_MEMORY } from './business-memory.js';
 import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY } from './kopabook-knowledge.js';
 import { handleOwnerCommand } from './bot-owner.js';
 import { handleFollowUp } from './bot-memory.js';
+import { getAIResponse, shouldUseAI } from './bot-ai.js';
 
 function getKopaBookResponse(message) {
   const lower = message.toLowerCase().trim();
@@ -129,6 +130,17 @@ export async function onRequestPost({ request, env }) {
         // Handle follow-ups ("yes", "no", "ok") using conversation context
         if (!result) {
           result = handleFollowUp(clean, recentMessages, siteConfig);
+          if (result) result.isFollowUp = true;
+        }
+
+        // Try AI brain for open conversation (thinks like Muse)
+        if (!result && shouldUseAI(clean, result)) {
+          try {
+            const aiResult = await getAIResponse(clean, {
+              env, siteConfig, ownerCtx, history: recentMessages
+            });
+            if (aiResult) result = aiResult;
+          } catch (e) {}
         }
 
         // Try order flow first, then booking flow, then knowledge
