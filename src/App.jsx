@@ -26,7 +26,7 @@ import StaffPage from "./pages/Staff";
 import SettingsPage from "./pages/Settings";
 import ActivityPage from "./pages/Activity";
 import AdminPage from "./pages/Admin";
-import { NAV_MODULES, modulesForRole } from "./lib/businessTypes";
+import { NAV_MODULES, modulesForRole, orgTypeFor } from "./lib/businessTypes";
 
 function useSession() {
   const [state, setState] = useState({ loading: true, session: null });
@@ -119,17 +119,25 @@ function AppRoute({ session }) {
     else if (path === "/app/admin") page = <AdminPage />;
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
     // Staff see only their role's workspace, even by direct link.
+    // Business types only see the modules that fit them, even by direct link
+    // (e.g. Hotels never opens for a provision store).
     const roleModules = modulesForRole(session.business?.role);
-    if (roleModules) {
-      const mod = NAV_MODULES[Object.keys(NAV_MODULES).find((p) => path === p || path.startsWith(p + "/")) || ""];
-      if (mod && !roleModules.includes(mod)) {
-        page = (
-          <div className="card">
-            <h2>Not available for your role</h2>
-            <p className="hint">Your role ({session.business?.role}) does not include this section. Ask the business owner if you need access.</p>
-          </div>
-        );
-      }
+    const org = orgTypeFor(session.business?.business_type);
+    const mod = NAV_MODULES[Object.keys(NAV_MODULES).find((p) => path === p || path.startsWith(p + "/")) || ""];
+    if (mod && roleModules && !roleModules.includes(mod)) {
+      page = (
+        <div className="card">
+          <h2>Not available for your role</h2>
+          <p className="hint">Your role ({session.business?.role}) does not include this section. Ask the business owner if you need access.</p>
+        </div>
+      );
+    } else if (mod && !org.modules.includes(mod)) {
+      page = (
+        <div className="card">
+          <h2>Not available for this business</h2>
+          <p className="hint">This section is not part of your business type.</p>
+        </div>
+      );
     }
     return <Layout session={session}>{page}</Layout>;
   }

@@ -68,8 +68,8 @@ export const ORG_TYPES = [
     key: "other",
     label: "Other Business",
     icon: "🏢",
-    tagline: "The full KopaBook toolkit, everything on.",
-    modules: ["dashboard", "sales", "services", "products", "suppliers", "import", "customers", "hotels", "debts", "expenses", "messages", "reports", "staff", "activity", "settings"],
+    tagline: "The full KopaBook toolkit for general businesses.",
+    modules: ["dashboard", "sales", "services", "products", "suppliers", "import", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "settings"],
   },
 ];
 
