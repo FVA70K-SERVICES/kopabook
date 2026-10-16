@@ -128,16 +128,20 @@ export function formatPrice(amount, currency) {
 // small drift is acceptable at these amounts.
 export const NGN_PER_USD = 1550;
 
+// Crypto payments carry a $2 minimum to cover blockchain network charges.
+export const CRYPTO_MIN_USD_CENTS = 200;
+
 // Crypto price in USD cents for any country. Nigerian NGN prices are
 // converted at NGN_PER_USD so Nigerians can also pay with crypto.
+// The $2 minimum applies to every crypto payment.
 export function getCryptoPriceUsdCents(tier, cycle, country) {
   const price = getPrice(tier, cycle, country);
   if (!price) return null;
-  if (price.currency === "USD") return { usdCents: Math.round(Number(price.amount)) };
-  if (price.currency === "NGN") {
-    return { usdCents: Math.max(1, Math.round(Number(price.amount) / NGN_PER_USD)) };
-  }
-  return null;
+  let usdCents;
+  if (price.currency === "USD") usdCents = Math.round(Number(price.amount));
+  else if (price.currency === "NGN") usdCents = Math.max(1, Math.round(Number(price.amount) / NGN_PER_USD));
+  else return null;
+  return { usdCents: Math.max(CRYPTO_MIN_USD_CENTS, usdCents) };
 }
 
 // The user's country for pricing. Read from their first business

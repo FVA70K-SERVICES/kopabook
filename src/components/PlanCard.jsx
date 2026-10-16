@@ -265,7 +265,7 @@ export default function PlanCard() {
       <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
         {method === "card"
           ? "Secure card payment by Paystack. Your plan activates immediately after payment."
-          : "Crypto payments (USDT on Tron, BTC on Bitcoin) are verified on the blockchain before activation."}
+          : "Crypto payments (USDT on Tron, BTC on Bitcoin) are verified on the blockchain before activation. $2 minimum per crypto payment (covers network charges)."}
       </p>
     </div>
   );
