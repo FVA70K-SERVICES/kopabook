@@ -155,8 +155,19 @@ export function FeaturesPage() {
 
 export function PricingPage() {
   const [prices, setPrices] = useState(null);
+  const [country, setCountry] = useState("");
   useEffect(() => {
-    fetch("/api/plans").then((r) => r.json()).then((d) => setPrices(d.plans || {})).catch(() => {});
+    // Detect country from browser locale, default to Nigeria
+    const locale = navigator.language || "en-NG";
+    const region = locale.split("-")[1]?.toUpperCase() || "NG";
+    const regionToCountry = {
+      NG: "Nigeria", GH: "Ghana", KE: "Kenya", ZA: "South Africa", GB: "United Kingdom",
+      US: "United States", CA: "Canada", IN: "India", AE: "UAE",
+    };
+    const detected = regionToCountry[region] || "United States";
+    setCountry(detected);
+    fetch(`/api/plans?country=${encodeURIComponent(detected)}`)
+      .then((r) => r.json()).then((d) => setPrices(d.plans || {})).catch(() => {});
   }, []);
   const price = (tier, cycle, fallback) =>
     prices?.[tier]?.[cycle]?.label || fallback;
@@ -225,11 +236,16 @@ export function PricingPage() {
               <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
             </div>
           </div>
+          {country && (
+            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 16, fontSize: 14 }}>
+              Prices shown for {country}. Fair pricing adjusted for your economy.
+            </p>
+          )}
           <div className="card" style={{ marginTop: 24 }}>
             <h3>How upgrading works</h3>
             <p style={{ color: "var(--muted)" }}>
               When you hit a free limit, upgrade from your settings in one tap and pay securely with
-              Paystack. Monthly or yearly billing, your choice. Your new limits turn on immediately
+              Paystack or crypto (USDT/BTC). Monthly or yearly billing, your choice. Your new limits turn on immediately
               after payment. Recording a sale is never blocked, on any plan.
             </p>
           </div>

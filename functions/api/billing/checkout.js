@@ -1,8 +1,9 @@
 // POST /api/billing/checkout — start a Paystack payment for a tier + billing cycle.
-// Prices come from the subscription_plans table (editable in the admin panel).
+// Prices use country-adjusted PPP pricing based on the user's business country.
 // Returns the Paystack authorization URL; the user pays there, then returns.
 import { json, getAuthContext, requireAuth } from "../_utils";
 import { LIMITS } from "../billing";
+import { getPrice } from "../_pricing";
 
 export async function onRequestPost(context) {
   try {
@@ -23,21 +24,26 @@ export async function onRequestPost(context) {
     }
 
     const db = context.env.KOPABOOK_DB;
-    const plan = await db.prepare(
-      `SELECT amount_kobo, currency FROM subscription_plans
-       WHERE tier = ? AND billing_cycle = ? AND active = 1 LIMIT 1`
-    ).bind(tier, cycle).first();
-    if (!plan) {
+
+    // Get user's country for localized pricing
+    const user = await db.prepare(
+      `SELECT country FROM users WHERE id = ? LIMIT 1`
+    ).bind(auth.user.id).first();
+    const userCountry = user?.country || "Nigeria";
+
+    const price = getPrice(tier, cycle, userCountry);
+    if (!price) {
       return json({ ok: false, message: "This plan is not available right now." }, 400);
     }
 
-    const amount = Number(plan.amount_kobo);
+    const amount = Number(price.amount);
+    const currency = price.currency;
     const reference = `kopa_${auth.user.id}_${Date.now()}`;
 
     await db.prepare(
-      `INSERT INTO subscription_payments (user_id, tier, billing_cycle, amount_kobo, paystack_reference, status)
-       VALUES (?, ?, ?, ?, ?, 'pending')`
-    ).bind(auth.user.id, tier, cycle, amount, reference).run();
+      `INSERT INTO subscription_payments (user_id, tier, billing_cycle, amount_kobo, paystack_reference, status, currency, country)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
+    ).bind(auth.user.id, tier, cycle, amount, reference, currency, userCountry).run();
 
     const origin = new URL(context.request.url).origin;
     const psRes = await fetch("https://api.paystack.co/transaction/initialize", {
@@ -50,9 +56,9 @@ export async function onRequestPost(context) {
         email: auth.user.email,
         amount,
         reference,
-        currency: plan.currency || "NGN",
+        currency,
         callback_url: `${origin}/app/settings?payment=${reference}`,
-        metadata: { user_id: auth.user.id, tier, billing_cycle: cycle },
+        metadata: { user_id: auth.user.id, tier, billing_cycle: cycle, country: userCountry },
       }),
     });
     const psData = await psRes.json().catch(() => ({}));
