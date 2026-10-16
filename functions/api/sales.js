@@ -275,6 +275,6 @@ export async function onRequestPost(context) {
     await audit(context, auth, "sale.create", "sale", saleId, { saleNumber, total: subtotal });
     return json({ ok: true, saleId, saleNumber, total: subtotal, paid, change, balanceDue }, 201);
   } catch (error) {
-    return json({ ok: false, message: "Could not record sale.", error: String(error) }, 500);
+    return json({ ok: false, message: "Could not record sale: " + String(error && error.message || error), error: String(error) }, 500);
   }
 }
