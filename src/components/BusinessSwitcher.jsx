@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { ORG_TYPES } from "../lib/businessTypes";
+import { ORG_TYPES, WORLD_CURRENCIES, COUNTRIES, WORLD_TIMEZONES } from "../lib/businessTypes";
 
 // Business switcher: one account, many companies. Shows the active business,
 // lets the owner jump between theirs and register a new one.
@@ -11,6 +11,12 @@ export default function BusinessSwitcher({ session, collapsed }) {
   const [name, setName] = useState("");
   const [orgKey, setOrgKey] = useState("other");
   const [customType, setCustomType] = useState("");
+  const [country, setCountry] = useState("Nigeria");
+  const [currency, setCurrency] = useState("NGN");
+  const [timezone, setTimezone] = useState(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Lagos"; }
+    catch { return "Africa/Lagos"; }
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -41,6 +47,7 @@ export default function BusinessSwitcher({ session, collapsed }) {
       await api.post("/api/businesses", {
         name: name.trim(), businessType: orgKey,
         customType: orgKey === "other" ? customType.trim() : undefined,
+        country, currency, timezone,
       });
       window.location.href = "/app/dashboard";
     } catch (err) { setError(err.message); }
@@ -130,6 +137,17 @@ export default function BusinessSwitcher({ session, collapsed }) {
               {orgKey === "other" && (
                 <div className="field"><label>Describe it (optional)</label><input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="e.g. Logistics company" /></div>
               )}
+              <div className="field"><div className="row2">
+                <div><label>Country</label><select value={country} onChange={(e) => setCountry(e.target.value)}>
+                  {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select></div>
+                <div><label>Currency</label><select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                  {WORLD_CURRENCIES.map(([code, cname]) => <option key={code} value={code}>{code} — {cname}</option>)}
+                </select></div>
+              </div></div>
+              <div className="field"><label>Timezone</label><select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                {WORLD_TIMEZONES.map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+              </select></div>
               <button className="btn btn-primary btn-block" disabled={saving}>{saving ? "Creating..." : "Create business"}</button>
               <button type="button" className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => setShowNew(false)}>Cancel</button>
             </form>

@@ -17,7 +17,9 @@ const ACTION_LABELS = {
   "hotel.booking": "Booking made", "hotel.checkin": "Guest checked in", "hotel.checkout": "Guest checked out",
   "hotel.room": "Room changed", "hotel.folio": "Folio charge/payment",
   "business.update": "Business settings changed",
+  "business.create": "Business created",
   "business.close": "Business closed", "business.reopen": "Business reopened",
+  "shipment.create": "Tracking number generated", "shipment.status": "Shipment status updated",
   "auth.login": "Signed in", "auth.password_reset": "Password reset",
 };
 
