@@ -24,7 +24,7 @@ function getKopaBookResponse(message) {
 async function getSiteMemory(env, siteId) {
   // KopaBook uses built-in knowledge
   if (siteId === 'kopabook') {
-    return { memory: { ...KOPABOOK_MEMORY }, plan: 'scale', botEnabled: true, isKopaBook: true };
+    return { memory: { ...KOPABOOK_MEMORY }, plan: 'internal', botEnabled: true, isKopaBook: true };
   }
   // Try to load from D1
   try {

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS chat_sites (
   bot_enabled INTEGER DEFAULT 1,
   welcome_message TEXT,
   brand_color TEXT DEFAULT '#15803d',
-  plan TEXT DEFAULT 'scale',
+  plan TEXT DEFAULT 'internal',
   memory_json TEXT,
   created_at INTEGER NOT NULL,
   status TEXT DEFAULT 'active'
@@ -64,6 +64,6 @@ VALUES (
   'Kopa Bot',
   'Hello! I''m Kopa Bot. Ask me about KopaBook features, pricing, or how to get started!',
   '#15803d',
-  'scale',
+  'internal',
   strftime('%s', 'now') * 1000
 );

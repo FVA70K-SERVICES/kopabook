@@ -62,6 +62,27 @@ export const FVACHAT_PLANS = {
     customBranding: true,
     priority: true
   },
+  internal: {
+    name: 'Internal',
+    price: 0,
+    currency: 'NGN',
+    priceDisplay: 'Internal - unlimited',
+    conversations: -1,        // unlimited
+    sites: -1,                // unlimited
+    features: [
+      'Unlimited conversations',
+      'Unlimited websites',
+      'All features unlocked',
+      'Order taking',
+      'Booking system',
+      'Priority support',
+      'No limits, permanent'
+    ],
+    ordering: true,
+    booking: true,
+    customBranding: true,
+    priority: true
+  }
   scale: {
     name: 'Scale',
     price: 7500,
@@ -90,6 +111,27 @@ export const FVACHAT_PLANS_USD = {
   free: { ...FVACHAT_PLANS.free, priceDisplay: 'Free forever' },
   starter: { ...FVACHAT_PLANS.starter, price: 2, priceDisplay: '$2/month' },
   growth: { ...FVACHAT_PLANS.growth, price: 5, priceDisplay: '$5/month' },
+  internal: {
+    name: 'Internal',
+    price: 0,
+    currency: 'NGN',
+    priceDisplay: 'Internal - unlimited',
+    conversations: -1,        // unlimited
+    sites: -1,                // unlimited
+    features: [
+      'Unlimited conversations',
+      'Unlimited websites',
+      'All features unlocked',
+      'Order taking',
+      'Booking system',
+      'Priority support',
+      'No limits, permanent'
+    ],
+    ordering: true,
+    booking: true,
+    customBranding: true,
+    priority: true
+  }
   scale: { ...FVACHAT_PLANS.scale, price: 10, priceDisplay: '$10/month' }
 };
 
