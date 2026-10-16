@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import Logo from "../components/Logo";
 
 function LegalShell({ title, updated, children }) {
   useEffect(() => { window.scrollTo(0, 0); }, []);
@@ -6,7 +7,7 @@ function LegalShell({ title, updated, children }) {
     <div className="page">
       <nav className="mnav">
         <div className="wrap" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <a href="/" className="brand">Kopa<span>Book</span></a>
+          <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
           <a href="/pricing" className="btn btn-secondary btn-sm">Back to site</a>
         </div>
       </nav>

@@ -2,23 +2,36 @@ import { useState, useEffect } from "react";
 import { api, nav } from "../lib/api";
 import { COUNTRIES } from "../lib/businessTypes";
 import ThemeToggle from "../components/ThemeToggle";
+import Logo from "../components/Logo";
 
 function MNav() {
+  const [open, setOpen] = useState(false);
+  const links = [
+    ["Features", "/features"],
+    ["Hotels", "/hotels"],
+    ["Pricing", "/pricing"],
+    ["About", "/about"],
+    ["FAQ", "/faq"],
+  ];
   return (
     <header className="mnav">
       <div className="wrap mnav-inner">
-        <a href="/" className="brand">Kopa<span>Book</span></a>
+        <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
         <nav className="mnav-links">
-          <a href="/features" className="hide-m">Features</a>
-          <a href="/hotels" className="hide-m">Hotels</a>
-          <a href="/pricing" className="hide-m">Pricing</a>
-          <a href="/about" className="hide-m">About</a>
-          <a href="/faq" className="hide-m">FAQ</a>
-          <a href="/login">Sign in</a>
+          {links.map(([label, href]) => <a key={href} href={href} className="hide-m">{label}</a>)}
+          <a href="/login" className="hide-m">Sign in</a>
           <ThemeToggle />
-          <a href="/waitlist" className="btn btn-primary btn-sm">Join waitlist</a>
+          <a href="/waitlist" className="btn btn-primary btn-sm hide-m">Join waitlist</a>
+          <button className="mnav-menu-btn" onClick={() => setOpen(!open)} aria-label="Open menu" aria-expanded={open}>☰</button>
         </nav>
       </div>
+      {open && (
+        <nav className="mnav-dropdown" aria-label="Mobile menu">
+          {links.map(([label, href]) => <a key={href} href={href} onClick={() => setOpen(false)}>{label}</a>)}
+          <a href="/login" onClick={() => setOpen(false)}>Sign in</a>
+          <a href="/waitlist" className="btn btn-primary" onClick={() => setOpen(false)}>Join waitlist</a>
+        </nav>
+      )}
     </header>
   );
 }
@@ -28,7 +41,7 @@ function MFooter() {
     <footer className="mfooter">
       <div className="wrap">
         <div>
-          <div className="brand">Kopa<span>Book</span></div>
+          <div className="brand"><Logo /></div>
           <p>Simple sales, stock and debt tracking for businesses everywhere.<br />Owned by Fortune Godson. Built by FVA70K Services.</p>
         </div>
         <div>

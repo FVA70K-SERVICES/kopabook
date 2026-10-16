@@ -68,7 +68,28 @@ a:hover { text-decoration: underline; }
 .brand span { color: var(--brand); }
 .mnav-links { display: flex; gap: 22px; align-items: center; }
 .mnav-links a { color: var(--ink); font-weight: 500; font-size: 15px; }
-@media (max-width: 720px) { .mnav-links a.hide-m { display: none; } }
+.brand-logo { height: 38px; width: auto; display: block; border-radius: 8px; }
+.mfooter .brand-logo { height: 42px; }
+.sidebar .brand-logo { background: #fff; padding: 4px 10px; height: 32px; }
+[data-theme="dark"] .mnav .brand-logo { background: #fff; padding: 4px 10px; height: 32px; }
+.mnav-menu-btn {
+  display: none; background: none; border: 1px solid var(--line); border-radius: 10px;
+  font-size: 20px; line-height: 1; padding: 7px 12px; cursor: pointer; color: var(--ink);
+}
+.mnav-dropdown { display: none; }
+@media (max-width: 860px) {
+  .mnav-links a.hide-m, .mnav-links .btn.hide-m { display: none; }
+  .mnav-menu-btn { display: inline-block; }
+  .mnav-dropdown {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 20px 16px; border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.98);
+  }
+  [data-theme="dark"] .mnav-dropdown { background: rgba(12, 19, 14, 0.98); }
+  .mnav-dropdown a { padding: 11px 4px; font-weight: 600; font-size: 16px; color: var(--ink); border-bottom: 1px solid var(--line); }
+  .mnav-dropdown a.btn { text-align: center; margin-top: 10px; border-bottom: 0; }
+  .brand-logo { height: 32px; }
+}
 
 /* ---------- buttons ---------- */
 .btn {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
 import { ORG_TYPES, WORLD_CURRENCIES, COUNTRIES } from "../lib/businessTypes";
+import Logo from "../components/Logo";
 
 export default function RegisterPage({ preset }) {
   const [orgKey, setOrgKey] = useState(preset || "");
@@ -45,7 +46,7 @@ export default function RegisterPage({ preset }) {
     <div className="page" style={{ background: "var(--bg)" }}>
       <div className="wrap">
         <div style={{ textAlign: "center", marginTop: 40 }}>
-          <a href="/" className="brand">Kopa<span>Book</span></a>
+          <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
         </div>
 
         {!orgKey ? (

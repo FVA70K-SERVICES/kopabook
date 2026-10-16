@@ -5,6 +5,7 @@ import BusinessSwitcher from "./BusinessSwitcher";
 import SyncStatus from "./SyncStatus.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import UsageMeter, { UpgradeNudge } from "./UsageMeter.jsx";
+import Logo from "./Logo.jsx";
 
 const ALL_LINKS = [
   { to: "/app/dashboard", label: "Dashboard", icon: "📊" },
@@ -70,7 +71,7 @@ export default function Layout({ session, children }) {
     <div className="app">
       <aside className={"sidebar" + (open ? " open" : "") + (collapsed ? " collapsed" : "")}>
         <div className="brand-row">
-          <div className="brand">{collapsed ? "K" : <>Kopa<span>Book</span></>}</div>
+          <div className="brand">{collapsed ? "K" : <Logo />}</div>
           <button className="collapse-btn" onClick={toggleCollapse}
             aria-label={collapsed ? "Expand menu" : "Hide menu"}
             title={collapsed ? "Expand menu" : "Hide menu"}>

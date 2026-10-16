@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
+import Logo from "../components/Logo";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
@@ -22,7 +23,7 @@ export function LoginPage() {
     <div className="page" style={{ background: "var(--bg)" }}>
       <div className="wrap">
         <div style={{ textAlign: "center", marginTop: 40 }}>
-          <a href="/" className="brand">Kopa<span>Book</span></a>
+          <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
         </div>
         <div className="form-card">
           <h1>Welcome back</h1>
@@ -71,7 +72,7 @@ export function OwnerSetupPage() {
     <div className="page" style={{ background: "var(--bg)" }}>
       <div className="wrap">
         <div style={{ textAlign: "center", marginTop: 40 }}>
-          <a href="/" className="brand">Kopa<span>Book</span></a>
+          <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
         </div>
         <div className="form-card">
           <h1>Set up your business</h1>
@@ -122,7 +123,7 @@ export function ForgotPasswordPage() {
     <div className="page" style={{ background: "var(--bg)" }}>
       <div className="wrap">
         <div style={{ textAlign: "center", marginTop: 40 }}>
-          <a href="/" className="brand">Kopa<span>Book</span></a>
+          <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
         </div>
         <div className="form-card">
           <h1>Reset password</h1>
@@ -173,7 +174,7 @@ export function ResetPasswordPage() {
     <div className="page" style={{ background: "var(--bg)" }}>
       <div className="wrap">
         <div style={{ textAlign: "center", marginTop: 40 }}>
-          <a href="/" className="brand">Kopa<span>Book</span></a>
+          <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
         </div>
         <div className="form-card">
           <h1>Choose a new password</h1>
