@@ -82,7 +82,7 @@ export const FVACHAT_PLANS = {
     booking: true,
     customBranding: true,
     priority: true
-  }
+  },
   scale: {
     name: 'Scale',
     price: 7500,
@@ -131,7 +131,7 @@ export const FVACHAT_PLANS_USD = {
     booking: true,
     customBranding: true,
     priority: true
-  }
+  },
   scale: { ...FVACHAT_PLANS.scale, price: 10, priceDisplay: '$10/month' }
 };
 
