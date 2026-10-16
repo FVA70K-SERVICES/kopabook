@@ -156,53 +156,63 @@ export function PricingPage() {
       <section className="section">
         <div className="wrap">
           <h2>Simple pricing</h2>
-          <p className="sub">Start free. Upgrade when your business grows. No payment collection yet, join the waitlist and we will notify you at launch.</p>
+          <p className="sub">Start free. Upgrade when your business grows. Recording a sale is always free and never blocked, on any plan.</p>
           <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
             <div className="card price-card" style={{ border: "2px solid var(--brand)" }}>
               <div className="tier">Free</div>
               <div className="amount">Free</div>
               <p style={{ color: "var(--muted)" }}>Always free. For solo merchants getting organised.</p>
               <ul>
-                <li>100 sales per week</li>
-                <li>100 products</li>
-                <li>1 branch</li>
-                <li>2 staff accounts</li>
+                <li>2 businesses</li>
+                <li>100 sales per week, per business</li>
+                <li>100 products and services, per business</li>
+                <li>2 staff accounts, per business</li>
+                <li>Sales, stock, debts, expenses, receipts</li>
               </ul>
-              <a href="/waitlist" className="btn btn-primary btn-block">Get started</a>
+              <a href="/register" className="btn btn-primary btn-block">Get started</a>
             </div>
             <div className="card price-card">
               <div className="tier">Starter</div>
               <div className="amount">NGN 1,000</div>
               <p style={{ color: "var(--muted)" }}>Per month. For growing shops with attendants.</p>
               <ul>
-                <li>1,000 sales per week</li>
-                <li>1,000 products</li>
-                <li>5 staff accounts</li>
-                <li>WhatsApp auto reminders</li>
+                <li>5 businesses</li>
+                <li>1,000 sales per week, per business</li>
+                <li>1,000 products and services, per business</li>
+                <li>5 staff accounts, per business</li>
+                <li>WhatsApp debt reminders</li>
                 <li>CSV import</li>
               </ul>
-              <a href="/waitlist" className="btn btn-secondary btn-block">Join waitlist</a>
+              <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
             </div>
             <div className="card price-card">
               <div className="tier">Pro</div>
               <div className="amount">NGN 2,500</div>
-              <p style={{ color: "var(--muted)" }}>Per month. For bigger businesses with branches.</p>
+              <p style={{ color: "var(--muted)" }}>Per month. For bigger businesses running multiple shops.</p>
               <ul>
+                <li>Unlimited businesses</li>
                 <li>Unlimited sales and products</li>
-                <li>3 branches</li>
                 <li>Unlimited staff accounts</li>
-                <li>Supplier verification</li>
+                <li>Shipment tracking</li>
+                <li>Hotel operations</li>
                 <li>Advanced reports</li>
               </ul>
-              <a href="/waitlist" className="btn btn-secondary btn-block">Join waitlist</a>
+              <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
             </div>
+          </div>
+          <div className="card" style={{ marginTop: 24 }}>
+            <h3>How upgrading works</h3>
+            <p style={{ color: "var(--muted)" }}>
+              KopaBook never takes money inside the app. When you hit a free limit, tap upgrade in your
+              settings and we will reach you on WhatsApp to arrange payment by bank transfer.
+              Your new limits turn on as soon as payment is confirmed. Sales recording is never blocked, on any plan.
+            </p>
           </div>
           <div className="card" style={{ marginTop: 24 }}>
             <h3>Add-ons, billed separately</h3>
             <p style={{ color: "var(--muted)" }}>Optional extras on top of any plan.</p>
             <ul>
-              <li>WhatsApp chatbot: billed per conversation at the Meta rate, zero markup.</li>
-              <li>Extra branch: NGN 500 per month, per branch.</li>
+              <li>Extra business on Starter: NGN 500 per month, per business.</li>
               <li>Custom domain: at cost.</li>
             </ul>
           </div>
