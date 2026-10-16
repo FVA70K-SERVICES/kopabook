@@ -1,6 +1,6 @@
-// POST /api/billing/webhook — Paystack event webhook.
+// POST /api/paystack/webhook — Paystack event webhook.
 // Paystack signs every event with HMAC SHA512 of the raw body using the secret key.
-// Configure this URL in the Paystack dashboard: https://kopabook-bop.pages.dev/api/billing/webhook
+// Configure this URL in the Paystack dashboard: https://kopabook-bop.pages.dev/api/paystack/webhook
 import { activateSubscription } from "./verify";
 
 export async function onRequestPost(context) {
@@ -29,14 +29,16 @@ export async function onRequestPost(context) {
       const tier = String(meta.tier || "");
       const cycle = String(meta.billing_cycle || "monthly");
       if (userId && (tier === "starter" || tier === "pro")) {
-        // Only activate if the amount matches a logged payment for this user.
-        const payment = await db.prepare(
-          `SELECT * FROM subscription_payments
-           WHERE user_id = ? AND tier = ? AND billing_cycle = ? AND status != 'paid'
-           ORDER BY id DESC LIMIT 1`
-        ).bind(userId, tier, cycle).first();
-        if (payment && Number(data.amount) === Number(payment.amount_kobo)) {
-          await activateSubscription(db, userId, tier, cycle, data);
+        // Match the exact payment by Paystack reference, not just the latest pending.
+        const reference = String(data.reference || "");
+        const payment = reference
+          ? await db.prepare(
+              `SELECT * FROM subscription_payments
+               WHERE paystack_reference = ? AND status != 'paid' LIMIT 1`
+            ).bind(reference).first()
+          : null;
+        if (payment && Number(payment.user_id) === userId && Number(data.amount) === Number(payment.amount_kobo)) {
+          await activateSubscription(db, userId, tier, cycle, data, reference);
         }
       }
     }

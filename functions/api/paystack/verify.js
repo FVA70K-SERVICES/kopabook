@@ -1,4 +1,4 @@
-// GET /api/billing/verify?reference=xxx — confirm a Paystack payment and activate the tier.
+// GET /api/paystack/verify?reference=xxx — confirm a Paystack payment and activate the tier.
 // Called when the user returns from Paystack; the webhook also activates independently.
 import { json, getAuthContext, requireAuth } from "../_utils";
 
@@ -6,7 +6,7 @@ function toSqlite(d) {
   return d.toISOString().slice(0, 19).replace("T", " ");
 }
 
-export async function activateSubscription(db, userId, tier, cycle, psData) {
+export async function activateSubscription(db, userId, tier, cycle, psData, reference) {
   const now = new Date();
   const end = new Date(now);
   if (cycle === "yearly") end.setFullYear(end.getFullYear() + 1);
@@ -25,11 +25,14 @@ export async function activateSubscription(db, userId, tier, cycle, psData) {
        current_period_end = excluded.current_period_end`
   ).bind(userId, tier, cycle, customerCode, toSqlite(now), toSqlite(now), toSqlite(end)).run();
 
-  await db.prepare(
-    `UPDATE subscription_payments SET status = 'paid', paid_at = ?,
-       paystack_customer_code = COALESCE(?, paystack_customer_code)
-     WHERE user_id = ? AND tier = ? AND status != 'paid'`
-  ).bind(toSqlite(now), customerCode, userId, tier).run();
+  // Mark only the specific payment as paid, by its Paystack reference.
+  if (reference) {
+    await db.prepare(
+      `UPDATE subscription_payments SET status = 'paid', paid_at = ?,
+         paystack_customer_code = COALESCE(?, paystack_customer_code)
+       WHERE paystack_reference = ? AND status != 'paid'`
+    ).bind(toSqlite(now), customerCode, reference).run();
+  }
 }
 
 export async function onRequestGet(context) {
@@ -67,7 +70,7 @@ export async function onRequestGet(context) {
       return json({ ok: false, message: "Payment amount mismatch. Contact support." }, 402);
     }
 
-    await activateSubscription(db, auth.user.id, payment.tier, payment.billing_cycle, psData.data);
+    await activateSubscription(db, auth.user.id, payment.tier, payment.billing_cycle, psData.data, reference);
     return json({ ok: true, tier: payment.tier, message: `Your ${payment.tier} plan is now active.` });
   } catch (error) {
     return json({ ok: false, message: "Could not verify the payment.", error: String(error) }, 500);
