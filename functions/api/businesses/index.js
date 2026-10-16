@@ -1,6 +1,7 @@
 // /api/businesses — GET list my businesses, POST create a new one.
 // One owner account can own and switch between many businesses.
 import { json, getAuthContext, requireAuth, toSqliteDate, audit } from "../_utils";
+import { LIMITS, TIER_NAMES, getAccountTier } from "../billing";
 
 const DEFAULT_MODES = [
   ["Cash", 1],
@@ -45,6 +46,23 @@ export async function onRequestPost(context) {
 
     const db = context.env.KOPABOOK_DB;
     const now = toSqliteDate();
+
+    // Tier limit: a free account can create 2 businesses, then must upgrade.
+    const { tier } = await getAccountTier(db, auth.user.id);
+    const maxBiz = LIMITS[tier].businesses;
+    if (maxBiz !== null) {
+      const owned = await db.prepare(
+        `SELECT COUNT(*) AS n FROM businesses
+         WHERE owner_user_id = ? AND (status IS NULL OR status = 'active')`
+      ).bind(auth.user.id).first();
+      if (Number(owned && owned.n) >= maxBiz) {
+        return json({
+          ok: false,
+          upgradeRequired: true,
+          message: `Your ${TIER_NAMES[tier]} plan allows ${maxBiz} businesses. Upgrade to add more.`,
+        }, 403);
+      }
+    }
 
     const bizResult = await db.prepare(
       `INSERT INTO businesses (owner_user_id, name, business_type, custom_type, country, currency, timezone, plan_tier)

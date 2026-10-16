@@ -1,5 +1,6 @@
 // /api/products — GET list, POST create
 import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "./_utils";
+import { LIMITS, TIER_NAMES, getBusinessOwnerTier } from "./billing";
 
 export async function onRequestGet(context) {
   try {
@@ -43,6 +44,23 @@ export async function onRequestPost(context) {
 
     if (!name || unitPrice === undefined || unitPrice === null) {
       return json({ ok: false, message: "Product name and unit price are required." }, 400);
+    }
+
+    // Tier limit: free accounts get 100 products/services per business, then upgrade.
+    const { tier } = await getBusinessOwnerTier(context.env.KOPABOOK_DB, auth.business.id);
+    const maxProducts = LIMITS[tier].products;
+    if (maxProducts !== null) {
+      const count = await context.env.KOPABOOK_DB.prepare(
+        `SELECT (SELECT COUNT(*) FROM products WHERE business_id = ? AND is_active = 1)
+              + (SELECT COUNT(*) FROM services WHERE business_id = ? AND is_active = 1) AS n`
+      ).bind(auth.business.id, auth.business.id).first();
+      if (Number(count && count.n) >= maxProducts) {
+        return json({
+          ok: false,
+          upgradeRequired: true,
+          message: `Your ${TIER_NAMES[tier]} plan allows ${maxProducts} products and services per business. Upgrade to add more.`,
+        }, 403);
+      }
     }
     const price = Number(unitPrice);
     if (Number.isNaN(price) || price < 0) {

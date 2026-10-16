@@ -1,13 +1,38 @@
-// /api/billing — GET current tier, limits and usage; POST record an upgrade request.
-// Usage figures are informational only and are NEVER used to block recording a sale.
+// /api/billing — GET current account tier, limits and usage; POST request an upgrade.
+// Tiers are per account (one person), not per business. Usage figures are
+// informational only and are NEVER used to block recording a sale.
 import { json, getAuthContext, requireAuth, toSqliteDate } from "./_utils";
 
 // null = unlimited
-const LIMITS = {
-  free: { salesPerWeek: 100, products: 100, staff: 2, branches: 1 },
-  starter: { salesPerWeek: 1000, products: 1000, staff: 5, branches: 1 },
-  pro: { salesPerWeek: null, products: null, staff: null, branches: 3 },
+export const LIMITS = {
+  free: { businesses: 2, salesPerWeek: 100, products: 100, staff: 2 },
+  starter: { businesses: 5, salesPerWeek: 1000, products: 1000, staff: 5 },
+  pro: { businesses: null, salesPerWeek: null, products: null, staff: null },
 };
+
+export const TIER_NAMES = { free: "Free", starter: "Starter", pro: "Pro" };
+export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", pro: "NGN 2,500/month" };
+
+export async function getAccountTier(db, userId) {
+  const row = await db.prepare(
+    `SELECT tier, status FROM account_subscriptions WHERE user_id = ? LIMIT 1`
+  ).bind(userId).first();
+  const tier = row && LIMITS[row.tier] ? row.tier : "free";
+  // A pending upgrade keeps the old tier until payment is confirmed.
+  if (row && row.status === "pending") {
+    return { tier: "free", pendingTier: row.tier, status: "pending" };
+  }
+  return { tier, pendingTier: null, status: row ? row.status : "active" };
+}
+
+// Tier of the account that owns a business (staff act under the owner's plan).
+export async function getBusinessOwnerTier(db, businessId) {
+  const biz = await db.prepare(
+    `SELECT owner_user_id FROM businesses WHERE id = ? LIMIT 1`
+  ).bind(businessId).first();
+  if (!biz) return { tier: "free", pendingTier: null, status: "active" };
+  return getAccountTier(db, biz.owner_user_id);
+}
 
 // Monday 00:00 UTC of the current week. sales.created_at is stored in UTC
 // ("YYYY-MM-DD HH:MM:SS" via datetime('now')), so the week window must use
@@ -27,45 +52,39 @@ export async function onRequestGet(context) {
     if (denied) return denied;
 
     const db = context.env.KOPABOOK_DB;
-    const businessId = auth.business.id;
-
-    const sub = await db
-      .prepare(`SELECT tier, status FROM subscriptions WHERE business_id = ? LIMIT 1`)
-      .bind(businessId)
-      .first();
-    const tier = sub && LIMITS[sub.tier] ? sub.tier : "free";
+    const { tier, pendingTier, status } = await getAccountTier(db, auth.user.id);
     const limits = LIMITS[tier];
+    const businessId = auth.business.id;
 
     const weekStart = toSqliteDate(weekStartUtc());
 
-    const salesRow = await db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM sales WHERE business_id = ? AND created_at >= ?`
-      )
-      .bind(businessId, weekStart)
-      .first();
-    const productsRow = await db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM products WHERE business_id = ? AND is_active = 1`
-      )
-      .bind(businessId)
-      .first();
-    const staffRow = await db
-      .prepare(`SELECT COUNT(*) AS n FROM business_members WHERE business_id = ?`)
-      .bind(businessId)
-      .first();
+    const bizRow = await db.prepare(
+      `SELECT COUNT(*) AS n FROM businesses
+       WHERE owner_user_id = ? AND (status IS NULL OR status = 'active')`
+    ).bind(auth.user.id).first();
+    const salesRow = await db.prepare(
+      `SELECT COUNT(*) AS n FROM sales WHERE business_id = ? AND created_at >= ?`
+    ).bind(businessId, weekStart).first();
+    const productsRow = await db.prepare(
+      `SELECT COUNT(*) AS n FROM products WHERE business_id = ? AND is_active = 1`
+    ).bind(businessId).first();
+    const staffRow = await db.prepare(
+      `SELECT COUNT(*) AS n FROM business_members WHERE business_id = ?`
+    ).bind(businessId).first();
 
     return json({
       ok: true,
       tier,
-      status: sub ? sub.status : "active",
+      tierName: TIER_NAMES[tier],
+      price: TIER_PRICES[tier],
+      status,
+      pendingTier,
       limits,
       usage: {
+        businesses: bizRow ? bizRow.n : 0,
         salesThisWeek: salesRow ? salesRow.n : 0,
         products: productsRow ? productsRow.n : 0,
         staff: staffRow ? staffRow.n : 0,
-        // v1 ships single-branch only; branches stays 1 until the multi-branch build lands.
-        branches: 1,
       },
       weekStart,
     });
@@ -82,9 +101,6 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
-    if (auth.business.role !== "owner") {
-      return json({ ok: false, message: "Only the owner can change the plan." }, 403);
-    }
 
     const body = await context.request.json().catch(() => ({}));
     const tier = String(body.tier || "").toLowerCase();
@@ -92,23 +108,22 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "Pick a valid paid tier: starter or pro." }, 400);
     }
 
-    // Real payment comes later. For now the request is noted as pending and the
-    // merchant keeps their current tier until payment is confirmed manually.
+    // Real payment is arranged outside the app (KopaBook never processes money).
+    // The request is noted as pending; the account keeps its current tier until
+    // payment is confirmed and the tier is activated manually.
     const now = toSqliteDate();
     await context.env.KOPABOOK_DB.prepare(
-      `INSERT INTO subscriptions (business_id, tier, status, started_at)
+      `INSERT INTO account_subscriptions (user_id, tier, status, updated_at)
        VALUES (?, ?, 'pending', ?)
-       ON CONFLICT(business_id) DO UPDATE SET tier = excluded.tier, status = 'pending'`
-    )
-      .bind(auth.business.id, tier, now)
-      .run();
+       ON CONFLICT(user_id) DO UPDATE SET tier = excluded.tier, status = 'pending', updated_at = excluded.updated_at`
+    ).bind(auth.user.id, tier, now).run();
 
     return json({
       ok: true,
       tier,
       status: "pending",
       message:
-        "Upgrade request noted. We will contact you to complete payment before the new limits turn on.",
+        "Upgrade request noted. We will contact you on WhatsApp to complete payment, then your new limits turn on.",
     });
   } catch (error) {
     return json(

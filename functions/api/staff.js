@@ -1,5 +1,6 @@
 // /api/staff - GET list members, POST invite (owner/manager only)
 import { json, getAuthContext, requireAuth, hashPassword, audit, toSqliteDate } from "./_utils";
+import { LIMITS, TIER_NAMES, getBusinessOwnerTier } from "./billing";
 
 // Default permission flags per role. Partners are co-owners: full access.
 const ROLE_FLAGS = {
@@ -63,6 +64,22 @@ export async function onRequestPost(context) {
     // Risk control: only the original owner can create another partner.
     if (staffRole === "partner" && !isOwner) {
       return json({ ok: false, message: "Only the owner can invite a partner." }, 403);
+    }
+
+    // Tier limit: free accounts get 2 staff per business, then upgrade.
+    const { tier } = await getBusinessOwnerTier(context.env.KOPABOOK_DB, auth.business.id);
+    const maxStaff = LIMITS[tier].staff;
+    if (maxStaff !== null) {
+      const staffCount = await context.env.KOPABOOK_DB.prepare(
+        `SELECT COUNT(*) AS n FROM business_members WHERE business_id = ?`
+      ).bind(auth.business.id).first();
+      if (Number(staffCount && staffCount.n) >= maxStaff) {
+        return json({
+          ok: false,
+          upgradeRequired: true,
+          message: `Your ${TIER_NAMES[tier]} plan allows ${maxStaff} staff accounts per business. Upgrade to invite more.`,
+        }, 403);
+      }
     }
 
     // Sensible default permission flags per role. Partners are co-owners.
