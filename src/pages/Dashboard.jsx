@@ -27,9 +27,35 @@ export default function DashboardPage() {
       <div className="metric-grid">
         <div className="metric-card"><span>Sales today</span><strong>{fmt(m.todaySalesTotal)}</strong></div>
         <div className="metric-card"><span>Expenses today</span><strong>{fmt(m.todayExpensesTotal)}</strong></div>
-        <div className="metric-card bad"><span>Outstanding debt</span><strong>{fmt(m.outstandingDebtTotal)}</strong></div>
+        {Number(m.todayChangeGiven || 0) > 0 && (
+          <div className="metric-card"><span>Change given today</span><strong>{fmt(m.todayChangeGiven)}</strong></div>
+        )}
+        <div className="metric-card bad"><span>Owed to you</span><strong>{fmt(m.outstandingDebtTotal)}</strong></div>
         <div className="metric-card warn"><span>Low stock items</span><strong>{m.lowStockCount}</strong></div>
       </div>
+
+      {m.collectedByMethod && Object.keys(m.collectedByMethod).length > 0 && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <h3 style={{ marginTop: 0 }}>Money in today, by method</h3>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {Object.entries(m.collectedByMethod).map(([method, total]) => (
+              <li key={method} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                <span style={{ textTransform: "capitalize" }}>{method}</span>
+                <strong className="money">{fmt(total)}</strong>
+              </li>
+            ))}
+            {Number(m.todayChangeGiven || 0) > 0 && (
+              <li style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}>
+                <span>Given back as change</span>
+                <strong className="money" style={{ color: "var(--gold, #b45309)" }}>({fmt(m.todayChangeGiven)})</strong>
+              </li>
+            )}
+          </ul>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            Have: {fmt(m.todaySalesTotal)} collected · Haven't: {fmt(m.outstandingDebtTotal)} still owed by customers
+          </p>
+        </div>
+      )}
 
       <div className="dash-grid">
         <div className="card list-card">

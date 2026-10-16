@@ -195,8 +195,8 @@ export async function onRequestPost(context) {
     // just inserted by the statement above (nothing runs between them).
     stmts.push(
       db.prepare(
-        `INSERT INTO sales (business_id, staff_user_id, customer_id, sale_number, subtotal, total_amount, amount_paid, balance_due, payment_method, status)
-         VALUES (?, ?, ${createCustomer ? "last_insert_rowid()" : "?"}, ?, ?, ?, ?, ?, ?, 'completed')`
+        `INSERT INTO sales (business_id, staff_user_id, customer_id, sale_number, subtotal, total_amount, amount_paid, balance_due, payment_method, status, change_given)
+         VALUES (?, ?, ${createCustomer ? "last_insert_rowid()" : "?"}, ?, ?, ?, ?, ?, ?, 'completed', ?)`
       ).bind(
         auth.business.id,
         auth.user.id,
@@ -206,7 +206,8 @@ export async function onRequestPost(context) {
         subtotal,
         paid,
         balanceDue,
-        payments.length > 1 ? "Split" : payments.length === 1 ? payments[0].mode : paymentMethod || "cash"
+        payments.length > 1 ? "Split" : payments.length === 1 ? payments[0].mode : paymentMethod || "cash",
+        change
       )
     );
     const headerIdx = stmts.length - 1;

@@ -13,7 +13,8 @@ export async function onRequestGet(context) {
     // "Today" follows the business's own timezone, not server UTC.
     const day = businessDay(auth.business.timezone);
     const todaySales = await db.prepare(
-      `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count
+      `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count,
+              COALESCE(SUM(change_given), 0) AS changeGiven
        FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?`
     ).bind(bid, day.startUtc, day.endUtc).first();
 
@@ -55,15 +56,32 @@ export async function onRequestGet(context) {
        ORDER BY s.id DESC LIMIT 5`
     ).bind(bid).all();
 
+    // Money position: what came in today, by method, and what went back as change.
+    // "Have" = collected. "Haven't" = still owed (debts). Change = given back.
+    const byMethod = await db.prepare(
+      `SELECT pr.payment_method AS method, COALESCE(SUM(pr.amount), 0) AS total
+       FROM payment_records pr
+       INNER JOIN sales s ON s.id = pr.sale_id
+       WHERE pr.business_id = ? AND s.created_at >= ? AND s.created_at < ?
+       GROUP BY pr.payment_method`
+    ).bind(bid, day.startUtc, day.endUtc).all();
+    const collectedByMethod = {};
+    for (const r of byMethod.results || []) {
+      collectedByMethod[r.method || "cash"] = Number(r.total || 0);
+    }
+
     return json({
       ok: true,
       metrics: {
         todaySalesTotal: Number(todaySales?.total || 0),
         todaySalesCount: Number(todaySales?.count || 0),
+        todayChangeGiven: Number(todaySales?.changeGiven || 0),
         todayExpensesTotal: Number(todayExpenses?.total || 0),
         todayExpensesCount: Number(todayExpenses?.count || 0),
         outstandingDebtTotal: Math.round(outstandingDebt * 100) / 100,
         openDebtCount: openDebts,
+        collectedByMethod,
+        todayCashCollected: Math.round((collectedByMethod.cash || collectedByMethod.Cash || 0) * 100) / 100,
         lowStockCount: Number(lowStock?.count || 0),
         totalProducts: Number(products?.count || 0),
       },
