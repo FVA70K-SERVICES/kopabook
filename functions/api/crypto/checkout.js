@@ -4,6 +4,7 @@
 import { json, getAuthContext, requireAuth } from "../_utils";
 import { getPrice } from "../_pricing";
 import { LIMITS } from "../billing";
+import { checkRateLimit } from "../_webhook_security";
 
 function randomRef() {
   return "crypto_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -14,6 +15,12 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+
+    // Rate limit: max 3 crypto payment requests per user per hour
+    const rateKey = `crypto_${auth.user.id}`;
+    if (!checkRateLimit(rateKey, 3, 3600000)) {
+      return json({ ok: false, message: "Too many requests. Please try again later." }, 429);
+    }
 
     const body = await context.request.json().catch(() => ({}));
     const tier = String(body.tier || "").toLowerCase();

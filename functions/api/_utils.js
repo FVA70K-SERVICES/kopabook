@@ -252,6 +252,14 @@ export function requireAuth(auth) {
   return null;
 }
 
+// Platform admin gate (for Fortune only). Checks users.is_platform_admin.
+// Returns a 403 JSON response when denied, or null when allowed.
+export function requirePlatformAdmin(auth) {
+  if (!auth || !auth.user) return json({ ok: false, message: "Not signed in." }, 401);
+  if (!auth.user.isPlatformAdmin) return json({ ok: false, message: "Platform admin only." }, 403);
+  return null;
+}
+
 export function canManage(auth) {
   return auth.business.role === "owner" || auth.business.role === "manager";
 }

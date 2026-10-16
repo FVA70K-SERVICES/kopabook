@@ -4,12 +4,19 @@
 import { json, getAuthContext, requireAuth } from "../_utils";
 import { LIMITS } from "../billing";
 import { getPrice } from "../_pricing";
+import { checkRateLimit } from "../_webhook_security";
 
 export async function onRequestPost(context) {
   try {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+
+    // Rate limit: max 5 checkout attempts per user per hour (prevent payment spam)
+    const rateKey = `checkout_${auth.user.id}`;
+    if (!checkRateLimit(rateKey, 5, 3600000)) {
+      return json({ ok: false, message: "Too many payment attempts. Please try again later." }, 429);
+    }
 
     const body = await context.request.json().catch(() => ({}));
     const tier = String(body.tier || "").toLowerCase();
