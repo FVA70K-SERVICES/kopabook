@@ -89,12 +89,12 @@ function AppRoute({ session }) {
     if (!session) { nav("/login"); return null; }
     let page = <DashboardPage />;
     if (path === "/app/products") page = <ProductsPage session={session} />;
-    else if (path === "/app/sales") page = <SalesPage />;
+    else if (path === "/app/sales") page = <SalesPage session={session} />;
     else if (path === "/app/services") page = <ServicesPage session={session} />;
     else if (path === "/app/suppliers") page = <SuppliersPage session={session} />;
     else if (path === "/app/import") page = <ImportPage />;
     else if (path === "/app/expenses") page = <ExpensesPage session={session} />;
-    else if (path.startsWith("/app/customers/")) page = <CustomerDetailPage customerId={path.split("/")[3]} />;
+    else if (path.startsWith("/app/customers/")) page = <CustomerDetailPage customerId={path.split("/")[3]} session={session} />;
     else if (path === "/app/customers") page = <CustomersPage />;
     else if (path === "/app/hotels") page = <HotelsPage session={session} />;
     else if (path === "/app/debts") page = <DebtsPage />;
