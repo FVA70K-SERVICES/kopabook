@@ -3,33 +3,60 @@ import { getBotResponse, shouldEscalate } from './fvabot.js';
 import { handleOrderMessage } from './order-flow.js';
 import { handleBookingMessage } from './booking-flow.js';
 import { DEFAULT_MEMORY } from './business-memory.js';
-import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY } from './kopabook-knowledge.js';
+import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName, nameWelcome, WARM_CLARIFIERS } from './kopabook-knowledge.js';
 import { handleOwnerCommand } from './bot-owner.js';
 import { handleFollowUp } from './bot-memory.js';
 import { getAIResponse, shouldUseAI } from './bot-ai.js';
 
-function getKopaBookResponse(message) {
+// D1-backed bot knowledge: the bot's BRAIN. Rows in `bot_knowledge` win over
+// the hardcoded fallback, so new features can be taught without a deploy.
+let KNOWLEDGE_CACHE = { at: 0, rows: [] };
+async function loadD1Knowledge(db) {
+  const now = Date.now();
+  if (now - KNOWLEDGE_CACHE.at < 5 * 60 * 1000) return KNOWLEDGE_CACHE.rows;
+  try {
+    const r = await db.prepare(
+      'SELECT topic, patterns, answer, quick_replies FROM bot_knowledge ORDER BY priority DESC'
+    ).all();
+    const rows = (r.results || []).map((row) => {
+      let patterns = [], quickReplies = [];
+      try { patterns = JSON.parse(row.patterns || '[]'); } catch (e) {}
+      try { quickReplies = JSON.parse(row.quick_replies || '[]'); } catch (e) {}
+      return { topic: row.topic, patterns, answer: row.answer, quickReplies };
+    });
+    KNOWLEDGE_CACHE = { at: now, rows };
+  } catch (e) {
+    KNOWLEDGE_CACHE = { at: now, rows: [] }; // table missing -> fallback below
+  }
+  return KNOWLEDGE_CACHE.rows;
+}
+
+function matchKnowledge(message, entries) {
   const lower = message.toLowerCase().trim();
-  for (const entry of KOPABOOK_KNOWLEDGE) {
-    for (const pattern of entry.patterns) {
-      if (lower.includes(pattern)) {
+  for (const entry of entries) {
+    for (const pattern of (entry.patterns || [])) {
+      if (pattern && lower.includes(String(pattern).toLowerCase())) {
         return {
           answer: entry.answer,
-          quickReplies: entry.quickReplies || [],
+          quickReplies: entry.quickReplies || entry.quick_replies || [],
           escalate: entry.escalate || false,
-          confidence: 'high'
+          confidence: 'high',
+          source: entry.topic ? 'd1' : 'builtin',
         };
       }
     }
   }
-  // No KopaBook match - ask, don't guess
-  const clarifiers = [
-    `I don't want to guess wrong. Are you asking about pricing, features, or how to get started with KopaBook?`,
-    `Could you tell me a bit more? I can help with pricing, features, stock, or any problem you're having.`,
-    `I want to give you the right answer. Is this about your business, our plans, or something else?`,
-  ];
+  return null;
+}
+
+async function getKopaBookResponse(message, db) {
+  // D1 knowledge first (fresh), hardcoded second (fallback)
+  const d1rows = await loadD1Knowledge(db);
+  const hit = matchKnowledge(message, d1rows) || matchKnowledge(message, KOPABOOK_KNOWLEDGE);
+  if (hit) return hit;
+  // No match - ask warmly, don't guess (the bot's HEART)
   return {
-    answer: clarifiers[Math.floor(Math.random() * clarifiers.length)],
+    answer: WARM_CLARIFIERS[Math.floor(Math.random() * WARM_CLARIFIERS.length)],
     quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human'],
     escalate: false,
     confidence: 'low'
@@ -111,8 +138,34 @@ export async function onRequestPost({ request, env }) {
           recentMessages = (hist.results || []).reverse();
         } catch {}
 
+        // Visitor name memory: learn it once, use it warmly
+        let visitorName = 'Visitor';
+        try {
+          const s = await env.KOPABOOK_DB.prepare(
+            'SELECT visitor_name FROM chat_sessions WHERE id = ?'
+          ).bind(sessionId).first();
+          if (s && s.visitor_name) visitorName = s.visitor_name;
+        } catch {}
+
+        // 1) Name capture: "my name is Ada"
+        const saidName = detectName(clean);
+        if (saidName) {
+          try {
+            await env.KOPABOOK_DB.prepare(
+              'UPDATE chat_sessions SET visitor_name = ? WHERE id = ?'
+            ).bind(saidName.slice(0, 60), sessionId).run();
+          } catch {}
+          result = nameWelcome(saidName);
+          visitorName = saidName;
+        }
+
+        // 2) Escalation FIRST: "talk to human" must always work
+        if (!result) {
+          result = getEscalationResponse(clean, visitorName);
+        }
+
         // Owner/staff mode: try business commands first
-        if (ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
+        if (!result && ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
           try {
             const ownerResult = await handleOwnerCommand(clean, {
               db: env.KOPABOOK_DB,
@@ -146,8 +199,8 @@ export async function onRequestPost({ request, env }) {
         // Try order flow first, then booking flow, then knowledge
         result = result || handleOrderMessage(clean, memory, sessionId, plan);
         if (!result) result = handleBookingMessage(clean, memory, sessionId, plan);
-        // KopaBook-specific knowledge
-        if (!result && siteConfig.isKopaBook) result = getKopaBookResponse(clean);
+        // KopaBook-specific knowledge (D1 brain + builtin fallback)
+        if (!result && siteConfig.isKopaBook) result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
         if (!result) {
           const botResult = getBotResponse(clean, siteConfig);
           result = {

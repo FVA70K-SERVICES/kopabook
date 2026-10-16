@@ -422,12 +422,14 @@
     const email = visitorEmail || prompt('Enter your email to receive the chat transcript:');
     if (!email) return;
     try {
-      await fetch(API + '/transcript', {
+      const res = await fetch(API + '/transcript', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, email })
       });
-      alert('Transcript sent to ' + email);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data && (data.sent || data.ok)) alert('Transcript sent to ' + email);
+      else alert('Could not send the transcript. Please try again.');
     } catch (e) { alert('Could not send transcript.'); }
   }
 
