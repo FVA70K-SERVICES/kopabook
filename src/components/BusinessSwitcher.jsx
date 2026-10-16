@@ -26,6 +26,13 @@ export default function BusinessSwitcher({ session, collapsed }) {
     } catch (e) { setError(e.message); }
   }
 
+  async function reopen(id) {
+    try {
+      await api.post("/api/businesses/reopen", { businessId: id });
+      window.location.href = "/app/dashboard";
+    } catch (e) { setError(e.message); }
+  }
+
   async function create(e) {
     e.preventDefault();
     if (!name.trim()) return;
@@ -65,7 +72,7 @@ export default function BusinessSwitcher({ session, collapsed }) {
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: "#7d9484", padding: "4px 8px" }}>
               My businesses
             </div>
-            {businesses.map((b) => (
+            {businesses.filter((b) => b.status !== "closed").map((b) => (
               <button
                 key={b.id}
                 onClick={() => switchTo(b.id)}
@@ -81,6 +88,21 @@ export default function BusinessSwitcher({ session, collapsed }) {
                 </span>
               </button>
             ))}
+            {businesses.some((b) => b.status === "closed") && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: "#7d9484", padding: "8px 8px 4px" }}>
+                  Closed
+                </div>
+                {businesses.filter((b) => b.status === "closed").map((b) => (
+                  <div key={b.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px", borderRadius: 8, opacity: 0.7 }}>
+                    <span style={{ fontSize: 14 }}>{b.name} <span className="pill pill-gray">closed</span></span>
+                    {b.role === "owner" && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => reopen(b.id)}>Reopen</button>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
             <button
               onClick={() => { setOpen(false); setShowNew(true); setError(""); }}
               style={{ display: "block", width: "100%", textAlign: "left", padding: "8px", borderRadius: 8, border: 0, cursor: "pointer", background: "transparent", color: "var(--brand-dark)", fontWeight: 700 }}

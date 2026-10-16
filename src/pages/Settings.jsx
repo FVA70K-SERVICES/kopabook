@@ -6,6 +6,17 @@ import PaymentModesEditor from "../components/PaymentModesEditor";
 
 export default function SettingsPage({ session }) {
   const [biz, setBiz] = useState(null);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  async function closeBusiness() {
+    setClosing(true);
+    try {
+      const d = await api.post("/api/businesses/close", { businessId: session.business?.id });
+      window.location.href = "/app/dashboard";
+    } catch (e) { setError(e.message); setConfirmClose(false); }
+    setClosing(false);
+  }
   const [form, setForm] = useState({ name: "", businessType: "", state: "", city: "", currency: "NGN", brandColor: "#166534", tagline: "", reminderTemplate: "", receiptPhone: "", receiptAddress: "", receiptFooter: "", receiptPaperWidth: "80mm" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -249,6 +260,25 @@ export default function SettingsPage({ session }) {
         </p>
         <p style={{ color: "var(--muted)", margin: 0 }}>Paid upgrades for staff workflows and advanced reports are coming soon.</p>
       </div>
+
+      {session.business?.role === "owner" && (
+        <div className="card narrow" style={{ marginTop: 18, borderColor: "var(--danger, #b91c1c)" }}>
+          <h3 style={{ marginTop: 0 }}>Danger zone</h3>
+          <p className="hint">Close this business. Its records are kept and it can be reopened from the business switcher, but staff lose access until then.</p>
+          {!confirmClose ? (
+            <button className="btn btn-secondary" style={{ color: "var(--danger, #b91c1c)" }} onClick={() => setConfirmClose(true)}>
+              Close business
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-secondary" onClick={() => setConfirmClose(false)}>Keep it open</button>
+              <button className="btn btn-primary" style={{ background: "var(--danger, #b91c1c)" }} disabled={closing} onClick={closeBusiness}>
+                {closing ? "Closing..." : "Yes, close it"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }

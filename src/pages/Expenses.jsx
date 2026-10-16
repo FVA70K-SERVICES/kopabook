@@ -32,6 +32,13 @@ export default function ExpensesPage({ session }) {
     setUploadingId(null);
   }
 
+  async function removeExpense(id) {
+    try {
+      await api.del(`/api/expenses?id=${id}`);
+      load();
+    } catch (e) { setError(e.message); }
+  }
+
   async function load() {
     setLoading(true);
     try {
@@ -80,7 +87,7 @@ export default function ExpensesPage({ session }) {
       {loading ? <div className="loading">Loading...</div> : (
         <div className="table-wrap">
           <table className="data">
-            <thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Amount</th><th>Receipt</th></tr></thead>
+            <thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Amount</th><th>Receipt</th>{canManageExpenses && <th></th>}</tr></thead>
             <tbody>
               {expenses.map((x) => (
                 <tr key={x.id}>
@@ -100,6 +107,19 @@ export default function ExpensesPage({ session }) {
                       </label>
                     ) : "—"}
                   </td>
+                  {canManageExpenses && (
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: "var(--danger, #b91c1c)" }}
+                        onClick={() => {
+                          if (window.confirm(`Delete this expense of ${fmt(x.amount)}?`)) removeExpense(x.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -3,7 +3,9 @@
 import { json, getAuthContext, requireAuth } from "./_utils";
 
 const ACTION_LABELS = {
-  "sale.record": "Sale recorded", "sale.refund": "Sale refunded",
+  "sale.record": "Sale recorded", "sale.refund": "Sale refunded", "sale.void": "Sale voided",
+  "expense.create": "Expense recorded", "expense.delete": "Expense deleted",
+  "customer.create": "Customer added", "customer.update": "Customer updated", "customer.delete": "Customer deleted",
   "product.create": "Product added", "product.update": "Product updated", "product.archive": "Product archived",
   "product.stock_adjust": "Stock adjusted",
   "debt.add": "Debt added", "debt.payment": "Debt payment recorded", "debt.writeoff": "Debt written off",
@@ -15,6 +17,7 @@ const ACTION_LABELS = {
   "hotel.booking": "Booking made", "hotel.checkin": "Guest checked in", "hotel.checkout": "Guest checked out",
   "hotel.room": "Room changed", "hotel.folio": "Folio charge/payment",
   "business.update": "Business settings changed",
+  "business.close": "Business closed", "business.reopen": "Business reopened",
   "auth.login": "Signed in", "auth.password_reset": "Password reset",
 };
 
