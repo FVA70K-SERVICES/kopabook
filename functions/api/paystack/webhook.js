@@ -52,11 +52,9 @@ export async function onRequestPost(context) {
           Number(payment.user_id) === userId &&
           Number(data.amount) === Number(payment.amount_kobo) &&
           String(data.currency || "NGN").toUpperCase() === String(payment.currency || "NGN").toUpperCase()) {
+        // activateSubscription atomically upserts the subscription and marks
+        // exactly this reference paid (replay-safe).
         await activateSubscription(db, userId, tier, cycle, data, reference);
-        // Mark as paid to prevent replay
-        await db.prepare(
-          `UPDATE subscription_payments SET status = 'paid' WHERE paystack_reference = ?`
-        ).bind(reference).run();
       }
     }
 

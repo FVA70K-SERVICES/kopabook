@@ -250,6 +250,7 @@ function CryptoPayments() {
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(null);
+  const [adminHash, setAdminHash] = useState({});
 
   async function load() {
     try {
@@ -259,49 +260,82 @@ function CryptoPayments() {
   }
   useEffect(() => { load(); }, []);
 
-  async function act(reference, action) {
-    if (!confirm(`${action === "approve" ? "Approve" : "Reject"} payment ${reference}?`)) return;
+  async function approve(reference) {
+    const hash = (adminHash[reference] || "").trim();
+    if (!confirm(`Approve payment ${reference}? The transaction will be verified on the blockchain first.`)) return;
     setBusy(reference);
     setMsg("");
     try {
-      const d = await api.post("/api/crypto/admin", { reference, action });
+      const d = await api.post("/api/crypto/admin", { reference, action: "approve", tx_hash: hash || undefined });
       setMsg(d.message);
       load();
     } catch (e) { setMsg(e.message); }
     setBusy(null);
   }
 
+  async function reject(reference) {
+    const reason = window.prompt("Rejection reason (required, the user will see this):");
+    if (!reason || reason.trim().length < 3) { setMsg("A reason is required to reject."); return; }
+    if (!confirm(`Reject payment ${reference}?`)) return;
+    setBusy(reference);
+    setMsg("");
+    try {
+      const d = await api.post("/api/crypto/admin", { reference, action: "reject", reason: reason.trim() });
+      setMsg(d.message);
+      load();
+    } catch (e) { setMsg(e.message); }
+    setBusy(null);
+  }
+
+  function verification(p) {
+    if (!p.verification_json) return null;
+    try { return JSON.parse(p.verification_json); } catch { return null; }
+  }
+
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Crypto payments pending</h3>
-      <p className="hint">Review each payment on the blockchain before approving. Approving activates the subscription immediately.</p>
+      <p className="hint">Approval verifies the transaction on the blockchain automatically (right wallet, right token, right amount, confirmed). Never approve without a passing verification.</p>
       {msg && <div className="alert alert-ok">{msg}</div>}
       {list.length === 0 ? (
         <p className="hint">No pending crypto payments.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table>
-            <thead><tr><th>Account</th><th>Plan</th><th>Amount</th><th>Currency</th><th>TX Hash</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Account</th><th>Plan</th><th>Amount</th><th>TX hash</th><th>Status</th><th>Verification</th><th>Actions</th></tr></thead>
             <tbody>
-              {list.map((p) => (
-                <tr key={p.reference}>
-                  <td><small>{p.email}</small><br /><small className="hint">{p.full_name || ""}</small></td>
-                  <td><strong style={{ textTransform: "capitalize" }}>{p.tier}</strong><br /><small className="hint">{p.billing_cycle}</small></td>
-                  <td className="money">${(Number(p.amount_usd_cents) / 100).toFixed(2)}</td>
-                  <td>{p.crypto_currency}</td>
-                  <td><small style={{ wordBreak: "break-all", maxWidth: 120, display: "inline-block" }}>{p.tx_hash || "-"}</small></td>
-                  <td>{p.status}</td>
-                  <td><small>{String(p.created_at || "").slice(0, 16)}</small></td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button className="btn btn-primary btn-sm" disabled={busy === p.reference}
-                      onClick={() => act(p.reference, "approve")}>
-                      {busy === p.reference ? "..." : "Approve"}
-                    </button>{" "}
-                    <button className="btn btn-secondary btn-sm" disabled={busy === p.reference}
-                      onClick={() => act(p.reference, "reject")}>Reject</button>
-                  </td>
-                </tr>
-              ))}
+              {list.map((p) => {
+                const v = verification(p);
+                return (
+                  <tr key={p.reference}>
+                    <td><small>{p.email}</small><br /><small className="hint">{p.full_name || ""} · {p.country || ""}</small></td>
+                    <td><strong style={{ textTransform: "capitalize" }}>{p.tier}</strong><br /><small className="hint">{p.billing_cycle}</small></td>
+                    <td className="money">${(Number(p.amount_usd_cents) / 100).toFixed(2)}<br /><small className="hint">{p.crypto_amount} {p.crypto_currency} · {p.crypto_currency === "BTC" ? "Bitcoin" : "Tron"}</small></td>
+                    <td>
+                      {p.tx_hash ? (
+                        <a href={p.explorer_url} target="_blank" rel="noreferrer">
+                          <small style={{ wordBreak: "break-all", maxWidth: 120, display: "inline-block" }}>{p.tx_hash.slice(0, 16)}...</small>
+                        </a>
+                      ) : (
+                        <input className="input" style={{ width: 150 }} placeholder="Paste TX hash to approve"
+                          value={adminHash[p.reference] || ""}
+                          onChange={(e) => setAdminHash({ ...adminHash, [p.reference]: e.target.value })} />
+                      )}
+                      <br /><small className="hint">{String(p.created_at || "").slice(0, 16)}</small>
+                    </td>
+                    <td><small>{p.status}</small>{p.expires_at && <><br /><small className="hint">expires {String(p.expires_at).slice(0, 16)}</small></>}</td>
+                    <td><small className="hint">{v ? (v.ok ? `Passed: ${v.detail || ""}` : `Failed: ${v.error || ""}`) : "Not checked yet"}</small></td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button className="btn btn-primary btn-sm" disabled={busy === p.reference}
+                        onClick={() => approve(p.reference)}>
+                        {busy === p.reference ? "..." : "Verify and approve"}
+                      </button>{" "}
+                      <button className="btn btn-secondary btn-sm" disabled={busy === p.reference}
+                        onClick={() => reject(p.reference)}>Reject</button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

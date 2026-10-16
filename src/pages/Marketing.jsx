@@ -231,7 +231,7 @@ export function PricingPage() {
                 <li>AI business copilot (Kopa Bot)</li>
                 <li>Smart briefings and reminders</li>
                 <li>Targets and goal tracking</li>
-                <li>Everything in Pro, for one business</li>
+                <li>Advanced reports, for one business</li>
               </ul>
               <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
             </div>

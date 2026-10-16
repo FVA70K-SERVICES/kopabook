@@ -1,17 +1,22 @@
 // Country-based fair pricing for KopaBook.
-// Prices are PPP-adjusted so each country pays a fair rate for their economy.
-// Nigeria uses NGN (home market). Ghana, Kenya, South Africa use local currency.
-// All other countries use USD.
+// Prices are adjusted so each country pays a fair rate for their economy.
+// Nigeria (home market) pays in NGN. Everywhere else pays in USD.
+//
+// Why USD-only outside Nigeria: our Paystack merchant account is Nigerian,
+// which can charge NGN and USD. GHS/KES/ZAR need separate country accounts,
+// so we do not pretend to charge them. Card payments outside Nigeria go
+// through Paystack in USD; crypto (USDT/BTC) is available everywhere.
 
 export const PRICING_TIERS = {
-  // Monthly prices in USD cents (yearly = 10x monthly)
+  // Monthly prices in USD cents (yearly = 10x monthly, i.e. 2 months free)
   low: { starter: 100, pro: 200, solo: 400 },           // Low income
   lower_middle: { starter: 200, pro: 400, solo: 700 },  // Lower-middle income
   upper_middle: { starter: 400, pro: 800, solo: 1200 }, // Upper-middle income
   high: { starter: 600, pro: 1200, solo: 1800 },        // High income
 };
 
-// Country -> pricing tier mapping
+// Country -> pricing tier mapping (roughly World Bank income groups).
+// Amounts are a starting point: tune them in PRICING_TIERS above.
 export const COUNTRY_TIERS = {
   // Nigeria: special NGN pricing (home market)
   "Nigeria": "nigeria",
@@ -66,21 +71,6 @@ export const COUNTRY_TIERS = {
 
 // High income: everything not listed above defaults to "high"
 
-// Paystack-supported local currencies (others use USD)
-export const COUNTRY_CURRENCIES = {
-  "Nigeria": "NGN",
-  "Ghana": "GHS",
-  "Kenya": "KES",
-  "South Africa": "ZAR",
-};
-
-// Approximate exchange rates to USD (for converting USD prices to local currency)
-const USD_RATES = {
-  "GHS": 15.5,   // Ghanaian Cedi
-  "KES": 129,    // Kenyan Shilling
-  "ZAR": 18.2,   // South African Rand
-};
-
 // Nigeria home pricing in NGN kobo
 const NIGERIA_PRICES = {
   starter: { monthly: 100000, yearly: 1000000 },   // NGN 1,000 / 10,000
@@ -93,9 +83,14 @@ export function getCountryTier(country) {
   return COUNTRY_TIERS[country] || "high";
 }
 
+// Only NGN (Nigeria) and USD (everywhere else). Our Paystack account can
+// charge these two; anything else would fail at the gateway.
 export function getCountryCurrency(country) {
-  return COUNTRY_CURRENCIES[country] || "USD";
+  return country === "Nigeria" ? "NGN" : "USD";
 }
+
+// Currencies our Paystack merchant account can actually charge.
+export const PAYSTACK_CURRENCIES = ["NGN", "USD"];
 
 // Get price in smallest currency unit (kobo/cents) for a tier, cycle, and country
 export function getPrice(tier, cycle, country) {
@@ -116,24 +111,14 @@ export function getPrice(tier, cycle, country) {
     };
   }
 
-  // Get USD cents
+  // Everywhere else: USD cents
   const usdCents = PRICING_TIERS[tierKey][tier] * (cycle === "yearly" ? 10 : 1);
-
-  // Convert to local currency if needed
-  if (currency === "USD") {
-    return { amount: usdCents, currency: "USD", tier: tierKey };
-  }
-
-  const rate = USD_RATES[currency] || 1;
-  const localAmount = Math.round((usdCents / 100) * rate * 100); // to smallest unit
-  // Round to nice numbers
-  const rounded = Math.round(localAmount / 100) * 100;
-  return { amount: rounded, currency, tier: tierKey };
+  return { amount: usdCents, currency: "USD", tier: tierKey };
 }
 
 export function formatPrice(amount, currency) {
   const n = Number(amount || 0) / 100;
-  const symbols = { NGN: "NGN", GHS: "GH₵", KES: "KSh", ZAR: "R", USD: "$" };
+  const symbols = { NGN: "NGN", USD: "$" };
   const sym = symbols[currency] || currency;
   return `${sym} ${n.toLocaleString()}`;
 }

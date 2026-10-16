@@ -6,30 +6,50 @@ function toSqlite(d) {
   return d.toISOString().slice(0, 19).replace("T", " ");
 }
 
-export async function activateSubscription(db, userId, tier, cycle, psData) {
+export async function activateSubscription(db, userId, tier, cycle, psData, reference) {
   const now = new Date();
   const end = new Date(now);
   if (cycle === "yearly") end.setFullYear(end.getFullYear() + 1);
   else end.setMonth(end.getMonth() + 1);
 
   const customerCode = (psData && psData.customer && psData.customer.customer_code) || null;
+  const ts = toSqlite(now);
 
-  await db.prepare(
-    `INSERT INTO account_subscriptions (user_id, tier, status, billing_cycle, paystack_customer_code, updated_at, current_period_start, current_period_end)
-     VALUES (?, ?, 'active', ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET tier = excluded.tier, status = 'active',
-       billing_cycle = excluded.billing_cycle,
-       paystack_customer_code = COALESCE(excluded.paystack_customer_code, paystack_customer_code),
-       updated_at = excluded.updated_at,
-       current_period_start = excluded.current_period_start,
-       current_period_end = excluded.current_period_end`
-  ).bind(userId, tier, cycle, customerCode, toSqlite(now), toSqlite(now), toSqlite(end)).run();
+  // Atomic: subscription upsert + mark-paid happen together or not at all.
+  const stmts = [
+    db.prepare(
+      `INSERT INTO account_subscriptions (user_id, tier, status, billing_cycle, paystack_customer_code, updated_at, current_period_start, current_period_end)
+       VALUES (?, ?, 'active', ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET tier = excluded.tier, status = 'active',
+         billing_cycle = excluded.billing_cycle,
+         paystack_customer_code = COALESCE(excluded.paystack_customer_code, paystack_customer_code),
+         updated_at = excluded.updated_at,
+         current_period_start = excluded.current_period_start,
+         current_period_end = excluded.current_period_end`
+    ).bind(userId, tier, cycle, customerCode, ts, ts, toSqlite(end)),
+  ];
 
-  await db.prepare(
-    `UPDATE subscription_payments SET status = 'paid', paid_at = ?,
-       paystack_customer_code = COALESCE(?, paystack_customer_code)
-     WHERE user_id = ? AND tier = ? AND status != 'paid'`
-  ).bind(toSqlite(now), customerCode, userId, tier).run();
+  if (reference) {
+    // Mark exactly the payment that was verified (no cross-payment marking).
+    stmts.push(
+      db.prepare(
+        `UPDATE subscription_payments SET status = 'paid', paid_at = ?,
+           paystack_customer_code = COALESCE(?, paystack_customer_code)
+         WHERE paystack_reference = ? AND user_id = ? AND status != 'paid'`
+      ).bind(ts, customerCode, reference, userId)
+    );
+  } else {
+    // Legacy path (no reference known): mark this user's unpaid rows for the tier.
+    stmts.push(
+      db.prepare(
+        `UPDATE subscription_payments SET status = 'paid', paid_at = ?,
+           paystack_customer_code = COALESCE(?, paystack_customer_code)
+         WHERE user_id = ? AND tier = ? AND status != 'paid'`
+      ).bind(ts, customerCode, userId, tier)
+    );
+  }
+
+  await db.batch(stmts);
 }
 
 export async function onRequestGet(context) {

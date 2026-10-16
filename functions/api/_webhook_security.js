@@ -2,6 +2,8 @@
 // - Constant-time signature comparison (timing attack resistant)
 // - Strict tier allowlist including solo
 // - Amount and reference matching to prevent tampering
+// - Durable rate limiting backed by D1 (works across Cloudflare isolates),
+//   with an in-memory fallback so a missing table never blocks real users.
 
 export const VALID_TIERS = ["starter", "pro", "solo"];
 export const VALID_CYCLES = ["monthly", "yearly"];
@@ -32,15 +34,16 @@ export async function verifyPaystackSignature(rawBody, signature, secret) {
   }
 }
 
-// Rate limiting: simple in-memory store (per-instance, best-effort)
-// For production, consider Durable Objects or KV for distributed limiting
-const rateLimits = new Map();
+// In-memory fallback only (per isolate, best effort). The D1 table is the
+// real store; this keeps some protection if the table is missing.
+const memFallback = new Map();
 
-export function checkRateLimit(key, maxRequests, windowMs) {
+function memCheck(key, maxRequests, windowMs) {
   const now = Date.now();
-  const record = rateLimits.get(key);
+  const record = memFallback.get(key);
   if (!record || now - record.windowStart > windowMs) {
-    rateLimits.set(key, { count: 1, windowStart: now });
+    if (memFallback.size > 5000) memFallback.clear();
+    memFallback.set(key, { count: 1, windowStart: now });
     return true;
   }
   if (record.count >= maxRequests) return false;
@@ -48,10 +51,26 @@ export function checkRateLimit(key, maxRequests, windowMs) {
   return true;
 }
 
-// Clean up old rate limit entries periodically
-setInterval(() => {
+// Durable rate limit: max `maxRequests` per `windowMs` for `key`.
+// Fails open to the in-memory fallback (never blocks legit traffic on DB errors).
+export async function checkRateLimit(db, key, maxRequests, windowMs) {
   const now = Date.now();
-  for (const [key, record] of rateLimits.entries()) {
-    if (now - record.windowStart > 3600000) rateLimits.delete(key);
+  const windowStart = now - windowMs;
+  try {
+    const row = await db.prepare(
+      `SELECT count, window_start FROM rate_limits WHERE key = ?`
+    ).bind(key).first();
+    if (!row || Number(row.window_start) < windowStart) {
+      await db.prepare(
+        `INSERT INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)
+         ON CONFLICT(key) DO UPDATE SET count = 1, window_start = excluded.window_start`
+      ).bind(key, now).run();
+      return true;
+    }
+    if (Number(row.count) >= maxRequests) return false;
+    await db.prepare(`UPDATE rate_limits SET count = count + 1 WHERE key = ?`).bind(key).run();
+    return true;
+  } catch {
+    return memCheck(key, maxRequests, windowMs);
   }
-}, 600000);
+}

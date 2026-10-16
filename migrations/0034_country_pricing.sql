@@ -1,7 +1,8 @@
--- Country-aware pricing: track currency and country on payments
--- Crypto payments table for countries where cards don't work well
+-- Country-aware pricing: track country and payment method on payments.
+-- NOTE: subscription_payments.currency already exists (added by 0027_paystack_billing.sql),
+-- so it is intentionally not added here.
+-- Crypto payments table for countries where cards don't work well.
 
-ALTER TABLE subscription_payments ADD COLUMN currency TEXT DEFAULT 'NGN';
 ALTER TABLE subscription_payments ADD COLUMN country TEXT DEFAULT 'Nigeria';
 ALTER TABLE subscription_payments ADD COLUMN payment_method TEXT DEFAULT 'paystack';
 

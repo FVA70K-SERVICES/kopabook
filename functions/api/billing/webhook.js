@@ -34,22 +34,20 @@ export async function onRequestPost(context) {
         });
       }
 
-      // Match by reference first (strongest), fall back to user+tier+cycle
+      // Match the exact payment by Paystack reference (idempotency).
+      // No fallback matching: activating without an exact reference match
+      // is how money gets credited to the wrong payment.
       const reference = String(data.reference || "");
-      let payment = null;
-      if (reference) {
-        payment = await db.prepare(
-          `SELECT * FROM subscription_payments
-           WHERE paystack_reference = ? AND status != 'paid' LIMIT 1`
-        ).bind(reference).first();
+      if (!reference) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
       }
-      if (!payment) {
-        payment = await db.prepare(
-          `SELECT * FROM subscription_payments
-           WHERE user_id = ? AND tier = ? AND billing_cycle = ? AND status != 'paid'
-           ORDER BY id DESC LIMIT 1`
-        ).bind(userId, tier, cycle).first();
-      }
+
+      const payment = await db.prepare(
+        `SELECT * FROM subscription_payments
+         WHERE paystack_reference = ? AND status != 'paid' LIMIT 1`
+      ).bind(reference).first();
 
       // Triple-check: user matches, amount matches exactly
       if (payment &&
