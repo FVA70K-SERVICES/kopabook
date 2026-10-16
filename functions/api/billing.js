@@ -12,7 +12,7 @@ export const LIMITS = {
 };
 
 export const TIER_NAMES = { free: "Free", starter: "Starter", solo: "Solo", pro: "Pro" };
-export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", solo: "NGN 1,500/month", pro: "NGN 2,500/month" };
+export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", solo: "NGN 5,000/month", pro: "NGN 2,500/month" };
 
 export async function getAccountTier(db, userId) {
   const row = await db.prepare(
