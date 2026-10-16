@@ -86,6 +86,8 @@ export async function onRequestPost({ request, env }) {
       ).bind(sessionId, 'agent', now - 5 * 60 * 1000).first();
 
       if (!recentAgent) {
+        let result = null;
+
         // Owner/staff mode: try business commands first
         if (ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
           try {
@@ -104,7 +106,7 @@ export async function onRequestPost({ request, env }) {
         }
 
         // Try order flow first, then booking flow, then knowledge
-        let result = result || handleOrderMessage(clean, memory, sessionId, plan);
+        result = result || handleOrderMessage(clean, memory, sessionId, plan);
         if (!result) result = handleBookingMessage(clean, memory, sessionId, plan);
         // KopaBook-specific knowledge
         if (!result && siteConfig.isKopaBook) result = getKopaBookResponse(clean);
