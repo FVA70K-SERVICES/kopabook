@@ -169,6 +169,7 @@ export async function getAuthContext(context) {
   const memberCols = `business_members.business_id, business_members.role AS business_role,
             business_members.can_view_profit, business_members.can_discount,
             business_members.can_manage_expenses, business_members.can_manage_products,
+            business_members.max_discount_percent, business_members.suspended,
             businesses.name AS business_name, businesses.currency, businesses.business_type,
             businesses.timezone, businesses.country, businesses.status`;
   const memberFrom = `FROM business_members
@@ -184,11 +185,14 @@ export async function getAuthContext(context) {
     ).bind(user.id, sessionRow.session_business_id).first();
     // A closed business is never the active one; fall through to an active business.
     if (membership && membership.status === "closed") membership = null;
+    // A suspended staff member loses access immediately.
+    if (membership && Number(membership.suspended || 0) === 1) membership = null;
   }
   if (!membership) {
     membership = await context.env.KOPABOOK_DB.prepare(
       `SELECT ${memberCols} ${memberFrom}
        AND (businesses.status IS NULL OR businesses.status = 'active')
+       AND (business_members.suspended IS NULL OR business_members.suspended = 0)
        ORDER BY business_members.id ASC LIMIT 1`
     ).bind(user.id).first();
     if (membership) {
@@ -228,6 +232,13 @@ export async function getAuthContext(context) {
       can_discount: fullAccess || Number(membership?.can_discount || 0) === 1,
       can_manage_expenses: fullAccess || Number(membership?.can_manage_expenses || 0) === 1,
       can_manage_products: fullAccess || Number(membership?.can_manage_products || 0) === 1,
+    },
+    // Per-staff limits. Owners and partners have no caps.
+    limits: {
+      max_discount_percent: fullAccess
+        ? null
+        : (membership?.max_discount_percent === null || membership?.max_discount_percent === undefined
+            ? null : Number(membership.max_discount_percent)),
     },
   };
 }

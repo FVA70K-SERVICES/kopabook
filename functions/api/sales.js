@@ -106,6 +106,18 @@ export async function onRequestPost(context) {
     if (discounted) {
       const permDenied = requirePerm(auth, "can_discount", "Only staff with discount permission can sell below the listed price.");
       if (permDenied) return permDenied;
+      // Per-staff discount cap: no line may be discounted beyond their limit.
+      const cap = auth.limits?.max_discount_percent;
+      if (cap !== null && cap !== undefined) {
+        for (const l of lines) {
+          if (l.defaultPrice > 0 && l.unitPrice < l.defaultPrice) {
+            const pct = Math.round(((l.defaultPrice - l.unitPrice) / l.defaultPrice) * 1000) / 10;
+            if (pct > cap) {
+              return json({ ok: false, message: `Your discount limit is ${cap}%. This sale needs ${pct}%. Ask the owner.` }, 403);
+            }
+          }
+        }
+      }
     }
 
     // Payments: accept a split list [{mode, amount}], or fall back to the

@@ -5,6 +5,9 @@ import { json, getAuthContext, requireAuth, hashPassword, audit, toSqliteDate } 
 const ROLE_FLAGS = {
   partner: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
   manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
+  accountant: { can_view_profit: 1, can_discount: 0, can_manage_expenses: 1, can_manage_products: 0 },
+  cashier: { can_view_profit: 0, can_discount: 1, can_manage_expenses: 0, can_manage_products: 0 },
+  storekeeper: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 1 },
   attendant: { can_view_profit: 0, can_discount: 0, can_manage_expenses: 0, can_manage_products: 0 },
   hotel_manager: { can_view_profit: 1, can_discount: 1, can_manage_expenses: 1, can_manage_products: 1 },
   receptionist: { can_view_profit: 0, can_discount: 1, can_manage_expenses: 0, can_manage_products: 0 },
@@ -29,7 +32,7 @@ export async function onRequestGet(context) {
     const members = await context.env.KOPABOOK_DB.prepare(
       `SELECT u.id, u.full_name, u.email, u.status, u.phone, bm.role AS business_role, bm.joined_at,
               bm.can_view_profit, bm.can_discount, bm.can_manage_expenses,
-              bm.can_manage_products, bm.commission_percent
+              bm.can_manage_products, bm.commission_percent, bm.max_discount_percent, bm.suspended
        FROM business_members bm
        INNER JOIN users u ON u.id = bm.user_id
        WHERE bm.business_id = ?
@@ -133,24 +136,45 @@ export async function onRequestPatch(context) {
     if (!Number.isFinite(commission)) commission = 0;
     commission = Math.min(100, Math.max(0, commission));
 
+    let maxDiscount = body.max_discount_percent === null || body.max_discount_percent === "" || body.max_discount_percent === undefined
+      ? null : Number(body.max_discount_percent);
+    if (maxDiscount !== null && !Number.isFinite(maxDiscount)) maxDiscount = null;
+    if (maxDiscount !== null) maxDiscount = Math.min(100, Math.max(0, maxDiscount));
+    const touchDiscount = Object.prototype.hasOwnProperty.call(body, "max_discount_percent");
+
     const fields = {
       can_view_profit: bool(body.can_view_profit),
       can_discount: bool(body.can_discount),
       can_manage_expenses: bool(body.can_manage_expenses),
       can_manage_products: bool(body.can_manage_products),
       commission_percent: commission,
+      max_discount_percent: maxDiscount,
+      suspended: body.suspended !== undefined ? bool(body.suspended) : undefined,
     };
+
+    const setClauses = [
+      "can_view_profit = ?", "can_discount = ?", "can_manage_expenses = ?",
+      "can_manage_products = ?", "commission_percent = ?",
+    ];
+    const setParams = [
+      fields.can_view_profit, fields.can_discount, fields.can_manage_expenses,
+      fields.can_manage_products, fields.commission_percent,
+    ];
+    if (touchDiscount) {
+      setClauses.push("max_discount_percent = ?");
+      setParams.push(fields.max_discount_percent);
+    }
+    if (fields.suspended !== undefined) {
+      setClauses.push("suspended = ?");
+      setParams.push(fields.suspended);
+    }
 
     await context.env.KOPABOOK_DB.prepare(
       `UPDATE business_members
-       SET can_view_profit = ?, can_discount = ?, can_manage_expenses = ?,
-           can_manage_products = ?, commission_percent = ?
+       SET ${setClauses.join(", ")}
        WHERE id = ?`
     )
-      .bind(
-        fields.can_view_profit, fields.can_discount, fields.can_manage_expenses,
-        fields.can_manage_products, fields.commission_percent, member.id
-      )
+      .bind(...setParams, member.id)
       .run();
 
     await audit(context, auth, "staff.permissions.update", "business_member", member.id, {
