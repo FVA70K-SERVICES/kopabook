@@ -115,6 +115,22 @@ export default function Layout({ session, children }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <ThemeToggle />
             <SyncStatus />
+            <button
+              onClick={logout}
+              title="Sign out"
+              aria-label="Sign out"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: "6px 10px",
+                cursor: "pointer",
+                color: "inherit",
+                fontSize: 13,
+              }}
+            >
+              ⎋ Sign out
+            </button>
           </div>
         </div>
         {billing && (
