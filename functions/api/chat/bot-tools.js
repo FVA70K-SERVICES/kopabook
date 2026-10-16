@@ -4,7 +4,7 @@
 export async function getBusinessContext(db, businessId) {
   try {
     const biz = await db.prepare(
-      'SELECT id, name, type, currency FROM businesses WHERE id = ?'
+      'SELECT id, name FROM businesses WHERE id = ?'
     ).bind(businessId).first();
     return biz || null;
   } catch { return null; }
@@ -14,7 +14,7 @@ export async function getTodaySales(db, businessId) {
   try {
     const today = new Date().toISOString().slice(0, 10);
     const r = await db.prepare(`
-      SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as total
+      SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
       FROM sales WHERE business_id = ? AND date(created_at) = date(?)
     `).bind(businessId, today).first();
     return { count: r?.count || 0, total: r?.total || 0 };
@@ -26,7 +26,7 @@ export async function getTodayExpenses(db, businessId) {
     const today = new Date().toISOString().slice(0, 10);
     const r = await db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total
-      FROM expenses WHERE business_id = ? AND date(created_at) = date(?)
+      FROM expenses WHERE business_id = ? AND date(incurred_on) = date(?)
     `).bind(businessId, today).first();
     return { total: r?.total || 0 };
   } catch { return { total: 0 }; }
@@ -35,9 +35,12 @@ export async function getTodayExpenses(db, businessId) {
 export async function getLowStock(db, businessId, limit = 10) {
   try {
     const r = await db.prepare(`
-      SELECT id, name, quantity, low_stock_threshold, price
-      FROM products
-      WHERE business_id = ? AND quantity <= COALESCE(low_stock_threshold, 5)
+      SELECT p.id, p.name, COALESCE(i.quantity_on_hand, 0) as quantity,
+             p.unit_price as price, COALESCE(i.reorder_level, 5) as threshold
+      FROM products p
+      LEFT JOIN inventory_items i ON i.product_id = p.id
+      WHERE p.business_id = ? AND p.is_active = 1
+        AND COALESCE(i.quantity_on_hand, 0) <= COALESCE(i.reorder_level, 5)
       ORDER BY quantity ASC LIMIT ?
     `).bind(businessId, limit).all();
     return r.results || [];
@@ -47,8 +50,8 @@ export async function getLowStock(db, businessId, limit = 10) {
 export async function getOwed(db, businessId) {
   try {
     const r = await db.prepare(`
-      SELECT COUNT(*) as count, COALESCE(SUM(balance), 0) as total
-      FROM customers WHERE business_id = ? AND balance > 0
+      SELECT COUNT(*) as count, COALESCE(SUM(balance_due), 0) as total
+      FROM sales WHERE business_id = ? AND balance_due > 0 AND status != 'voided'
     `).bind(businessId).first();
     return { count: r?.count || 0, total: r?.total || 0 };
   } catch { return { count: 0, total: 0 }; }
@@ -57,7 +60,7 @@ export async function getOwed(db, businessId) {
 export async function getWeekSales(db, businessId) {
   try {
     const r = await db.prepare(`
-      SELECT date(created_at) as day, COUNT(*) as count, COALESCE(SUM(total), 0) as total
+      SELECT date(created_at) as day, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
       FROM sales
       WHERE business_id = ? AND created_at >= datetime('now', '-7 days')
       GROUP BY date(created_at) ORDER BY day DESC
@@ -69,56 +72,15 @@ export async function getWeekSales(db, businessId) {
 export async function findProduct(db, businessId, searchTerm) {
   try {
     const r = await db.prepare(`
-      SELECT id, name, price, quantity FROM products
-      WHERE business_id = ? AND name LIKE ? LIMIT 5
+      SELECT p.id, p.name, p.unit_price as price, COALESCE(i.quantity_on_hand, 0) as quantity
+      FROM products p
+      LEFT JOIN inventory_items i ON i.product_id = p.id
+      WHERE p.business_id = ? AND p.is_active = 1 AND p.name LIKE ? LIMIT 5
     `).bind(businessId, `%${searchTerm}%`).all();
     return r.results || [];
   } catch { return []; }
 }
 
-export async function recordQuickSale(db, businessId, productId, quantity, userId) {
-  try {
-    const product = await db.prepare(
-      'SELECT id, name, price, quantity FROM products WHERE id = ? AND business_id = ?'
-    ).bind(productId, businessId).first();
-    if (!product) return { error: 'Product not found' };
-    if (product.quantity < quantity) return { error: `Only ${product.quantity} in stock` };
-
-    const total = product.price * quantity;
-    const saleId = 'sale_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const now = new Date().toISOString();
-
-    await db.prepare(`
-      INSERT INTO sales (id, business_id, total, payment_method, created_by, created_at)
-      VALUES (?, ?, ?, 'cash', ?, ?)
-    `).bind(saleId, businessId, total, userId, now).run();
-
-    await db.prepare(`
-      INSERT INTO sale_items (sale_id, product_id, quantity, price, total)
-      VALUES (?, ?, ?, ?, ?)
-    `).bind(saleId, productId, quantity, product.price, total).run();
-
-    await db.prepare(
-      'UPDATE products SET quantity = quantity - ? WHERE id = ?'
-    ).bind(quantity, productId).run();
-
-    return { ok: true, saleId, product: product.name, quantity, total };
-  } catch (e) { return { error: e.message }; }
-}
-
-export async function recordQuickExpense(db, businessId, amount, description, category, userId) {
-  try {
-    const id = 'exp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const now = new Date().toISOString();
-    await db.prepare(`
-      INSERT INTO expenses (id, business_id, amount, description, category, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(id, businessId, amount, description, category || 'general', userId, now).run();
-    return { ok: true, id, amount, description };
-  } catch (e) { return { error: e.message }; }
-}
-
-// Targets / goals
 export async function getTargets(db, businessId) {
   try {
     const r = await db.prepare(`
@@ -148,7 +110,7 @@ export async function getTargetProgress(db, businessId, target) {
       if (target.period === 'week') dateFilter = "created_at >= datetime('now', '-7 days')";
       if (target.period === 'month') dateFilter = "strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')";
       const r = await db.prepare(`
-        SELECT COALESCE(SUM(total), 0) as total FROM sales
+        SELECT COALESCE(SUM(total_amount), 0) as total FROM sales
         WHERE business_id = ? AND ${dateFilter}
       `).bind(businessId).first();
       const current = r?.total || 0;

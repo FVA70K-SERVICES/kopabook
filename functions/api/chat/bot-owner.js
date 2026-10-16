@@ -1,7 +1,7 @@
 // Kopa Bot Owner Mode - understands owner/staff commands and runs business tasks
 import {
   getBusinessContext, getTodaySales, getTodayExpenses, getLowStock,
-  getOwed, getWeekSales, findProduct, recordQuickSale, recordQuickExpense,
+  getOwed, getWeekSales, findProduct,
   getTargets, setTarget, getTargetProgress, formatNaira
 } from './bot-tools.js';
 import { handleReminderCommand, checkDueReminders } from './bot-reminders.js';
@@ -134,7 +134,7 @@ export async function handleOwnerCommand(message, ctx) {
     return { answer: msg, quickReplies: ['Brief me', 'Record sale'] };
   }
 
-  // --- RECORD SALE: "record sale 2 rice" or "sell 3 coke" ---
+  // --- RECORD SALE: guide to app (complex inventory transactions) ---
   const saleMatch = lower.match(/(?:record sale|sell|record)\s+(\d+)\s+(.+)/);
   if (saleMatch) {
     if (!limits.recordSale) return tierBlocked('recording sales', limits);
@@ -147,22 +147,15 @@ export async function handleOwnerCommand(message, ctx) {
     if (products.length === 0) {
       return { answer: `I could not find "${productSearch}" in your products. Check the spelling or add it first.`, quickReplies: ['Check stock'] };
     }
-    if (products.length > 1) {
-      let msg = `I found ${products.length} matches. Which one?\n\n`;
-      products.forEach((p, i) => { msg += `${i + 1}. ${p.name} - ${formatNaira(p.price)} (${p.quantity} in stock)\n`; });
-      msg += `\nReply with the number, e.g. "1"`;
-      return { answer: msg, quickReplies: products.map((p, i) => `${i + 1}`), pendingAction: { type: 'sale', qty, products } };
-    }
 
-    const result = await recordQuickSale(db, businessId, products[0].id, qty, userId);
-    if (result.error) return { answer: `Could not record sale: ${result.error}`, quickReplies: ['Check stock'] };
+    const p = products[0];
     return {
-      answer: `Sale recorded! ${qty}x ${result.product} = ${formatNaira(result.total)}. Stock updated.`,
-      quickReplies: ['Brief me', 'Record another sale']
+      answer: `Found: ${p.name} at ${formatNaira(p.price)} (${p.quantity} in stock).\n\nTo record this sale, tap Sales > New Sale in the app. I will have full sale recording soon!`,
+      quickReplies: ['Brief me', 'Check stock']
     };
   }
 
-  // --- RECORD EXPENSE: "record expense 5000 fuel" ---
+  // --- RECORD EXPENSE: guide to app ---
   const expMatch = lower.match(/(?:record expense|add expense|expense)\s+(\d+)\s*(.+)?/);
   if (expMatch) {
     if (!limits.recordExpense) return tierBlocked('recording expenses', limits);
@@ -170,11 +163,9 @@ export async function handleOwnerCommand(message, ctx) {
 
     const amount = parseInt(expMatch[1]);
     const desc = (expMatch[2] || 'Expense').trim();
-    const result = await recordQuickExpense(db, businessId, amount, desc, 'general', userId);
-    if (result.error) return { answer: `Could not record expense: ${result.error}` };
     return {
-      answer: `Expense recorded: ${formatNaira(amount)} for "${desc}".`,
-      quickReplies: ['Brief me', 'Record sale']
+      answer: `Got it: ${formatNaira(amount)} for "${desc}".\n\nTo save this, tap Expenses > Add in the app. Full expense recording via chat is coming soon!`,
+      quickReplies: ['Brief me']
     };
   }
 
