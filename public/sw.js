@@ -1,7 +1,7 @@
 /* KopaBook service worker: offline-first app shell, network-first API reads.
    Non-GET API calls are never intercepted so queued mutations flow through. */
 
-const SHELL_CACHE = "kopabook-shell-v2";
+const SHELL_CACHE = "kopabook-shell-v3";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 
