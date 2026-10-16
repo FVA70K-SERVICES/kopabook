@@ -6,7 +6,7 @@ import {
   HotelsLandingPage, AboutPage, FaqPage,
 } from "./pages/Marketing";
 import { TermsPage, PrivacyPage, RefundPage } from "./pages/Legal";
-import { LoginPage, OwnerSetupPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/Auth";
+import { LoginPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/Auth";
 import RegisterPage from "./pages/Register";
 import { SaleReceiptPage, HotelReceiptPage } from "./pages/Receipt";
 import DashboardPage from "./pages/Dashboard";
@@ -80,10 +80,6 @@ function AppRoute({ session }) {
   if (path === "/login") {
     if (session) { nav("/app/dashboard"); return null; }
     return <LoginPage />;
-  }
-  if (path === "/owner-setup") {
-    if (session) { nav("/app/dashboard"); return null; }
-    return <OwnerSetupPage />;
   }
   if (path === "/forgot-password") {
     if (session) { nav("/app/dashboard"); return null; }

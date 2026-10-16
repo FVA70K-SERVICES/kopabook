@@ -25,7 +25,6 @@ export const api = {
   me: () => request("/api/auth/me"),
   login: (email, password) => request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => request("/api/auth/logout", { method: "POST" }),
-  bootstrap: (payload) => request("/api/auth/bootstrap", { method: "POST", body: JSON.stringify(payload) }),
 };
 
 const CURRENCY_SYMBOLS = {
