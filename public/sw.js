@@ -1,7 +1,7 @@
 /* KopaBook service worker: offline-first app shell, network-first API reads.
    Non-GET API calls are never intercepted so queued mutations flow through. */
 
-const SHELL_CACHE = "kopabook-shell-v1";
+const SHELL_CACHE = "kopabook-shell-v2";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 
@@ -9,7 +9,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(SHELL_CACHE)
-      .then((cache) => cache.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon.svg"]))
+      .then((cache) => cache.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"]))
       .then(() => self.skipWaiting())
       .catch(() => self.skipWaiting())
   );

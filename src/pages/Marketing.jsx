@@ -349,12 +349,25 @@ export function AboutPage() {
             <li><strong>Free core.</strong> Recording sales is free and always will be. Limits never block you from recording a sale.</li>
           </ul>
           <h2>Who builds it</h2>
-          <p>
-            KopaBook is built by <strong>FVA70K Services</strong>, founded by Fortune Godson.
-            It is designed with real merchants, for real merchants, one honest feature at a time.
-          </p>
+          <div className="card" style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap", marginTop: 16 }}>
+            <img
+              src="/founder.jpg"
+              alt="Fortune Godson, founder of KopaBook"
+              style={{ width: 160, height: 160, borderRadius: "50%", objectFit: "cover", border: "3px solid var(--brand)" }}
+            />
+            <div style={{ flex: "1 1 260px" }}>
+              <h3 style={{ margin: "0 0 4px" }}>Fortune Godson</h3>
+              <p className="hint" style={{ margin: "0 0 12px" }}>Founder, FVA70K Services</p>
+              <p style={{ margin: 0 }}>
+                Fortune started FVA70K Services to build practical tools for real businesses.
+                KopaBook grew out of watching small merchants lose money to forgotten debts,
+                untracked stock, and notebooks that never add up. It is designed with real
+                merchants, for real merchants, one honest feature at a time.
+              </p>
+            </div>
+          </div>
           <div style={{ marginTop: 32 }}>
-            <a href="/waitlist" className="btn btn-primary">Join the waitlist</a>{" "}
+            <a href="/register" className="btn btn-primary">Get started free</a>{" "}
             <a href="/faq" className="btn btn-secondary">Read the FAQ</a>
           </div>
         </div>
