@@ -1,11 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
-const PRICES = {
-  starter: { monthly: "NGN 1,000/month", yearly: "NGN 10,000/year" },
-  pro: { monthly: "NGN 2,500/month", yearly: "NGN 25,000/year" },
-};
-
 function bar(used, limit) {
   if (limit === null || limit === undefined) return null;
   const pct = Math.min(100, Math.round((Number(used) / Math.max(1, limit)) * 100));
@@ -18,6 +13,7 @@ function bar(used, limit) {
 
 export default function PlanCard() {
   const [plan, setPlan] = useState(null);
+  const [prices, setPrices] = useState(null);
   const [cycle, setCycle] = useState("monthly");
   const [paying, setPaying] = useState("");
   const [msg, setMsg] = useState("");
@@ -29,12 +25,13 @@ export default function PlanCard() {
 
   useEffect(() => {
     load();
+    api.get("/api/plans").then((d) => setPrices(d.plans || {})).catch(() => {});
     // Returning from Paystack: verify the payment.
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("payment");
     if (ref) {
       setVerifying(true);
-      api.get("/api/billing/verify?reference=" + encodeURIComponent(ref))
+      api.get("/api/paystack/verify?reference=" + encodeURIComponent(ref))
         .then((d) => {
           setMsg(d.message || "Payment confirmed.");
           load();
@@ -117,14 +114,16 @@ export default function PlanCard() {
             ))}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {plan.tier === "free" && (
+            {plan.tier === "free" && prices?.starter?.[cycle] && (
               <button className="btn btn-primary btn-sm" disabled={!!paying} onClick={() => checkout("starter")}>
-                {paying === "starter" ? "Opening Paystack..." : `Pay ${PRICES.starter[cycle]} for Starter`}
+                {paying === "starter" ? "Opening Paystack..." : `Pay ${prices.starter[cycle].label} for Starter`}
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" disabled={!!paying} onClick={() => checkout("pro")}>
-              {paying === "pro" ? "Opening Paystack..." : `Pay ${PRICES.pro[cycle]} for Pro`}
-            </button>
+            {prices?.pro?.[cycle] && (
+              <button className="btn btn-secondary btn-sm" disabled={!!paying} onClick={() => checkout("pro")}>
+                {paying === "pro" ? "Opening Paystack..." : `Pay ${prices.pro[cycle].label} for Pro`}
+              </button>
+            )}
           </div>
         </>
       )}

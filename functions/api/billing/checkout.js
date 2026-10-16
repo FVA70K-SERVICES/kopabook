@@ -1,17 +1,8 @@
 // POST /api/billing/checkout — start a Paystack payment for a tier + billing cycle.
+// Prices come from the subscription_plans table (editable in the admin panel).
 // Returns the Paystack authorization URL; the user pays there, then returns.
 import { json, getAuthContext, requireAuth } from "../_utils";
 import { LIMITS } from "../billing";
-
-// Amounts in kobo. Yearly = 10x monthly (2 months free).
-export const PLAN_PRICES = {
-  starter: { monthly: 100000, yearly: 1000000 },
-  pro: { monthly: 250000, yearly: 2500000 },
-};
-export const PLAN_LABELS = {
-  starter: { monthly: "NGN 1,000/month", yearly: "NGN 10,000/year" },
-  pro: { monthly: "NGN 2,500/month", yearly: "NGN 25,000/year" },
-};
 
 export async function onRequestPost(context) {
   try {
@@ -22,7 +13,7 @@ export async function onRequestPost(context) {
     const body = await context.request.json().catch(() => ({}));
     const tier = String(body.tier || "").toLowerCase();
     const cycle = String(body.cycle || "monthly").toLowerCase();
-    if (!PLAN_PRICES[tier] || !PLAN_PRICES[tier][cycle]) {
+    if (!LIMITS[tier] || tier === "free" || !["monthly", "yearly"].includes(cycle)) {
       return json({ ok: false, message: "Pick a valid plan." }, 400);
     }
 
@@ -31,9 +22,17 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "Payments are not connected yet. Please try again later." }, 503);
     }
 
-    const amount = PLAN_PRICES[tier][cycle];
-    const reference = `kopa_${auth.user.id}_${Date.now()}`;
     const db = context.env.KOPABOOK_DB;
+    const plan = await db.prepare(
+      `SELECT amount_kobo, currency FROM subscription_plans
+       WHERE tier = ? AND billing_cycle = ? AND active = 1 LIMIT 1`
+    ).bind(tier, cycle).first();
+    if (!plan) {
+      return json({ ok: false, message: "This plan is not available right now." }, 400);
+    }
+
+    const amount = Number(plan.amount_kobo);
+    const reference = `kopa_${auth.user.id}_${Date.now()}`;
 
     await db.prepare(
       `INSERT INTO subscription_payments (user_id, tier, billing_cycle, amount_kobo, paystack_reference, status)
@@ -51,7 +50,7 @@ export async function onRequestPost(context) {
         email: auth.user.email,
         amount,
         reference,
-        currency: "NGN",
+        currency: plan.currency || "NGN",
         callback_url: `${origin}/app/settings?payment=${reference}`,
         metadata: { user_id: auth.user.id, tier, billing_cycle: cycle },
       }),

@@ -146,6 +146,71 @@ function Businesses() {
   );
 }
 
+function Plans() {
+  const [plans, setPlans] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [edits, setEdits] = useState({});
+  const [busy, setBusy] = useState("");
+
+  async function load() {
+    try {
+      const d = await api.get("/api/admin/plans");
+      setPlans(d.plans || []);
+      const e = {};
+      for (const p of d.plans || []) e[p.tier + "|" + p.billing_cycle] = Number(p.amount_kobo) / 100;
+      setEdits(e);
+    } catch (e) { setMsg(e.message); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function save(tier, cycle) {
+    const key = tier + "|" + cycle;
+    setBusy(key);
+    setMsg("");
+    try {
+      const d = await api.post("/api/admin/plans", { tier, cycle, amount_ngn: Number(edits[key]) });
+      setMsg(d.message);
+      load();
+    } catch (e) { setMsg(e.message); }
+    setBusy("");
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Subscription fees</h3>
+      <p className="hint">Set the price customers pay on Paystack. Changes apply immediately to new checkouts.</p>
+      {msg && <div className="alert alert-ok">{msg}</div>}
+      <table>
+        <thead><tr><th>Plan</th><th>Cycle</th><th>Price (NGN)</th><th></th></tr></thead>
+        <tbody>
+          {plans.map((p) => {
+            const key = p.tier + "|" + p.billing_cycle;
+            return (
+              <tr key={key}>
+                <td style={{ textTransform: "capitalize" }}><strong>{p.tier}</strong></td>
+                <td style={{ textTransform: "capitalize" }}>{p.billing_cycle}</td>
+                <td>
+                  <input
+                    type="number" min="1" step="1" style={{ maxWidth: 140 }}
+                    value={edits[key] ?? ""}
+                    onChange={(e) => setEdits({ ...edits, [key]: e.target.value })}
+                  />
+                </td>
+                <td>
+                  <button className="btn btn-primary btn-sm" disabled={busy === key} onClick={() => save(p.tier, p.billing_cycle)}>
+                    {busy === key ? "Saving..." : "Save"}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="hint">Yearly is usually set to 10x the monthly price (2 months free).</p>
+    </div>
+  );
+}
+
 function Payments() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get("/api/admin/overview").then(setD).catch(() => {}); }, []);
@@ -194,11 +259,13 @@ export default function AdminPage() {
         <Tab id="accounts" label="Accounts" active={tab} set={setTab} />
         <Tab id="businesses" label="Businesses" active={tab} set={setTab} />
         <Tab id="payments" label="Payments" active={tab} set={setTab} />
+        <Tab id="plans" label="Plans & fees" active={tab} set={setTab} />
       </div>
       {tab === "overview" && <Overview />}
       {tab === "accounts" && <Accounts />}
       {tab === "businesses" && <Businesses />}
       {tab === "payments" && <Payments />}
+      {tab === "plans" && <Plans />}
     </>
   );
 }
