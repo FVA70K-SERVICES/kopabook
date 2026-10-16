@@ -170,7 +170,7 @@ export async function getAuthContext(context) {
             business_members.can_view_profit, business_members.can_discount,
             business_members.can_manage_expenses, business_members.can_manage_products,
             businesses.name AS business_name, businesses.currency, businesses.business_type,
-            businesses.timezone, businesses.country`;
+            businesses.timezone, businesses.country, businesses.status`;
   const memberFrom = `FROM business_members
      INNER JOIN businesses ON businesses.id = business_members.business_id
      WHERE business_members.user_id = ?`;
@@ -182,10 +182,14 @@ export async function getAuthContext(context) {
     membership = await context.env.KOPABOOK_DB.prepare(
       `SELECT ${memberCols} ${memberFrom} AND business_members.business_id = ? LIMIT 1`
     ).bind(user.id, sessionRow.session_business_id).first();
+    // A closed business is never the active one; fall through to an active business.
+    if (membership && membership.status === "closed") membership = null;
   }
   if (!membership) {
     membership = await context.env.KOPABOOK_DB.prepare(
-      `SELECT ${memberCols} ${memberFrom} ORDER BY business_members.id ASC LIMIT 1`
+      `SELECT ${memberCols} ${memberFrom}
+       AND (businesses.status IS NULL OR businesses.status = 'active')
+       ORDER BY business_members.id ASC LIMIT 1`
     ).bind(user.id).first();
     if (membership) {
       await context.env.KOPABOOK_DB.prepare(

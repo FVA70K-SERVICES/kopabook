@@ -108,3 +108,43 @@ export async function onRequestPatch(context) {
     return json({ ok: false, message: "Could not update customer.", error: String(error) }, 500);
   }
 }
+
+// DELETE /api/customer-profile?id= — delete a customer (owner/partner only).
+// Blocked when the customer has sales or ledger history, so records are
+// never orphaned. Remove or void those first.
+export async function onRequestDelete(context) {
+  try {
+    const auth = await getAuthContext(context);
+    const denied = requireAuth(auth);
+    if (denied) return denied;
+    if (auth.business.role !== "owner" && auth.business.role !== "partner") {
+      return json({ ok: false, message: "Only the owner or a partner can delete customers." }, 403);
+    }
+
+    const id = getId(context);
+    if (!id) return json({ ok: false, message: "Customer id is required." }, 400);
+    const customer = await getCustomer(context, id, auth.business.id);
+    if (!customer) return json({ ok: false, message: "Customer not found." }, 404);
+
+    const db = context.env.KOPABOOK_DB;
+    const salesCount = await db.prepare(
+      `SELECT COUNT(*) AS c FROM sales WHERE customer_id = ? AND business_id = ?`
+    ).bind(id, auth.business.id).first();
+    const ledgerCount = await db.prepare(
+      `SELECT COUNT(*) AS c FROM customer_ledger WHERE customer_id = ?`
+    ).bind(id).first();
+    if (Number(salesCount?.c || 0) > 0 || Number(ledgerCount?.c || 0) > 0) {
+      return json({
+        ok: false,
+        message: "This customer has sales or debt history and cannot be deleted. Their record stays for your books.",
+      }, 409);
+    }
+
+    await db.prepare(`DELETE FROM customers WHERE id = ?`).bind(id).run();
+
+    await audit(context, auth, "customer.delete", "customer", id, { name: customer.name });
+    return json({ ok: true });
+  } catch (error) {
+    return json({ ok: false, message: "Could not delete customer.", error: String(error) }, 500);
+  }
+}

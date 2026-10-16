@@ -88,3 +88,32 @@ export async function onRequestPost(context) {
     return json({ ok: false, message: "Could not record expense.", error: String(error) }, 500);
   }
 }
+
+// DELETE /api/expenses?id= — delete an expense record (owner/partner or expense permission).
+// A supplier purchase behind the expense is kept; only the expense record is removed.
+export async function onRequestDelete(context) {
+  try {
+    const auth = await getAuthContext(context);
+    const denied = requireAuth(auth);
+    if (denied) return denied;
+    const permDenied = requirePerm(auth, "can_manage_expenses", "Only staff with expense permission can delete expenses.");
+    if (permDenied) return permDenied;
+
+    const url = new URL(context.request.url);
+    const id = Number(url.searchParams.get("id")) || null;
+    if (!id) return json({ ok: false, message: "Expense id is required." }, 400);
+
+    const db = context.env.KOPABOOK_DB;
+    const row = await db.prepare(
+      `SELECT id, amount FROM expenses WHERE id = ? AND business_id = ? LIMIT 1`
+    ).bind(id, auth.business.id).first();
+    if (!row) return json({ ok: false, message: "Expense not found." }, 404);
+
+    await db.prepare(`DELETE FROM expenses WHERE id = ?`).bind(id).run();
+
+    await audit(context, auth, "expense.delete", "expense", id, { amount: row.amount });
+    return json({ ok: true });
+  } catch (error) {
+    return json({ ok: false, message: "Could not delete expense.", error: String(error) }, 500);
+  }
+}

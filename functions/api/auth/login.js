@@ -41,7 +41,11 @@ export async function onRequestPost(context) {
     const token = newSessionToken();
     const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000);
     const firstBiz = await context.env.KOPABOOK_DB.prepare(
-      `SELECT business_id FROM business_members WHERE user_id = ? ORDER BY id ASC LIMIT 1`
+      `SELECT business_members.business_id FROM business_members
+       INNER JOIN businesses ON businesses.id = business_members.business_id
+       WHERE business_members.user_id = ?
+         AND (businesses.status IS NULL OR businesses.status = 'active')
+       ORDER BY business_members.id ASC LIMIT 1`
     ).bind(user.id).first();
     await context.env.KOPABOOK_DB.prepare(
       `INSERT INTO sessions (user_id, session_token, expires_at, last_seen_at, business_id)

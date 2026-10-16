@@ -17,7 +17,7 @@ export async function onRequestGet(context) {
   if (denied) return denied;
 
   const rows = await context.env.KOPABOOK_DB.prepare(
-    `SELECT b.id, b.name, b.business_type, m.role,
+    `SELECT b.id, b.name, b.business_type, b.status, m.role,
             (SELECT COUNT(*) FROM business_members WHERE business_id = b.id) AS member_count
      FROM businesses b
      JOIN business_members m ON m.business_id = b.id
