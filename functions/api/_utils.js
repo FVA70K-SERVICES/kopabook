@@ -214,6 +214,7 @@ export async function getAuthContext(context) {
       email: user.email,
       role: user.role,
       status: user.status,
+      isPlatformAdmin: !!user.is_platform_admin,
     },
     business: membership
       ? {

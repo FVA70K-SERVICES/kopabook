@@ -90,6 +90,16 @@ export default function Layout({ session, children }) {
             </div>
           ))}
         </nav>
+        {session.user?.isPlatformAdmin && (
+          <nav className="snav">
+            <div className="nav-group">
+              <div className="nav-group-label">Platform</div>
+              <a href="/app/admin" className={navCls("/app/admin")} title="Admin">
+                <span className="nico">👑</span><span className="lbl">Admin</span>
+              </a>
+            </div>
+          </nav>
+        )}
         <div className="user">
           <div className="uinfo">
             <div>{session.user?.fullName}</div>

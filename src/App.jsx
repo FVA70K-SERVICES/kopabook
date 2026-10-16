@@ -24,6 +24,7 @@ import ReportsPage from "./pages/Reports";
 import StaffPage from "./pages/Staff";
 import SettingsPage from "./pages/Settings";
 import ActivityPage from "./pages/Activity";
+import AdminPage from "./pages/Admin";
 import { NAV_MODULES, modulesForRole } from "./lib/businessTypes";
 
 function useSession() {
@@ -104,6 +105,7 @@ function AppRoute({ session }) {
     else if (path === "/app/reports") page = <ReportsPage />;
     else if (path === "/app/staff") page = <StaffPage session={session} />;
     else if (path === "/app/settings") page = <SettingsPage session={session} />;
+    else if (path === "/app/admin") page = <AdminPage />;
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
     // Staff see only their role's workspace, even by direct link.
     const roleModules = modulesForRole(session.business?.role);
