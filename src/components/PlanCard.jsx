@@ -228,6 +228,18 @@ export default function PlanCard() {
             <div className="card" style={{ marginTop: 12, background: "var(--bg-soft, #f8fafc)" }}>
               <h4 style={{ marginTop: 0 }}>Pay {cryptoQuote.amount_label} for {cryptoQuote.tier}</h4>
               <p className="hint" style={{ marginBottom: 6 }}>Network: <strong>{cryptoQuote.network}</strong>. Complete within 24 hours.</p>
+              <div style={{ textAlign: "center", marginBottom: 8 }}>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(cryptoQuote.wallet_address)}`}
+                  alt="Scan wallet address"
+                  width={180}
+                  height={180}
+                  loading="lazy"
+                  style={{ borderRadius: 8, border: "1px solid var(--border)", background: "#fff" }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+                <p className="hint" style={{ margin: "4px 0 0" }}>Scan with your wallet app</p>
+              </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
                 <code style={{ wordBreak: "break-all", flex: 1, fontSize: 13 }}>{cryptoQuote.wallet_address}</code>
                 <button type="button" className="btn btn-sm btn-secondary" onClick={copyAddress}>
