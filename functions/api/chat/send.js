@@ -15,12 +15,24 @@ function getKopaBookResponse(message) {
         return {
           answer: entry.answer,
           quickReplies: entry.quickReplies || [],
-          escalate: entry.escalate || false
+          escalate: entry.escalate || false,
+          confidence: 'high'
         };
       }
     }
   }
-  return null;
+  // No KopaBook match - ask, don't guess
+  const clarifiers = [
+    `I don't want to guess wrong. Are you asking about pricing, features, or how to get started with KopaBook?`,
+    `Could you tell me a bit more? I can help with pricing, features, stock, or any problem you're having.`,
+    `I want to give you the right answer. Is this about your business, our plans, or something else?`,
+  ];
+  return {
+    answer: clarifiers[Math.floor(Math.random() * clarifiers.length)],
+    quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human'],
+    escalate: false,
+    confidence: 'low'
+  };
 }
 
 async function getSiteMemory(env, siteId) {

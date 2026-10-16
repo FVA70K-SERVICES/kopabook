@@ -80,9 +80,11 @@ const KNOWLEDGE = [
   },
 ];
 
-const FALLBACK_RESPONSES = [
-  'That\'s a great question. Let me connect you with a team member who can give you the exact answer. One moment...',
-  'I want to make sure you get the right answer. I\'ve flagged this for our team. Can I help with anything else meanwhile?',
+const CLARIFYING_RESPONSES = [
+  // Instead of guessing, ask what they mean
+  (msg) => `I want to make sure I understand you correctly. Are you asking about our pricing, features, or something else?`,
+  (msg) => `Hmm, I don't want to guess wrong. Could you tell me a bit more about what you need help with?`,
+  (msg) => `I want to give you the right answer. Is this about getting started, pricing, or a problem you're having?`,
 ];
 
 export function getBotResponse(message, siteConfig = {}) {
@@ -109,12 +111,12 @@ export function getBotResponse(message, siteConfig = {}) {
     }
   }
 
-  // No match - fallback with escalation
-  const fallback = FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
+  // No match - ASK, don't guess. Never escalate on first unclear message.
+  const clarifier = CLARIFYING_RESPONSES[Math.floor(Math.random() * CLARIFYING_RESPONSES.length)];
   return {
-    answer: fallback,
-    quickReplies: ['Talk to human', 'Pricing', 'Our services'],
-    escalate: true,
+    answer: clarifier(message),
+    quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human'],
+    escalate: false,
     confidence: 'low'
   };
 }
