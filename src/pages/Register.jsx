@@ -3,6 +3,7 @@ import { nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
 import { ORG_TYPES, WORLD_CURRENCIES, COUNTRIES } from "../lib/businessTypes";
 import Logo from "../components/Logo";
+import HumanCheck, { FVA_VERIFY_SITEKEY } from "../components/HumanCheck";
 
 export default function RegisterPage({ preset }) {
   const [orgKey, setOrgKey] = useState(preset || "");
@@ -17,6 +18,7 @@ export default function RegisterPage({ preset }) {
     timezone: detectedTz,
   });
   const [status, setStatus] = useState({ loading: false, error: "" });
+  const [humanToken, setHumanToken] = useState(null);
 
   const org = ORG_TYPES.find((t) => t.key === orgKey);
   const nameLabel = orgKey === "hotel" ? "Hotel name *" : "Business name *";
@@ -26,13 +28,17 @@ export default function RegisterPage({ preset }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (FVA_VERIFY_SITEKEY && !humanToken) {
+      setStatus({ loading: false, error: "Please tick the 'Verify you are human' box." });
+      return;
+    }
     setStatus({ loading: true, error: "" });
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ ...form, businessType: orgKey, customType: orgKey === "other" ? customType.trim() : undefined }),
+        body: JSON.stringify({ ...form, businessType: orgKey, customType: orgKey === "other" ? customType.trim() : undefined, fvaverify_token: humanToken }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) throw new Error(data.message || "Registration failed.");
@@ -107,6 +113,7 @@ export default function RegisterPage({ preset }) {
                 )}</div>
                 <div><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder={form.country === "Nigeria" ? "e.g. Asaba" : "e.g. Accra"} /></div>
               </div></div>
+              <HumanCheck onToken={setHumanToken} />
               <button className="btn btn-primary btn-block" disabled={status.loading}>
                 {status.loading ? "Creating your account..." : "Create my account"}
               </button>

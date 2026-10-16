@@ -3,6 +3,7 @@
 // to 5 requests per email per hour to prevent mail bombing.
 import { json } from "../_utils";
 import { sha256Hex, randomToken, sendMail, resetPasswordEmail } from "../_mail";
+import { verifyHumanToken } from "../_fvaverify";
 
 export async function onRequestPost(context) {
   try {
@@ -10,6 +11,12 @@ export async function onRequestPost(context) {
     const email = String(body.email || "").trim().toLowerCase();
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return json({ ok: false, message: "Enter a valid email address." }, 400);
+    }
+
+    // FVAVerify human check (skipped until FVAVerify is live and configured).
+    const human = await verifyHumanToken(context.env, body.fvaverify_token);
+    if (human && !human.ok) {
+      return json({ ok: false, message: human.message }, 403);
     }
 
     const db = context.env.KOPABOOK_DB;

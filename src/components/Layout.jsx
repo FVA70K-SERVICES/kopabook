@@ -22,6 +22,8 @@ const ALL_LINKS = [
   { to: "/app/reports", label: "Reports", icon: "📈" },
   { to: "/app/staff", label: "Staff", icon: "🧑‍💼" },
   { to: "/app/activity", label: "Activity", icon: "🕒" },
+  { to: "/app/notebook", label: "Notebook", icon: "📓" },
+  { to: "/app/calculator", label: "Calculator", icon: "🧮" },
   { to: "/app/settings", label: "Settings", icon: "⚙️" },
 ];
 

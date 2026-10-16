@@ -334,3 +334,9 @@ table.data tr:first-child td { border-top: 0; }
   .receipt-paper { box-shadow: none; margin: 0; padding: 0; }
   @page { margin: 3mm; }
 }
+
+/* Desktop-only sections (e.g. Developer API): hidden on mobile to keep the
+   small-screen arrangement clean. */
+@media (max-width: 860px) {
+  .desktop-only { display: none !important; }
+}

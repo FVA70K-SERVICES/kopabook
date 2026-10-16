@@ -3,6 +3,7 @@ import { api, nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
 import { WORLD_CURRENCIES, WORLD_TIMEZONES, COUNTRIES, ORG_TYPES } from "../lib/businessTypes";
 import PaymentModesEditor from "../components/PaymentModesEditor";
+import DeveloperApi from "../components/DeveloperApi";
 import PlanCard from "../components/PlanCard";
 
 export default function SettingsPage({ session }) {
@@ -254,6 +255,12 @@ export default function SettingsPage({ session }) {
           <h3 style={{ marginTop: 0 }}>🕒 Activity & security</h3>
           <p className="hint">See every important action in this business, who did it and when. The log is permanent and cannot be edited.</p>
           <button className="btn btn-secondary" onClick={() => nav("/app/activity")}>View activity log</button>
+        </div>
+      )}
+
+      {isOwner && (
+        <div className="card narrow desktop-only" style={{ marginTop: 18 }}>
+          <DeveloperApi />
         </div>
       )}
 

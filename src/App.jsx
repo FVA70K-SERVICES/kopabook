@@ -25,6 +25,8 @@ import ReportsPage from "./pages/Reports";
 import StaffPage from "./pages/Staff";
 import SettingsPage from "./pages/Settings";
 import ActivityPage from "./pages/Activity";
+import NotebookPage from "./pages/Notebook";
+import CalculatorPage from "./pages/Calculator";
 import AdminPage from "./pages/Admin";
 import { NAV_MODULES, modulesForRole, orgTypeFor } from "./lib/businessTypes";
 
@@ -118,6 +120,8 @@ function AppRoute({ session }) {
     else if (path === "/app/settings") page = <SettingsPage session={session} />;
     else if (path === "/app/admin") page = <AdminPage />;
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
+    else if (path === "/app/notebook") page = <NotebookPage session={session} />;
+    else if (path === "/app/calculator") page = <CalculatorPage />;
     // Staff see only their role's workspace, even by direct link.
     // Business types only see the modules that fit them, even by direct link
     // (e.g. Hotels never opens for a provision store).

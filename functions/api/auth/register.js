@@ -10,6 +10,7 @@ import {
   sessionCookieHeader,
   audit,
 } from "../_utils";
+import { verifyHumanToken } from "../_fvaverify";
 
 const DEFAULT_MODES = [
   ["Cash", 1],
@@ -35,6 +36,12 @@ export async function onRequestPost(context) {
     const cleanEmail = String(email).trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return json({ ok: false, message: "Enter a valid email address." }, 400);
+    }
+
+    // FVAVerify human check (skipped until FVAVerify is live and configured).
+    const human = await verifyHumanToken(context.env, body.fvaverify_token);
+    if (human && !human.ok) {
+      return json({ ok: false, message: human.message }, 403);
     }
 
     const db = context.env.KOPABOOK_DB;

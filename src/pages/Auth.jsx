@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, nav } from "../lib/api";
 import Logo from "../components/Logo";
+import HumanCheck, { FVA_VERIFY_SITEKEY } from "../components/HumanCheck";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
@@ -49,13 +50,18 @@ export function LoginPage() {
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
+  const [humanToken, setHumanToken] = useState(null);
   const [status, setStatus] = useState({ loading: false, error: "", ok: "" });
 
   async function submit(e) {
     e.preventDefault();
+    if (FVA_VERIFY_SITEKEY && !humanToken) {
+      setStatus({ loading: false, error: "Please tick the 'Verify you are human' box.", ok: "" });
+      return;
+    }
     setStatus({ loading: true, error: "", ok: "" });
     try {
-      const d = await api.post("/api/auth/forgot", { email });
+      const d = await api.post("/api/auth/forgot", { email, fvaverify_token: humanToken });
       setStatus({ loading: false, error: "", ok: d.message || "Check your inbox for the reset link." });
     } catch (err) {
       setStatus({ loading: false, error: err.message, ok: "" });
@@ -77,6 +83,7 @@ export function ForgotPasswordPage() {
           </p>
           <form onSubmit={submit}>
             <div className="field"><label>Account email *</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" /></div>
+            <HumanCheck onToken={setHumanToken} />
             <button className="btn btn-primary btn-block" disabled={status.loading}>
               {status.loading ? "Sending..." : "Send reset link"}
             </button>

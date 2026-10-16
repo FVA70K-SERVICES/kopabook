@@ -246,6 +246,53 @@ function Payments() {
   );
 }
 
+function ApiKeys() {
+  const [d, setD] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api.get("/api/admin/api-keys").then(setD).catch((e) => setError(e.message));
+  }, []);
+  async function revoke(id) {
+    if (!window.confirm("Revoke this API key? The developer's app will stop working immediately.")) return;
+    try {
+      await api.del("/api/admin/api-keys?id=" + id);
+      const nd = await api.get("/api/admin/api-keys");
+      setD(nd);
+    } catch (e) { setError(e.message); }
+  }
+  if (error) return <div className="alert alert-error">{error}</div>;
+  if (!d) return <p className="hint">Loading...</p>;
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Developer API keys</h3>
+      <p className="hint">{d.activeCount} active keys across the platform. Full control: revoke any key here.</p>
+      <div style={{ overflowX: "auto" }}>
+        <table>
+          <thead><tr><th>Business</th><th>Key</th><th>Prefix</th><th>Status</th><th>Hits/hr</th><th>Last used</th><th>Created</th><th></th></tr></thead>
+          <tbody>
+            {(d.keys || []).map((k) => (
+              <tr key={k.id}>
+                <td><small>{k.business_name}<br />{k.owner_email}</small></td>
+                <td>{k.name}</td>
+                <td><code style={{ fontSize: 12 }}>{k.key_prefix}...</code></td>
+                <td>{k.status === "active"
+                  ? <span style={{ color: "#1a6b3c" }}>active</span>
+                  : <span style={{ color: "#b3261e" }}>revoked</span>}</td>
+                <td>{k.hits_last_hour ?? "-"}</td>
+                <td><small>{k.last_used_at ? String(k.last_used_at).slice(0, 16) : "never"}</small></td>
+                <td><small>{String(k.created_at).slice(0, 10)}</small></td>
+                <td>{k.status === "active" && (
+                  <button className="btn btn-secondary btn-sm" onClick={() => revoke(k.id)}>Revoke</button>
+                )}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function CryptoPayments() {
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState("");
@@ -366,6 +413,7 @@ export default function AdminPage() {
         <Tab id="payments" label="Payments" active={tab} set={setTab} />
         <Tab id="crypto" label="Crypto" active={tab} set={setTab} />
         <Tab id="plans" label="Plans & fees" active={tab} set={setTab} />
+        <Tab id="apikeys" label="API keys" active={tab} set={setTab} />
       </div>
       {tab === "overview" && <Overview />}
       {tab === "accounts" && <Accounts />}
@@ -373,6 +421,7 @@ export default function AdminPage() {
       {tab === "payments" && <Payments />}
       {tab === "crypto" && <CryptoPayments />}
       {tab === "plans" && <Plans />}
+      {tab === "apikeys" && <ApiKeys />}
     </>
   );
 }
