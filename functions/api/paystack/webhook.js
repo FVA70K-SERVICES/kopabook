@@ -1,6 +1,6 @@
 // POST /api/paystack/webhook — Paystack event webhook.
 // Paystack signs every event with HMAC SHA512 of the raw body using the secret key.
-// Configure this URL in the Paystack dashboard: https://kopabook-bop.pages.dev/api/paystack/webhook
+// Configure this URL in the Paystack dashboard: https://kopabook.com/api/paystack/webhook
 import { activateSubscription } from "./verify";
 
 export async function onRequestPost(context) {

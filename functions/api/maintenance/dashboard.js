@@ -2,7 +2,7 @@
 // GET /api/maintenance/dashboard?key=xxx - overview of all services
 
 const SERVICES = [
-  { id: 'kopabook', name: 'KopaBook', url: 'https://kopabook-bop.pages.dev', type: 'internal' },
+  { id: 'kopabook', name: 'KopaBook', url: 'https://kopabook.com', type: 'internal' },
   { id: 'fva70k', name: 'FVA70K Services', url: 'https://fva70k.com', type: 'internal' },
   { id: 'fixpro', name: 'FixPro Hub', url: 'https://fixprohub.ng', type: 'internal' },
   { id: 'gou', name: 'Global Open University', url: 'https://globalopenuniversity.online', type: 'internal' },
