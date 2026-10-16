@@ -174,7 +174,7 @@ export function PricingPage() {
             <div className="card price-card">
               <div className="tier">Starter</div>
               <div className="amount">NGN 1,000</div>
-              <p style={{ color: "var(--muted)" }}>Per month. For growing shops with attendants.</p>
+              <p style={{ color: "var(--muted)" }}>Per month, or NGN 10,000 per year (2 months free). For growing shops with attendants.</p>
               <ul>
                 <li>5 businesses</li>
                 <li>1,000 sales per week, per business</li>
@@ -188,7 +188,7 @@ export function PricingPage() {
             <div className="card price-card">
               <div className="tier">Pro</div>
               <div className="amount">NGN 2,500</div>
-              <p style={{ color: "var(--muted)" }}>Per month. For bigger businesses running multiple shops.</p>
+              <p style={{ color: "var(--muted)" }}>Per month, or NGN 25,000 per year (2 months free). For bigger businesses running multiple shops.</p>
               <ul>
                 <li>Unlimited businesses</li>
                 <li>Unlimited sales and products</li>
@@ -203,9 +203,9 @@ export function PricingPage() {
           <div className="card" style={{ marginTop: 24 }}>
             <h3>How upgrading works</h3>
             <p style={{ color: "var(--muted)" }}>
-              KopaBook never takes money inside the app. When you hit a free limit, tap upgrade in your
-              settings and we will reach you on WhatsApp to arrange payment by bank transfer.
-              Your new limits turn on as soon as payment is confirmed. Sales recording is never blocked, on any plan.
+              When you hit a free limit, upgrade from your settings in one tap and pay securely with
+              Paystack. Monthly or yearly billing, your choice. Your new limits turn on immediately
+              after payment. Recording a sale is never blocked, on any plan.
             </p>
           </div>
           <div className="card" style={{ marginTop: 24 }}>
