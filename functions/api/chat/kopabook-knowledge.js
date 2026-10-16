@@ -4,18 +4,23 @@
 export const KOPABOOK_KNOWLEDGE = [
   {
     patterns: ['price', 'cost', 'how much', 'pricing', 'fee', 'subscription', 'plan'],
-    answer: 'KopaBook is free to start! Here are the plans:\n\n• Free: 2 businesses, 100 products, 2 staff\n• Starter: NGN 1,000/month or NGN 10,000/year (5 businesses, 1,000 products, 5 staff)\n• Pro: NGN 2,500/month or NGN 25,000/year (unlimited everything)\n\nYearly plans save you 2 months! Sales are never blocked on any plan.',
-    quickReplies: ['Start free', 'See features', 'Talk to human']
+    answer: 'KopaBook is free to start! Here are the plans:\n\n• Free: 2 businesses, 100 products, 2 staff\n• Starter: NGN 1,000/month (5 businesses, 1,000 products, 5 staff)\n• Solo: NGN 5,000/month (1 business + AI worker that briefs you, tracks stock, sets reminders)\n• Pro: NGN 2,500/month (unlimited everything)\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want me to help you pick?',
+    quickReplies: ['Start free', 'What is Solo?', 'Talk to human']
+  },
+  {
+    patterns: ['what is solo', 'solo plan', 'solo tier', 'ai worker'],
+    answer: 'Solo is for single-shop owners who want an AI assistant. For NGN 5,000/month, Kopa Bot becomes your worker: it briefs you every morning, alerts you when stock runs low, reminds you of tasks, tracks your targets, and answers customer questions. Like having staff without the salary!',
+    quickReplies: ['Pricing', 'Start free', 'Talk to human']
   },
   {
     patterns: ['what is kopabook', 'about kopabook', 'what does', 'features'],
-    answer: 'KopaBook is the best free record book for Nigerian local businesses. Track sales, stock, debts, expenses, staff, and customers, all in one app. It works offline, so no network wahala!',
+    answer: 'KopaBook is the best free record book for Nigerian local businesses. Track sales, stock, debts, expenses, staff, and customers, all in one app. It works offline, so no network wahala! What would you like to know more about?',
     quickReplies: ['Pricing', 'How to start', 'Talk to human']
   },
   {
     patterns: ['how to start', 'sign up', 'register', 'create account', 'get started'],
     answer: 'Getting started is easy:\n1. Create your free account\n2. Add your business\n3. Start recording sales\n\nNo card needed for the free plan. Want me to guide you?',
-    quickReplies: ['Pricing', 'Features', 'Talk to human']
+    quickReplies: ['Yes, guide me', 'Pricing', 'Talk to human']
   },
   {
     patterns: ['offline', 'no network', 'internet'],

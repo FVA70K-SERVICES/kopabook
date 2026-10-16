@@ -5,6 +5,7 @@ import { handleBookingMessage } from './booking-flow.js';
 import { DEFAULT_MEMORY } from './business-memory.js';
 import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY } from './kopabook-knowledge.js';
 import { handleOwnerCommand } from './bot-owner.js';
+import { handleFollowUp } from './bot-memory.js';
 
 function getKopaBookResponse(message) {
   const lower = message.toLowerCase().trim();
@@ -88,6 +89,15 @@ export async function onRequestPost({ request, env }) {
       if (!recentAgent) {
         let result = null;
 
+        // Load recent conversation for context (bot memory)
+        let recentMessages = [];
+        try {
+          const hist = await env.KOPABOOK_DB.prepare(
+            'SELECT sender, message FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 6'
+          ).bind(sessionId).all();
+          recentMessages = (hist.results || []).reverse();
+        } catch {}
+
         // Owner/staff mode: try business commands first
         if (ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
           try {
@@ -97,17 +107,16 @@ export async function onRequestPost({ request, env }) {
               userId: ownerCtx.userId,
               userName: ownerCtx.userName,
               userRole: ownerCtx.userRole || 'owner',
-              tier: plan || 'free'
+              tier: plan || 'free',
+              history: recentMessages
             });
-            if (ownerResult) {
-              result = ownerResult;
-            } else {
-              // Debug: owner command returned null
-              result = { answer: `[DEBUG] Owner mode active but no command matched for: "${clean}". Tier: ${plan}`, quickReplies: [] };
-            }
-          } catch (e) {
-            result = { answer: `[DEBUG] Owner command error: ${e.message}`, quickReplies: [] };
-          }
+            if (ownerResult) result = ownerResult;
+          } catch (e) {}
+        }
+
+        // Handle follow-ups ("yes", "no", "ok") using conversation context
+        if (!result) {
+          result = handleFollowUp(clean, recentMessages, siteConfig);
         }
 
         // Try order flow first, then booking flow, then knowledge
