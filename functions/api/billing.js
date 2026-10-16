@@ -15,14 +15,20 @@ export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", pro: "NGN
 
 export async function getAccountTier(db, userId) {
   const row = await db.prepare(
-    `SELECT tier, status FROM account_subscriptions WHERE user_id = ? LIMIT 1`
+    `SELECT tier, status, billing_cycle, current_period_end FROM account_subscriptions WHERE user_id = ? LIMIT 1`
   ).bind(userId).first();
   const tier = row && LIMITS[row.tier] ? row.tier : "free";
   // A pending upgrade keeps the old tier until payment is confirmed.
   if (row && row.status === "pending") {
-    return { tier: "free", pendingTier: row.tier, status: "pending" };
+    return { tier: "free", pendingTier: row.tier, status: "pending", billingCycle: null, periodEnd: null };
   }
-  return { tier, pendingTier: null, status: row ? row.status : "active" };
+  return {
+    tier,
+    pendingTier: null,
+    status: row ? row.status : "active",
+    billingCycle: row ? row.billing_cycle : null,
+    periodEnd: row ? row.current_period_end : null,
+  };
 }
 
 // Tier of the account that owns a business (staff act under the owner's plan).
@@ -52,7 +58,7 @@ export async function onRequestGet(context) {
     if (denied) return denied;
 
     const db = context.env.KOPABOOK_DB;
-    const { tier, pendingTier, status } = await getAccountTier(db, auth.user.id);
+    const { tier, pendingTier, status, billingCycle, periodEnd } = await getAccountTier(db, auth.user.id);
     const limits = LIMITS[tier];
     const businessId = auth.business.id;
 
@@ -79,6 +85,8 @@ export async function onRequestGet(context) {
       price: TIER_PRICES[tier],
       status,
       pendingTier,
+      billing_cycle: billingCycle,
+      current_period_end: periodEnd,
       limits,
       usage: {
         businesses: bizRow ? bizRow.n : 0,

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
+const PRICES = {
+  starter: { monthly: "NGN 1,000/month", yearly: "NGN 10,000/year" },
+  pro: { monthly: "NGN 2,500/month", yearly: "NGN 25,000/year" },
+};
+
 function bar(used, limit) {
   if (limit === null || limit === undefined) return null;
   const pct = Math.min(100, Math.round((Number(used) / Math.max(1, limit)) * 100));
@@ -13,25 +18,45 @@ function bar(used, limit) {
 
 export default function PlanCard() {
   const [plan, setPlan] = useState(null);
-  const [upgrading, setUpgrading] = useState(false);
+  const [cycle, setCycle] = useState("monthly");
+  const [paying, setPaying] = useState("");
   const [msg, setMsg] = useState("");
+  const [verifying, setVerifying] = useState(false);
+
+  async function load() {
+    try { setPlan(await api.get("/api/billing")); } catch (e) {}
+  }
 
   useEffect(() => {
-    api.get("/api/billing").then(setPlan).catch(() => {});
+    load();
+    // Returning from Paystack: verify the payment.
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("payment");
+    if (ref) {
+      setVerifying(true);
+      api.get("/api/billing/verify?reference=" + encodeURIComponent(ref))
+        .then((d) => {
+          setMsg(d.message || "Payment confirmed.");
+          load();
+        })
+        .catch((e) => setMsg(e.message))
+        .finally(() => {
+          setVerifying(false);
+          window.history.replaceState({}, "", "/app/settings");
+        });
+    }
   }, []);
 
-  async function upgrade(tier) {
-    setUpgrading(true);
+  async function checkout(tier) {
+    setPaying(tier);
     setMsg("");
     try {
-      const d = await api.post("/api/billing", { tier });
-      setMsg(d.message || "Request noted.");
-      const fresh = await api.get("/api/billing");
-      setPlan(fresh);
+      const d = await api.post("/api/billing/checkout", { tier, cycle });
+      window.location.href = d.authorization_url;
     } catch (e) {
       setMsg(e.message);
+      setPaying("");
     }
-    setUpgrading(false);
   }
 
   if (!plan || !plan.ok) return null;
@@ -44,11 +69,11 @@ export default function PlanCard() {
       <h3 style={{ marginTop: 0 }}>Your plan: {plan.tierName}</h3>
       <p className="hint" style={{ marginTop: 0 }}>
         {plan.price}
-        {plan.status === "pending" && plan.pendingTier && (
-          <> · Upgrade to {plan.pendingTier} requested, we will contact you on WhatsApp to complete payment.</>
-        )}
+        {plan.current_period_end && <> · renews {String(plan.current_period_end).slice(0, 10)}</>}
+        {verifying && <> · confirming your payment...</>}
       </p>
       {msg && <div className="alert alert-ok">{msg}</div>}
+
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 12px" }}>
         <li style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -76,24 +101,35 @@ export default function PlanCard() {
           {bar(u.staff, l.staff)}
         </li>
       </ul>
-      {plan.tier === "free" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn btn-primary btn-sm" disabled={upgrading} onClick={() => upgrade("starter")}>
-            Upgrade to Starter (NGN 1,000/mo)
-          </button>
-          <button className="btn btn-secondary btn-sm" disabled={upgrading} onClick={() => upgrade("pro")}>
-            Upgrade to Pro (NGN 2,500/mo)
-          </button>
-        </div>
-      )}
-      {plan.tier === "starter" && (
-        <button className="btn btn-primary btn-sm" disabled={upgrading} onClick={() => upgrade("pro")}>
-          Upgrade to Pro (NGN 2,500/mo)
-        </button>
+
+      {plan.tier !== "pro" && (
+        <>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            {(["monthly", "yearly"]).map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={"btn btn-sm " + (cycle === c ? "btn-primary" : "btn-secondary")}
+                onClick={() => setCycle(c)}
+              >
+                {c === "monthly" ? "Monthly" : "Yearly (2 months free)"}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {plan.tier === "free" && (
+              <button className="btn btn-primary btn-sm" disabled={!!paying} onClick={() => checkout("starter")}>
+                {paying === "starter" ? "Opening Paystack..." : `Pay ${PRICES.starter[cycle]} for Starter`}
+              </button>
+            )}
+            <button className="btn btn-secondary btn-sm" disabled={!!paying} onClick={() => checkout("pro")}>
+              {paying === "pro" ? "Opening Paystack..." : `Pay ${PRICES.pro[cycle]} for Pro`}
+            </button>
+          </div>
+        </>
       )}
       <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
-        KopaBook never takes money inside the app. After you request an upgrade we reach you on
-        WhatsApp to arrange payment, then your new limits turn on.
+        Secure payment by Paystack. Your plan activates immediately after payment.
       </p>
     </div>
   );
