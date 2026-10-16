@@ -12,7 +12,8 @@ function daysSince(iso) {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 }
 
-export default function CustomerDetailPage({ customerId }) {
+export default function CustomerDetailPage({ customerId, session }) {
+  const canDelete = ["owner", "partner"].includes(session?.business?.role);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -122,7 +123,24 @@ export default function CustomerDetailPage({ customerId }) {
     <>
       <div className="page-head">
         <button className="btn btn-secondary btn-sm" onClick={() => nav("/app/customers")}>← Customers</button>
-        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit"}</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit"}</button>
+          {canDelete && (
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ color: "var(--danger, #b91c1c)" }}
+              onClick={async () => {
+                if (!window.confirm("Delete this customer? This is only possible if they have no sales or debt history.")) return;
+                try {
+                  await api.del(`/api/customer-profile?id=${customerId}`);
+                  nav("/app/customers");
+                } catch (e) { setError(e.message); }
+              }}
+            >
+              Delete
+            </button>
+          )}
+        </div>
       </div>
       {error && <div className="alert alert-error">{error}</div>}
 

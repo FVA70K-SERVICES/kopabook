@@ -4,7 +4,8 @@ import { waLink, receiptText } from "../lib/whatsapp";
 import { receiptCardUrl, shareCard } from "../lib/shareCards";
 import MessageSale from "../components/MessageSale";
 
-export default function SalesPage() {
+export default function SalesPage({ session }) {
+  const canVoid = ["owner", "partner"].includes(session?.business?.role);
   const [view, setView] = useState("new"); // new | history
   const [products, setProducts] = useState([]);
   const [catalog, setCatalog] = useState("products"); // products | services
@@ -46,6 +47,13 @@ export default function SalesPage() {
     try {
       const d = await api.get(`/api/sales?from=${dateFilter}&to=${dateFilter}&limit=100`);
       setHistory(d.sales);
+    } catch (e) { setError(e.message); }
+  }
+
+  async function voidSale(id) {
+    try {
+      await api.del(`/api/sales/${id}`);
+      loadHistory();
     } catch (e) { setError(e.message); }
   }
   useEffect(() => { if (view === "history") loadHistory(); }, [view, dateFilter]);
@@ -256,7 +264,20 @@ export default function SalesPage() {
                     <td className="money">{fmt(s.amount_paid)}</td>
                     <td className={Number(s.balance_due) > 0 ? "money debt-amt" : "money"}>{fmt(s.balance_due)}</td>
                     <td><small>{s.created_at?.slice(11, 16)}</small></td>
-                    <td><a className="btn btn-secondary btn-sm" href={`/app/receipt/sale/${s.id}`} target="_blank" rel="noreferrer">🧾</a></td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <a className="btn btn-secondary btn-sm" href={`/app/receipt/sale/${s.id}`} target="_blank" rel="noreferrer">🧾</a>
+                      {canVoid && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ color: "var(--danger, #b91c1c)", marginLeft: 6 }}
+                          onClick={() => {
+                            if (window.confirm(`Void sale ${s.sale_number}? Stock will be restored.`)) voidSale(s.id);
+                          }}
+                        >
+                          Void
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
