@@ -72,7 +72,7 @@ export function LandingPage() {
           </p>
           <div className="hero-cta">
             <a href="/waitlist" className="btn btn-primary">Start free</a>
-            <a href="/features" className="btn btn-secondary">See how it works</a>
+            <a href="#how-it-works" className="btn btn-secondary">See how it works</a>
           </div>
           <p className="hero-proof">Made for provision stores, phone sellers, fashion vendors and market traders.</p>
         </div>
@@ -93,9 +93,15 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
+      <section id="how-it-works" className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
         <div className="wrap">
           <h2>How it works</h2>
+          <div style={{ maxWidth: 760, margin: "0 auto 30px" }}>
+            <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
+              <iframe src="https://www.youtube.com/embed/nJeMpDLDKUo" title="KopaBook: How It Works - The Free Record Book for Your Business" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
+            </div>
+            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Watch the full 3-minute tour of KopaBook.</p>
+          </div>
           <div className="steps narrow" style={{ margin: "30px auto" }}>
             <div className="step"><div className="n">1</div><div><strong>Add your products once.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Name, price, opening stock. Done in minutes.</p></div></div>
             <div className="step"><div className="n">2</div><div><strong>Record sales as they happen.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Pick products, take payment, done. Partial payments become debts automatically.</p></div></div>
