@@ -148,7 +148,7 @@ export async function getAuthContext(context) {
 
   const sessionRow = await context.env.KOPABOOK_DB.prepare(
     `SELECT sessions.user_id, sessions.business_id AS session_business_id,
-            users.id, users.full_name, users.email, users.role, users.status,
+            users.id, users.full_name, users.email, users.phone, users.role, users.status,
             users.is_platform_admin
      FROM sessions
      INNER JOIN users ON users.id = sessions.user_id
@@ -213,6 +213,7 @@ export async function getAuthContext(context) {
       id: user.id,
       fullName: user.full_name,
       email: user.email,
+      phone: user.phone || null,
       role: user.role,
       status: user.status,
       isPlatformAdmin: !!user.is_platform_admin,

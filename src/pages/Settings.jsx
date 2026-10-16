@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
-import { WORLD_CURRENCIES, WORLD_TIMEZONES, COUNTRIES } from "../lib/businessTypes";
+import { WORLD_CURRENCIES, WORLD_TIMEZONES, COUNTRIES, ORG_TYPES } from "../lib/businessTypes";
 import PaymentModesEditor from "../components/PaymentModesEditor";
 import PlanCard from "../components/PlanCard";
 
 export default function SettingsPage({ session }) {
-  const [biz, setBiz] = useState(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [closing, setClosing] = useState(false);
 
@@ -24,17 +23,21 @@ export default function SettingsPage({ session }) {
   const [ok, setOk] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // My profile (own full name)
-  const [myName, setMyName] = useState(session.user?.full_name || "");
+  // My profile (own full name + phone)
+  const [myName, setMyName] = useState(session.user?.fullName || "");
+  const [myPhone, setMyPhone] = useState(session.user?.phone || "");
   const [nameStatus, setNameStatus] = useState({ loading: false, error: "", ok: "" });
 
-  async function saveName(e) {
+  const initials = myName.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
+
+  async function saveProfile(e) {
     e.preventDefault();
     setNameStatus({ loading: true, error: "", ok: "" });
     try {
-      const d = await api.patch("/api/auth/me", { fullName: myName });
+      const d = await api.patch("/api/auth/me", { fullName: myName, phone: myPhone });
       setNameStatus({ loading: false, error: "", ok: d.message || "Profile updated." });
-      window.location.reload();
+      // Refresh the sidebar name without a full page reload.
+      window.dispatchEvent(new CustomEvent("kopabook:profile-updated", { detail: { fullName: myName } }));
     } catch (err) {
       setNameStatus({ loading: false, error: err.message, ok: "" });
     }
@@ -49,7 +52,6 @@ export default function SettingsPage({ session }) {
   useEffect(() => {
     api.get("/api/business")
       .then((d) => {
-        setBiz(d.business);
         setForm({
           name: d.business.name || "", businessType: d.business.business_type || "",
           customType: d.business.custom_type || "",
@@ -105,16 +107,26 @@ export default function SettingsPage({ session }) {
       {error && <div className="alert alert-error">{error}</div>}
       {ok && <div className="alert alert-ok">{ok}</div>}
 
-      <PlanCard />
-
       <div className="card narrow" style={{ margin: "0 0 18px" }}>
         <h3 style={{ marginTop: 0 }}>My profile</h3>
         {nameStatus.error && <div className="alert alert-error">{nameStatus.error}</div>}
         {nameStatus.ok && <div className="alert alert-ok">{nameStatus.ok}</div>}
-        <form onSubmit={saveName}>
-          <div className="field"><label>Full name</label><input value={myName} onChange={(e) => setMyName(e.target.value)} required minLength={2} /></div>
+        <form onSubmit={saveProfile}>
+          <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: "50%", background: "#166534", color: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 20, fontWeight: 700, flexShrink: 0,
+            }}>{initials}</div>
+            <div>
+              <div style={{ fontWeight: 600 }}>{myName || "Your name"}</div>
+              <div className="hint" style={{ margin: 0 }}>{session.user?.email || ""}</div>
+            </div>
+          </div>
+          <div className="field"><label>Full name</label><input value={myName} onChange={(e) => { setMyName(e.target.value); setNameStatus((s) => ({ ...s, ok: "", error: "" })); }} required minLength={2} /></div>
+          <div className="field"><label>Phone (for WhatsApp messages)</label><input value={myPhone} onChange={(e) => { setMyPhone(e.target.value); setNameStatus((s) => ({ ...s, ok: "", error: "" })); }} placeholder="080..." inputMode="tel" /></div>
           <div className="field"><label>Email</label><input value={session.user?.email || ""} disabled /></div>
-          <button className="btn btn-secondary" disabled={nameStatus.loading}>{nameStatus.loading ? "Saving..." : "Save name"}</button>
+          <button className="btn btn-secondary" disabled={nameStatus.loading}>{nameStatus.loading ? "Saving..." : "Save profile"}</button>
         </form>
       </div>
 
@@ -123,7 +135,12 @@ export default function SettingsPage({ session }) {
         <form onSubmit={save}>
           <div className="field"><label>Business name</label><input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={!isOwner} /></div>
           <div className="field"><div className="row2">
-            <div><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} disabled={!isOwner} /></div>
+            <div><label>Business type</label>
+              <select value={form.businessType} onChange={(e) => set("businessType", e.target.value)} disabled={!isOwner}>
+                {ORG_TYPES.map((t) => <option key={t.key} value={t.key}>{t.icon} {t.label}</option>)}
+              </select>
+              <p className="hint" style={{ margin: "4px 0 0" }}>Controls which sections appear in your menu.</p>
+            </div>
             {form.businessType === "other" && (
               <div><label>Custom type</label><input value={form.customType} onChange={(e) => set("customType", e.target.value)} disabled={!isOwner} placeholder="e.g. Logistics company" /></div>
             )}
@@ -159,6 +176,10 @@ export default function SettingsPage({ session }) {
             ? <button className="btn btn-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
             : <p style={{ color: "var(--muted)" }}>Only the owner or a partner can change business settings.</p>}
         </form>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <PlanCard />
       </div>
 
       <div className="card narrow" style={{ marginTop: 18 }}>
@@ -254,14 +275,6 @@ export default function SettingsPage({ session }) {
         <h3 style={{ marginTop: 0 }}>Backups</h3>
         <p className="hint">Save a full copy of your business data (products, customers, sales, debts and more) to your R2 bucket. Download any backup to keep it safe.</p>
         <BackupCard />
-      </div>
-
-      <div className="card narrow" style={{ marginTop: 18 }}>
-        <h3 style={{ marginTop: 0 }}>Plan</h3>
-        <p style={{ color: "var(--muted)", margin: "0 0 6px" }}>
-          Current plan: <strong style={{ textTransform: "capitalize" }}>{biz?.plan_tier || "free"}</strong>
-        </p>
-        <p style={{ color: "var(--muted)", margin: 0 }}>Paid upgrades for staff workflows and advanced reports are coming soon.</p>
       </div>
 
       {session.business?.role === "owner" && (

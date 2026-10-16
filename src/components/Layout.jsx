@@ -28,6 +28,14 @@ const ALL_LINKS = [
 export default function Layout({ session, children }) {
   const [open, setOpen] = useState(false);
   const [billing, setBilling] = useState(null);
+  const [displayName, setDisplayName] = useState(session.user?.fullName || "");
+
+  // Refresh the sidebar name when the profile is saved in Settings (no reload).
+  useEffect(() => {
+    const handler = (e) => { if (e.detail?.fullName) setDisplayName(e.detail.fullName); };
+    window.addEventListener("kopabook:profile-updated", handler);
+    return () => window.removeEventListener("kopabook:profile-updated", handler);
+  }, []);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("kopabook-sidebar") === "collapsed"; } catch { return false; }
   });
@@ -103,7 +111,7 @@ export default function Layout({ session, children }) {
         )}
         <div className="user">
           <div className="uinfo">
-            <div>{session.user?.fullName}</div>
+            <div>{displayName}</div>
             <div style={{ color: "#9fb3a6" }}>{session.business?.role}</div>
           </div>
           <button onClick={logout}>Log out</button>
