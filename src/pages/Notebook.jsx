@@ -30,6 +30,7 @@ export default function NotebookPage({ session }) {
   const [color, setColor] = useState("default");
   const [pinned, setPinned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const myId = session.user?.id;
   const myRole = session.business?.role;
@@ -82,7 +83,8 @@ export default function NotebookPage({ session }) {
   }
 
   async function remove(n) {
-    if (!window.confirm("Delete this note?")) return;
+    if (confirmDeleteId !== n.id) { setConfirmDeleteId(n.id); return; }
+    setConfirmDeleteId(null);
     try {
       await api.del("/api/notes?id=" + n.id);
       load(tab);
@@ -177,7 +179,7 @@ export default function NotebookPage({ session }) {
                 {canEdit(n) && (
                   <div style={{ display: "flex", gap: 6 }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => openEdit(n)}>Edit</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => remove(n)}>Delete</button>
+                    <button className="btn btn-secondary btn-sm" style={confirmDeleteId === n.id ? { color: "#b3261e", borderColor: "#b3261e", fontWeight: 700 } : undefined} onClick={() => remove(n)}>{confirmDeleteId === n.id ? "Tap again to delete" : "Delete"}</button>
                   </div>
                 )}
               </div>
