@@ -101,8 +101,13 @@ export async function onRequestPost({ request, env }) {
             });
             if (ownerResult) {
               result = ownerResult;
+            } else {
+              // Debug: owner command returned null
+              result = { answer: `[DEBUG] Owner mode active but no command matched for: "${clean}". Tier: ${plan}`, quickReplies: [] };
             }
-          } catch (e) {}
+          } catch (e) {
+            result = { answer: `[DEBUG] Owner command error: ${e.message}`, quickReplies: [] };
+          }
         }
 
         // Try order flow first, then booking flow, then knowledge
