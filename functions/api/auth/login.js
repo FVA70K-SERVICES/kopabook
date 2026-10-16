@@ -45,6 +45,7 @@ export async function onRequestPost(context) {
        INNER JOIN businesses ON businesses.id = business_members.business_id
        WHERE business_members.user_id = ?
          AND (businesses.status IS NULL OR businesses.status = 'active')
+         AND (business_members.suspended IS NULL OR business_members.suspended = 0)
        ORDER BY business_members.id ASC LIMIT 1`
     ).bind(user.id).first();
     await context.env.KOPABOOK_DB.prepare(

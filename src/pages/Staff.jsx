@@ -267,6 +267,9 @@ export default function StaffPage({ session }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <strong>{m.full_name}</strong>
                   <span className="pill pill-gray">{m.business_role}</span>
+                  {Number(m.suspended || 0) === 1 && (
+                    <span className="pill pill-red" style={{ marginLeft: 6 }}>Suspended</span>
+                  )}
                 </div>
                 <div className="row2" style={{ marginTop: 8 }}>
                   {PERMS.map((p) => (
@@ -281,23 +284,46 @@ export default function StaffPage({ session }) {
                     </label>
                   ))}
                 </div>
-                <div className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
-                  <label>Commission %</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.5}
-                    defaultValue={m.commission_percent ?? 0}
-                    key={`${m.id}-${m.commission_percent}`}
-                    disabled={!canManageStaff || (m.business_role === "partner" && !isOwner)}
-                    onBlur={(e) => {
-                      const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
-                      if (v !== Number(m.commission_percent || 0)) {
-                        savePerms(m.id, { commission_percent: v });
-                      }
-                    }}
-                  />
+                <div className="row2" style={{ marginTop: 8 }}>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Commission %</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      defaultValue={m.commission_percent ?? 0}
+                      key={`${m.id}-comm-${m.commission_percent}`}
+                      disabled={!canManageStaff || (m.business_role === "partner" && !isOwner)}
+                      onBlur={(e) => {
+                        const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                        if (v !== Number(m.commission_percent || 0)) {
+                          savePerms(m.id, { commission_percent: v });
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Max discount % (blank = no cap)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      placeholder="No cap"
+                      defaultValue={m.max_discount_percent ?? ""}
+                      key={`${m.id}-disc-${m.max_discount_percent ?? "none"}`}
+                      disabled={!canManageStaff || (m.business_role === "partner" && !isOwner)}
+                      onBlur={(e) => {
+                        const raw = e.target.value.trim();
+                        const cur = m.max_discount_percent ?? null;
+                        const v = raw === "" ? null : Math.min(100, Math.max(0, Number(raw) || 0));
+                        if (v !== cur) {
+                          savePerms(m.id, { max_discount_percent: v });
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
                 {canManageStaff && (isOwner || m.business_role !== "partner") && (
                   <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -313,6 +339,27 @@ export default function StaffPage({ session }) {
                     >
                       Reset password
                     </button>
+                    {Number(m.suspended || 0) === 1 ? (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: "var(--green, #15803d)" }}
+                        onClick={() => savePerms(m.id, { suspended: 0 })}
+                      >
+                        Reactivate
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: "var(--gold, #b45309)" }}
+                        onClick={() => {
+                          if (window.confirm(`${m.full_name} will lose access until reactivated. Suspend?`)) {
+                            savePerms(m.id, { suspended: 1 });
+                          }
+                        }}
+                      >
+                        Suspend
+                      </button>
+                    )}
                     <button
                       className="btn btn-secondary btn-sm"
                       style={{ color: "var(--danger, #b91c1c)" }}

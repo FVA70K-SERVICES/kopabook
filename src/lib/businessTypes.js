@@ -99,6 +99,9 @@ export const STAFF_ROLES = {
   default: [
     { key: "partner", label: "Partner", desc: "Co-owner with full access. Cannot remove the owner." },
     { key: "manager", label: "Manager", desc: "Manages products, stock, customers, debts and expenses." },
+    { key: "accountant", label: "Accountant", desc: "Expenses, reports and profit. No sales or stock changes." },
+    { key: "cashier", label: "Cashier", desc: "Records sales and takes payments. Discounts within their limit." },
+    { key: "storekeeper", label: "Storekeeper", desc: "Products and stock control. No sales or expenses." },
     { key: "attendant", label: "Attendant", desc: "Records sales and works their area." },
   ],
 };
@@ -170,6 +173,9 @@ export const ROLE_MODULES = {
   // Everyone keeps the staff page for their own shift clock; management
   // sections inside it are owner/partner only.
   manager: ["dashboard", "sales", "services", "products", "suppliers", "import", "expenses", "customers", "hotels", "debts", "messages", "reports", "staff"],
+  accountant: ["dashboard", "expenses", "reports", "customers", "messages", "staff"],
+  cashier: ["dashboard", "sales", "services", "products", "customers", "debts", "messages", "staff"],
+  storekeeper: ["dashboard", "products", "suppliers", "import", "messages", "staff"],
   attendant: ["dashboard", "sales", "services", "products", "customers", "debts", "messages", "staff"],
   hotel_manager: ["dashboard", "hotels", "customers", "debts", "expenses", "messages", "reports", "staff"],
   receptionist: ["dashboard", "hotels", "customers", "messages", "staff"],
