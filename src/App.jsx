@@ -5,6 +5,7 @@ import {
   LandingPage, FeaturesPage, PricingPage, WaitlistPage, NotFoundPage,
   HotelsLandingPage, AboutPage, FaqPage,
 } from "./pages/Marketing";
+import { TermsPage, PrivacyPage, RefundPage } from "./pages/Legal";
 import { LoginPage, OwnerSetupPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/Auth";
 import RegisterPage from "./pages/Register";
 import { SaleReceiptPage, HotelReceiptPage } from "./pages/Receipt";
@@ -52,6 +53,9 @@ function AppRoute({ session }) {
   if (path === "/pricing") return <PricingPage />;
   if (path === "/about") return <AboutPage />;
   if (path === "/faq") return <FaqPage />;
+  if (path === "/terms") return <TermsPage />;
+  if (path === "/privacy") return <PrivacyPage />;
+  if (path === "/refund") return <RefundPage />;
   if (path === "/waitlist") return <WaitlistPage />;
   if (path === "/hotels") return <HotelsLandingPage />;
   if (path === "/hotels/register") {
