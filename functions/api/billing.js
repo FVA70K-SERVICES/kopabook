@@ -7,11 +7,12 @@ import { json, getAuthContext, requireAuth, toSqliteDate } from "./_utils";
 export const LIMITS = {
   free: { businesses: 2, salesPerWeek: 100, products: 100, staff: 2 },
   starter: { businesses: 5, salesPerWeek: 1000, products: 1000, staff: 5 },
-  pro: { businesses: null, salesPerWeek: null, products: null, staff: null },
+  solo: { businesses: 1, salesPerWeek: null, products: 500, staff: 3, aiWorker: true },
+  pro: { businesses: null, salesPerWeek: null, products: null, staff: null, aiWorker: true },
 };
 
-export const TIER_NAMES = { free: "Free", starter: "Starter", pro: "Pro" };
-export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", pro: "NGN 2,500/month" };
+export const TIER_NAMES = { free: "Free", starter: "Starter", solo: "Solo", pro: "Pro" };
+export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", solo: "NGN 1,500/month", pro: "NGN 2,500/month" };
 
 export async function getAccountTier(db, userId) {
   const row = await db.prepare(

@@ -111,6 +111,11 @@
           <select id="assignSelect"><option value="">Assign to...</option></select>
           <button class="primary" onclick="takeover()">Take Over</button>
           <button class="warn" onclick="releaseToBot()">Back to Bot</button>
+          <button onclick="getSuggestions()" title="Get AI-suggested replies" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">Suggest Replies</button>
+        </div>
+        <div id="suggestions" style="display:none;padding:12px 20px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">
+          <div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px;">SUGGESTED REPLIES (tap to use)</div>
+          <div id="suggestionList" style="display:flex;flex-direction:column;gap:8px;"></div>
         </div>
         <div class="messages" id="messages"></div>
         <div class="input-bar">
@@ -265,6 +270,39 @@ function escapeHtml(t) {
   const d = document.createElement('div');
   d.textContent = t || '';
   return d.innerHTML;
+}
+
+async function getSuggestions() {
+  if (!activeSession) return;
+  const box = document.getElementById('suggestions');
+  const list = document.getElementById('suggestionList');
+  box.style.display = 'block';
+  list.innerHTML = '<p style="color:#9ca3af;font-size:13px;">Thinking...</p>';
+  try {
+    const data = await fetch(`/api/chat/admin/suggest?session_id=${activeSession.id}`).then(r => r.json());
+    if (data.suggestions && data.suggestions.length > 0) {
+      list.innerHTML = data.suggestions.map((s, i) => `
+        <button onclick="useSuggestion(${i})" data-sug="${i}"
+          style="text-align:left;padding:10px 14px;background:white;border:1px solid #e5e7eb;border-radius:10px;cursor:pointer;font-size:13px;line-height:1.5;">
+          ${escapeHtml(s)}
+        </button>`).join('') +
+        (data.intent ? `<p style="font-size:11px;color:#9ca3af;">Detected: ${data.intent.replace('_', ' ')}</p>` : '');
+      window._suggestions = data.suggestions;
+    } else {
+      list.innerHTML = '<p style="color:#9ca3af;font-size:13px;">No suggestions yet. Wait for the visitor to write.</p>';
+    }
+  } catch {
+    list.innerHTML = '<p style="color:#dc2626;font-size:13px;">Could not load suggestions.</p>';
+  }
+}
+
+function useSuggestion(i) {
+  const text = window._suggestions[i];
+  if (text) {
+    document.getElementById('replyInput').value = text;
+    document.getElementById('suggestions').style.display = 'none';
+    document.getElementById('replyInput').focus();
+  }
 }
 
 document.querySelectorAll('.filter-tabs button').forEach(b => {

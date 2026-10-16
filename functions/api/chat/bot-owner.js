@@ -4,6 +4,7 @@ import {
   getOwed, getWeekSales, findProduct, recordQuickSale, recordQuickExpense,
   getTargets, setTarget, getTargetProgress, formatNaira
 } from './bot-tools.js';
+import { handleReminderCommand, checkDueReminders } from './bot-reminders.js';
 
 // Tier capabilities for bot tools
 export const BOT_TIER_LIMITS = {
@@ -15,16 +16,24 @@ export const BOT_TIER_LIMITS = {
   starter: {
     briefing: true, stockAlerts: true, recordSale: false,
     recordExpense: false, targets: false, tasks: false,
-    note: 'Starter: briefings and stock alerts. Upgrade to Pro to record sales and set targets.'
+    note: 'Starter: briefings and stock alerts. Upgrade to Solo for your AI worker.'
+  },
+  solo: {
+    briefing: true, stockAlerts: true, recordSale: true,
+    recordExpense: true, targets: true, tasks: true,
+    agentWorkers: true,
+    note: null
   },
   pro: {
     briefing: true, stockAlerts: true, recordSale: true,
     recordExpense: true, targets: true, tasks: true,
+    agentWorkers: true, multiBusiness: true,
     note: null
   },
   internal: {
     briefing: true, stockAlerts: true, recordSale: true,
     recordExpense: true, targets: true, tasks: true,
+    agentWorkers: true, multiBusiness: true,
     note: null
   }
 };
@@ -50,6 +59,22 @@ export async function handleOwnerCommand(message, ctx) {
 
   const biz = await getBusinessContext(db, businessId);
   const bizName = biz?.name || 'your business';
+
+  // --- REMINDERS (never forget) ---
+  if (lower.startsWith('remind me') || lower.match(/^(my reminders|list reminders|reminders|cancel reminder)/)) {
+    if (!limits.tasks) return tierBlocked('reminders', limits);
+    const remResult = await handleReminderCommand(message, ctx);
+    if (remResult) return remResult;
+  }
+
+  // Check for due reminders and include them
+  let dueReminderNote = '';
+  try {
+    const due = await checkDueReminders(db, businessId);
+    if (due.length > 0) {
+      dueReminderNote = `\n\nReminder! ${due.map(r => `"${r.title}"`).join(', ')}`;
+    }
+  } catch {}
 
   // --- BRIEF ME ---
   if (lower.match(/^(brief|brief me|morning brief|daily brief|summary|how is business|business update)/)) {
@@ -88,6 +113,8 @@ export async function handleOwnerCommand(message, ctx) {
         brief += `- ${t.description}: ${formatNaira(prog.current)} / ${formatNaira(prog.target)} (${prog.pct}%)\n`;
       }
     }
+
+    if (dueReminderNote) brief += dueReminderNote;
 
     return { answer: brief, quickReplies: ['Check stock', 'Record sale', 'Set target'] };
   }
@@ -208,6 +235,8 @@ export async function handleOwnerCommand(message, ctx) {
     if (limits.recordExpense) msg += `- "Record expense 5000 fuel" - record an expense\n`;
     if (limits.targets) msg += `- "Set target 100000 sales this week" - set a goal\n`;
     if (limits.targets) msg += `- "My targets" - check goal progress\n`;
+    if (limits.tasks) msg += `- "Remind me to call supplier tomorrow at 9am" - never forget\n`;
+    if (limits.tasks) msg += `- "My reminders" - see all reminders\n`;
     msg += `- "Week summary" - last 7 days\n`;
     if (limits.note) msg += `\n${limits.note}`;
     return { answer: msg, quickReplies: ['Brief me', 'Check stock'] };
