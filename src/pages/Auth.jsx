@@ -40,7 +40,7 @@ export function LoginPage() {
             </p>
           </form>
           <p style={{ textAlign: "center", marginTop: 18, fontSize: 14, color: "var(--muted)" }}>
-            First time here? <a href="/owner-setup">Set up your business</a>
+            First time here? <a href="/register">Create your account</a>
           </p>
         </div>
       </div>
