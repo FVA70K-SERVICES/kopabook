@@ -8,7 +8,9 @@ async function request(path, options = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
-    throw new Error(data.message || `Request failed (${res.status})`);
+    const err = new Error(data.message || `Request failed (${res.status})`);
+    if (data.upgradeRequired) err.upgradeRequired = true;
+    throw err;
   }
   return data;
 }

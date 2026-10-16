@@ -3,6 +3,7 @@ import { api, nav } from "../lib/api";
 import { NIGERIAN_STATES } from "../lib/nigeria";
 import { WORLD_CURRENCIES, WORLD_TIMEZONES, COUNTRIES } from "../lib/businessTypes";
 import PaymentModesEditor from "../components/PaymentModesEditor";
+import PlanCard from "../components/PlanCard";
 
 export default function SettingsPage({ session }) {
   const [biz, setBiz] = useState(null);
@@ -103,6 +104,8 @@ export default function SettingsPage({ session }) {
       <div className="page-head"><h1>Settings</h1></div>
       {error && <div className="alert alert-error">{error}</div>}
       {ok && <div className="alert alert-ok">{ok}</div>}
+
+      <PlanCard />
 
       <div className="card narrow" style={{ margin: "0 0 18px" }}>
         <h3 style={{ marginTop: 0 }}>My profile</h3>

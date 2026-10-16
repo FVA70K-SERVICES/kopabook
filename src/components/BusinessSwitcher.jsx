@@ -19,6 +19,7 @@ export default function BusinessSwitcher({ session, collapsed }) {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [needsUpgrade, setNeedsUpgrade] = useState(false);
 
   useEffect(() => {
     api.get("/api/businesses").then((d) => setBusinesses(d.businesses || [])).catch(() => {});
@@ -50,7 +51,7 @@ export default function BusinessSwitcher({ session, collapsed }) {
         country, currency, timezone,
       });
       window.location.href = "/app/dashboard";
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(err.message); setNeedsUpgrade(!!err.upgradeRequired); }
     setSaving(false);
   }
 
@@ -126,7 +127,16 @@ export default function BusinessSwitcher({ session, collapsed }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>New business</h2>
             <p className="hint">It gets its own dashboard, stock, staff and records. You stay in control with this same account.</p>
-            {error && <div className="alert alert-error">{error}</div>}
+            {error && (
+              <div className="alert alert-error">
+                {error}
+                {needsUpgrade && (
+                  <div style={{ marginTop: 8 }}>
+                    <a href="/app/settings" className="btn btn-primary btn-sm">See plans and upgrade</a>
+                  </div>
+                )}
+              </div>
+            )}
             <form onSubmit={create}>
               <div className="field"><label>Business name *</label><input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. FVA70K Stores" autoFocus /></div>
               <div className="field"><label>Organization type</label>
