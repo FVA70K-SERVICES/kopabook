@@ -1,0 +1,118 @@
+/* FVA70K Live Chat widget styles */
+#fva-chat-btn {
+  position: fixed; bottom: 24px; right: 24px; z-index: 1000;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: var(--brand, #1a6b3c); color: white; border: none;
+  font-size: 28px; cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.15s;
+}
+#fva-chat-btn:hover { transform: scale(1.05); }
+#fva-chat-badge {
+  position: absolute; top: -4px; right: -4px;
+  background: #e53935; color: white; font-size: 12px; font-weight: 700;
+  min-width: 22px; height: 22px; border-radius: 11px;
+  display: none; align-items: center; justify-content: center; padding: 0 6px;
+}
+#fva-chat-badge.show { display: flex; }
+#fva-chat-window {
+  position: fixed; bottom: 96px; right: 24px; z-index: 1000;
+  width: 360px; max-width: calc(100vw - 32px); height: 520px; max-height: calc(100vh - 140px);
+  background: white; border-radius: 16px; overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+  display: none; flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+#fva-chat-window.open { display: flex; }
+#fva-chat-header {
+  background: var(--navy, #1a2b49); color: white; padding: 16px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+#fva-chat-header .title { font-weight: 700; font-size: 16px; }
+#fva-chat-header .status { font-size: 12px; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
+#fva-chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; }
+#fva-chat-close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
+#fva-chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #f8faf9; }
+.fva-msg { max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.45; word-wrap: break-word; }
+.fva-msg.agent { background: white; border: 1px solid #e5e7eb; align-self: flex-start; border-bottom-left-radius: 4px; }
+.fva-msg.bot { background: #f0f7ff; border: 1px solid #bfdbfe; align-self: flex-start; border-bottom-left-radius: 4px; }
+.fva-msg.bot .bot-label { font-size: 11px; font-weight: 700; color: #1a2b49; margin-bottom: 4px; }
+.fva-msg.visitor { background: var(--brand, #1a6b3c); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+.fva-msg .time { font-size: 10px; opacity: 0.6; margin-top: 4px; }
+.fva-msg.typing { padding: 14px 18px; }
+.fva-msg.typing .tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; margin: 0 2px; animation: fva-bounce 1.2s infinite; }
+.fva-msg.typing .tdot:nth-child(2) { animation-delay: 0.2s; }
+.fva-msg.typing .tdot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes fva-bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+#fva-typing { font-size: 13px; color: #666; font-style: italic; padding: 0 16px 8px; display: none; background: #f8faf9; }
+#fva-typing.show { display: block; }
+#fva-chat-quick { display: flex; gap: 8px; padding: 10px 16px; flex-wrap: wrap; background: #f8faf9; }
+.fva-quick-btn { background: white; border: 1px solid var(--brand, #1a6b3c); color: var(--brand, #1a6b3c); border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+.fva-quick-btn:hover { background: var(--brand, #1a6b3c); color: white; }
+#fva-chat-input-area { display: flex; padding: 12px 16px; border-top: 1px solid #e5e7eb; background: white; gap: 8px; }
+#fva-chat-input { flex: 1; border: 1px solid #e5e7eb; border-radius: 24px; padding: 10px 16px; font-size: 14px; outline: none; }
+#fva-chat-input:focus { border-color: var(--brand, #1a6b3c); }
+#fva-chat-send { background: var(--brand, #1a6b3c); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 18px; flex-shrink: 0; }
+#fva-chat-name-prompt { padding: 24px; text-align: center; }
+#fva-chat-name-prompt input { width: 100%; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 12px 0; font-size: 15px; }
+@media (max-width: 480px) {
+  #fva-chat-window { right: 16px; bottom: 88px; }
+  #fva-chat-btn { right: 16px; bottom: 16px; }
+}
+
+/* v2 features */
+#fva-chat-menu-dropdown {
+  position: absolute; top: 60px; right: 12px; z-index: 1001;
+  background: white; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+  overflow: hidden; min-width: 200px;
+}
+#fva-chat-menu-dropdown button {
+  display: block; width: 100%; text-align: left; padding: 12px 16px;
+  border: none; background: white; cursor: pointer; font-size: 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+#fva-chat-menu-dropdown button:hover { background: #f8faf9; }
+#fva-chat-menu-dropdown button:last-child { border-bottom: none; }
+
+#fva-emoji-picker {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 16px;
+  background: #f8faf9; border-top: 1px solid #e5e7eb; max-height: 120px; overflow-y: auto;
+}
+.fva-emoji { background: none; border: none; font-size: 22px; cursor: pointer; padding: 4px; border-radius: 8px; }
+.fva-emoji:hover { background: #e5e7eb; }
+#fva-emoji-btn { background: none; border: none; font-size: 22px; cursor: pointer; flex-shrink: 0; }
+
+.read-receipt { font-size: 11px; margin-left: 4px; }
+.read-receipt.read { color: #4caf50; font-weight: 700; }
+.fva-msg.visitor .read-receipt { color: rgba(255,255,255,0.7); }
+.fva-msg.visitor .read-receipt.read { color: #a5d6a7; }
+
+#fva-chat-rating { padding: 16px; text-align: center; background: #f8faf9; border-top: 1px solid #e5e7eb; }
+#fva-chat-rating p { margin: 0 0 8px; font-weight: 600; font-size: 14px; }
+.fva-star { background: none; border: none; font-size: 28px; cursor: pointer; padding: 4px; transition: transform 0.15s; }
+.fva-star:hover { transform: scale(1.2); }
+
+#fva-chat-invite {
+  position: fixed; bottom: 96px; right: 24px; z-index: 999;
+  background: white; border-radius: 16px; padding: 16px 20px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.2); max-width: 280px;
+  animation: fva-slide-in 0.3s ease-out;
+}
+@keyframes fva-slide-in { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+#fva-invite-go {
+  background: var(--brand, #1a6b3c); color: white; border: none;
+  border-radius: 20px; padding: 8px 20px; margin-top: 12px; cursor: pointer; font-weight: 600;
+}
+#fva-invite-no {
+  position: absolute; top: 8px; right: 12px; background: none;
+  border: none; font-size: 18px; cursor: pointer; color: #999;
+}
+
+.fva-action-wrap { align-self: flex-start; margin: 4px 0; }
+.fva-action-btn {
+  display: inline-block; background: #25d366; color: white !important;
+  padding: 12px 24px; border-radius: 24px; text-decoration: none;
+  font-weight: 700; font-size: 14px;
+}
+.fva-action-btn:hover { background: #1da851; }
