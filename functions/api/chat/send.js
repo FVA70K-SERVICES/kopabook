@@ -4,6 +4,7 @@ import { handleOrderMessage } from './order-flow.js';
 import { handleBookingMessage } from './booking-flow.js';
 import { DEFAULT_MEMORY } from './business-memory.js';
 import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY } from './kopabook-knowledge.js';
+import { handleOwnerCommand } from './bot-owner.js';
 
 function getKopaBookResponse(message) {
   const lower = message.toLowerCase().trim();
@@ -46,7 +47,7 @@ async function getSiteMemory(env, siteId) {
 
 export async function onRequestPost({ request, env }) {
   try {
-    const { sessionId, sender, message, siteId } = await request.json();
+    const { sessionId, sender, message, siteId, ownerCtx } = await request.json();
     if (!sessionId || !message || !message.trim()) {
       return Response.json({ error: 'Missing fields' }, { status: 400 });
     }
@@ -85,8 +86,25 @@ export async function onRequestPost({ request, env }) {
       ).bind(sessionId, 'agent', now - 5 * 60 * 1000).first();
 
       if (!recentAgent) {
+        // Owner/staff mode: try business commands first
+        if (ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
+          try {
+            const ownerResult = await handleOwnerCommand(clean, {
+              db: env.KOPABOOK_DB,
+              businessId: ownerCtx.businessId,
+              userId: ownerCtx.userId,
+              userName: ownerCtx.userName,
+              userRole: ownerCtx.userRole || 'owner',
+              tier: plan || 'free'
+            });
+            if (ownerResult) {
+              result = ownerResult;
+            }
+          } catch (e) {}
+        }
+
         // Try order flow first, then booking flow, then knowledge
-        let result = handleOrderMessage(clean, memory, sessionId, plan);
+        let result = result || handleOrderMessage(clean, memory, sessionId, plan);
         if (!result) result = handleBookingMessage(clean, memory, sessionId, plan);
         // KopaBook-specific knowledge
         if (!result && siteConfig.isKopaBook) result = getKopaBookResponse(clean);

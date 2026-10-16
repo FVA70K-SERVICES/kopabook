@@ -37,6 +37,17 @@ function useSession() {
         if (active) {
           setCurrency(d.business?.currency);
           setState({ loading: false, session: d });
+          // Tell Kopa Bot who is logged in (business copilot mode)
+          try {
+            if (d.user && d.business && window.setFVAChatOwner) {
+              window.setFVAChatOwner({
+                businessId: d.business.id,
+                userId: d.user.id,
+                userName: d.user.name,
+                userRole: d.business.role || 'owner'
+              });
+            }
+          } catch (e) {}
         }
       })
       .catch(() => { if (active) setState({ loading: false, session: null }); });

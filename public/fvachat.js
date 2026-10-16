@@ -226,15 +226,29 @@
       body: JSON.stringify({ sessionId, who: 'visitor', typing }) }).catch(() => {});
   }
 
+  // Owner context: set by host page if user is logged in as owner/staff
+  // window.FVAChatOwner = { businessId, userId, userName, userRole }
+  function getOwnerCtx() {
+    try {
+      if (window.FVAChatOwner && window.FVAChatOwner.businessId && window.FVAChatOwner.userId) {
+        return window.FVAChatOwner;
+      }
+    } catch (e) {}
+    return null;
+  }
+
   async function sendMessage(text) {
     const msgId = 'local_' + Date.now();
     appendMsg('visitor', text, Date.now(), msgId, false);
     showBotTyping();
     try {
+      const payload = { sessionId, sender: 'visitor', message: text, siteId: SITE_ID };
+      const ownerCtx = getOwnerCtx();
+      if (ownerCtx) payload.ownerCtx = ownerCtx;
       const res = await fetch(API + '/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, sender: 'visitor', message: text, siteId: SITE_ID })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       hideBotTyping();

@@ -27,6 +27,11 @@
     </script>
     <script type="module" src="/src/main.jsx"></script>
     <!-- FVAChat: AI support chat by FVA70K Services -->
+    <script>
+      // Owner context for Kopa Bot business copilot
+      window.FVAChatOwner = null;
+      window.setFVAChatOwner = function(ctx) { window.FVAChatOwner = ctx; };
+    </script>
     <script src="/fvachat.js"
       data-site-id="kopabook"
       data-business="KopaBook Support"
