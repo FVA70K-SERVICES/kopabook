@@ -14,6 +14,7 @@ export default function DeveloperApi() {
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState("");
   const [showDocs, setShowDocs] = useState(false);
+  const [confirmRevokeId, setConfirmRevokeId] = useState(null);
 
   async function load() {
     setLoading(true); setError("");
@@ -43,7 +44,8 @@ export default function DeveloperApi() {
   }
 
   async function revoke(id) {
-    if (!window.confirm("Revoke this key? Every website or app using it will stop working immediately.")) return;
+    if (confirmRevokeId !== id) { setConfirmRevokeId(id); return; }
+    setConfirmRevokeId(null);
     try {
       await api.del("/api/api-keys?id=" + id);
       load();
@@ -161,7 +163,7 @@ export default function DeveloperApi() {
               </div>
             </div>
             {k.status === "active" && (
-              <button className="btn btn-secondary btn-sm" onClick={() => revoke(k.id)}>Revoke</button>
+              <button className="btn btn-secondary btn-sm" style={confirmRevokeId === k.id ? { color: "#b3261e", borderColor: "#b3261e", fontWeight: 700 } : undefined} onClick={() => revoke(k.id)}>{confirmRevokeId === k.id ? "Tap again to revoke" : "Revoke"}</button>
             )}
           </div>
         </div>
