@@ -7,6 +7,7 @@
 import { json, getAuthContext, requirePlatformAdmin } from "../_utils";
 import { activateSubscription } from "../billing/verify";
 import { verifyCryptoPayment, isValidTxHash, explorerUrl } from "./_verify";
+import { getUserCountry } from "../_pricing";
 
 function nowSql() {
   return new Date().toISOString().slice(0, 19).replace("T", " ");
@@ -27,7 +28,10 @@ export async function onRequestGet(context) {
 
     const db = context.env.KOPABOOK_DB;
     const payments = await db.prepare(
-      `SELECT cp.*, u.email, u.full_name, u.country
+      `SELECT cp.*, u.email, u.full_name,
+         (SELECT b.country FROM businesses b
+          JOIN business_members m ON m.business_id = b.id
+          WHERE m.user_id = u.id LIMIT 1) AS country
        FROM crypto_payments cp
        JOIN users u ON u.id = cp.user_id
        WHERE cp.status IN ('pending', 'awaiting_verification')
@@ -143,6 +147,8 @@ export async function onRequestPost(context) {
       tx_hash: txHash,
     });
 
+    const payerCountry = await getUserCountry(db, payment.user_id);
+
     await db.batch([
       db.prepare(
         `UPDATE crypto_payments
@@ -152,8 +158,8 @@ export async function onRequestPost(context) {
       db.prepare(
         `INSERT INTO subscription_payments
            (user_id, tier, billing_cycle, amount_kobo, currency, country, payment_method, paystack_reference, status, paid_at)
-         VALUES (?, ?, ?, ?, 'USD', (SELECT country FROM users WHERE id = ?), 'crypto', ?, 'paid', ?)`
-      ).bind(payment.user_id, payment.tier, payment.billing_cycle, payment.amount_usd_cents, payment.user_id, reference, now),
+         VALUES (?, ?, ?, ?, 'USD', ?, 'crypto', ?, 'paid', ?)`
+      ).bind(payment.user_id, payment.tier, payment.billing_cycle, payment.amount_usd_cents, payerCountry, reference, now),
       audit(db, auth.user.id, "crypto_payment.approved", reference, {
         tier: payment.tier,
         billing_cycle: payment.billing_cycle,

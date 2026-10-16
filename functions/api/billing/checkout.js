@@ -3,7 +3,7 @@
 // Returns the Paystack authorization URL; the user pays there, then returns.
 import { json, getAuthContext, requireAuth } from "../_utils";
 import { LIMITS } from "../billing";
-import { getPrice, PAYSTACK_CURRENCIES } from "../_pricing";
+import { getPrice, PAYSTACK_CURRENCIES, getUserCountry } from "../_pricing";
 import { checkRateLimit } from "../_webhook_security";
 
 export async function onRequestPost(context) {
@@ -31,11 +31,8 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "Payments are not connected yet. Please try again later." }, 503);
     }
 
-    // Get user's country for localized pricing
-    const user = await db.prepare(
-      `SELECT country FROM users WHERE id = ? LIMIT 1`
-    ).bind(auth.user.id).first();
-    const userCountry = user?.country || "Nigeria";
+    // Get user's country for localized pricing (from their business; never throws)
+    const userCountry = await getUserCountry(db, auth.user.id);
 
     const price = getPrice(tier, cycle, userCountry);
     if (!price) {

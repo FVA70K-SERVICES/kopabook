@@ -122,3 +122,38 @@ export function formatPrice(amount, currency) {
   const sym = symbols[currency] || currency;
   return `${sym} ${n.toLocaleString()}`;
 }
+
+// Approximate NGN per USD, used only to quote crypto amounts for Nigerian
+// users (crypto settles in USD value). Keep roughly at the market rate;
+// small drift is acceptable at these amounts.
+export const NGN_PER_USD = 1550;
+
+// Crypto price in USD cents for any country. Nigerian NGN prices are
+// converted at NGN_PER_USD so Nigerians can also pay with crypto.
+export function getCryptoPriceUsdCents(tier, cycle, country) {
+  const price = getPrice(tier, cycle, country);
+  if (!price) return null;
+  if (price.currency === "USD") return { usdCents: Math.round(Number(price.amount)) };
+  if (price.currency === "NGN") {
+    return { usdCents: Math.max(1, Math.round(Number(price.amount) / NGN_PER_USD)) };
+  }
+  return null;
+}
+
+// The user's country for pricing. Read from their first business
+// (businesses.country exists since migration 0020). There is no
+// users.country column, so never query it. Falls back to Nigeria and
+// never throws, so pricing can never 500 the checkout.
+export async function getUserCountry(db, userId) {
+  try {
+    const row = await db.prepare(
+      `SELECT b.country AS country FROM businesses b
+       JOIN business_members m ON m.business_id = b.id
+       WHERE m.user_id = ? LIMIT 1`
+    ).bind(userId).first();
+    const c = row?.country && String(row.country).trim();
+    return c || "Nigeria";
+  } catch {
+    return "Nigeria";
+  }
+}

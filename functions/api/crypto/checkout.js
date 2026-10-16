@@ -3,7 +3,7 @@
 // then submits the transaction hash. Nothing activates until the transaction is
 // verified on the blockchain by an admin.
 import { json, getAuthContext, requireAuth } from "../_utils";
-import { getPrice } from "../_pricing";
+import { getCryptoPriceUsdCents, getUserCountry } from "../_pricing";
 import { LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
 import { getBtcPriceUsd, isValidCryptoAddress, explorerUrl } from "./_verify";
@@ -39,17 +39,14 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "We accept USDT and BTC." }, 400);
     }
 
-    const user = await db.prepare(
-      `SELECT country FROM users WHERE id = ? LIMIT 1`
-    ).bind(auth.user.id).first();
-    const userCountry = user?.country || "Nigeria";
+    const userCountry = await getUserCountry(db, auth.user.id);
 
-    // Crypto is always priced in USD (country-adjusted).
-    const price = getPrice(tier, cycle, userCountry);
-    if (!price || price.currency !== "USD") {
+    // Crypto settles in USD value (country-adjusted; NGN converted at a fixed rate).
+    const cryptoPrice = getCryptoPriceUsdCents(tier, cycle, userCountry);
+    if (!cryptoPrice) {
       return json({ ok: false, message: "This plan is not available right now." }, 400);
     }
-    const usdCents = Number(price.amount);
+    const usdCents = cryptoPrice.usdCents;
     const usdAmount = (usdCents / 100).toFixed(2);
 
     const walletAddress = cryptoCurrency === "BTC"
