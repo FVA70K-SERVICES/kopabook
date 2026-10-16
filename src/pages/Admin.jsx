@@ -104,6 +104,7 @@ function Accounts() {
                 <td style={{ whiteSpace: "nowrap" }}>
                   <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => act(a.id, "set_tier", { tier: "starter", cycle: "manual" })}>Starter</button>{" "}
                   <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => act(a.id, "set_tier", { tier: "pro", cycle: "manual" })}>Pro</button>{" "}
+                  <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => act(a.id, "set_tier", { tier: "solo", cycle: "manual" })}>Solo</button>{" "}
                   <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => act(a.id, "set_tier", { tier: "free", cycle: "manual" })}>Free</button>{" "}
                   {a.status === "suspended"
                     ? <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => act(a.id, "unsuspend")}>Unsuspend</button>
@@ -177,8 +178,12 @@ function Plans() {
 
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>Subscription fees</h3>
-      <p className="hint">Set the price customers pay on Paystack. Changes apply immediately to new checkouts.</p>
+      <h3 style={{ marginTop: 0 }}>Subscription fees (Nigeria base prices)</h3>
+      <p className="hint">
+        Nigeria home prices in NGN. International prices are auto-calculated using fair PPP tiers
+        (low: $1/2/4, lower-middle: $2/4/7, upper-middle: $4/8/12, high: $6/12/18 monthly USD
+        for Starter/Pro/Solo). Changes apply immediately to new checkouts.
+      </p>
       {msg && <div className="alert alert-ok">{msg}</div>}
       <table>
         <thead><tr><th>Plan</th><th>Cycle</th><th>Price (NGN)</th><th></th></tr></thead>
@@ -217,17 +222,19 @@ function Payments() {
   if (!d) return <p className="hint">Loading...</p>;
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>Payments · total NGN {Number(d.totals.revenue).toLocaleString()}</h3>
+      <h3 style={{ marginTop: 0 }}>Payments</h3>
       <div style={{ overflowX: "auto" }}>
         <table>
-          <thead><tr><th>Account</th><th>Plan</th><th>Cycle</th><th>Amount</th><th>Status</th><th>Paid at</th></tr></thead>
+          <thead><tr><th>Account</th><th>Plan</th><th>Cycle</th><th>Amount</th><th>Method</th><th>Country</th><th>Status</th><th>Paid at</th></tr></thead>
           <tbody>
             {d.recentPayments.map((p) => (
               <tr key={p.id}>
                 <td><small>{p.email}</small></td>
                 <td style={{ textTransform: "capitalize" }}>{p.tier}</td>
                 <td>{p.billing_cycle}</td>
-                <td className="money">NGN {(Number(p.amount_kobo) / 100).toLocaleString()}</td>
+                <td className="money">{p.currency || "NGN"} {(Number(p.amount_kobo) / 100).toLocaleString()}</td>
+                <td>{p.payment_method || "paystack"}</td>
+                <td><small>{p.country || "-"}</small></td>
                 <td>{p.status}</td>
                 <td><small>{p.paid_at ? String(p.paid_at).slice(0, 16) : "-"}</small></td>
               </tr>
@@ -235,6 +242,70 @@ function Payments() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function CryptoPayments() {
+  const [list, setList] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(null);
+
+  async function load() {
+    try {
+      const d = await api.get("/api/crypto/admin");
+      setList(d.payments || []);
+    } catch (e) { setMsg(e.message); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function act(reference, action) {
+    if (!confirm(`${action === "approve" ? "Approve" : "Reject"} payment ${reference}?`)) return;
+    setBusy(reference);
+    setMsg("");
+    try {
+      const d = await api.post("/api/crypto/admin", { reference, action });
+      setMsg(d.message);
+      load();
+    } catch (e) { setMsg(e.message); }
+    setBusy(null);
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Crypto payments pending</h3>
+      <p className="hint">Review each payment on the blockchain before approving. Approving activates the subscription immediately.</p>
+      {msg && <div className="alert alert-ok">{msg}</div>}
+      {list.length === 0 ? (
+        <p className="hint">No pending crypto payments.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table>
+            <thead><tr><th>Account</th><th>Plan</th><th>Amount</th><th>Currency</th><th>TX Hash</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+            <tbody>
+              {list.map((p) => (
+                <tr key={p.reference}>
+                  <td><small>{p.email}</small><br /><small className="hint">{p.full_name || ""}</small></td>
+                  <td><strong style={{ textTransform: "capitalize" }}>{p.tier}</strong><br /><small className="hint">{p.billing_cycle}</small></td>
+                  <td className="money">${(Number(p.amount_usd_cents) / 100).toFixed(2)}</td>
+                  <td>{p.crypto_currency}</td>
+                  <td><small style={{ wordBreak: "break-all", maxWidth: 120, display: "inline-block" }}>{p.tx_hash || "-"}</small></td>
+                  <td>{p.status}</td>
+                  <td><small>{String(p.created_at || "").slice(0, 16)}</small></td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button className="btn btn-primary btn-sm" disabled={busy === p.reference}
+                      onClick={() => act(p.reference, "approve")}>
+                      {busy === p.reference ? "..." : "Approve"}
+                    </button>{" "}
+                    <button className="btn btn-secondary btn-sm" disabled={busy === p.reference}
+                      onClick={() => act(p.reference, "reject")}>Reject</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -259,12 +330,14 @@ export default function AdminPage() {
         <Tab id="accounts" label="Accounts" active={tab} set={setTab} />
         <Tab id="businesses" label="Businesses" active={tab} set={setTab} />
         <Tab id="payments" label="Payments" active={tab} set={setTab} />
+        <Tab id="crypto" label="Crypto" active={tab} set={setTab} />
         <Tab id="plans" label="Plans & fees" active={tab} set={setTab} />
       </div>
       {tab === "overview" && <Overview />}
       {tab === "accounts" && <Accounts />}
       {tab === "businesses" && <Businesses />}
       {tab === "payments" && <Payments />}
+      {tab === "crypto" && <CryptoPayments />}
       {tab === "plans" && <Plans />}
     </>
   );

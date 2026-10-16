@@ -47,10 +47,10 @@ export async function onRequestGet(context) {
     ).all();
 
     const recentPayments = await db.prepare(
-      `SELECT p.id, u.email, p.tier, p.billing_cycle, p.amount_kobo, p.status, p.paid_at
+      `SELECT p.id, u.email, p.tier, p.billing_cycle, p.amount_kobo, p.currency, p.country, p.payment_method, p.status, p.paid_at
        FROM subscription_payments p
        LEFT JOIN users u ON u.id = p.user_id
-       ORDER BY p.id DESC LIMIT 10`
+       ORDER BY p.id DESC LIMIT 20`
     ).all();
 
     return json({
