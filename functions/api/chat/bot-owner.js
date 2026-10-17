@@ -2,7 +2,10 @@
 import {
   getBusinessContext, getTodaySales, getTodayExpenses, getLowStock,
   getOwed, getWeekSales, findProduct,
-  getTargets, setTarget, getTargetProgress, formatNaira
+  getTargets, setTarget, getTargetProgress, formatNaira, formatNGN,
+  findCustomer, getDebtors, recordSale,
+  saveMemory, listMemories, forgetMemory,
+  savePendingAction, getPendingAction, clearPendingAction
 } from './bot-tools.js';
 import { handleReminderCommand, checkDueReminders } from './bot-reminders.js';
 
@@ -40,9 +43,9 @@ export const BOT_TIER_LIMITS = {
 
 // Staff role limits (within owner mode)
 const STAFF_LIMITS = {
-  owner: ['briefing', 'stock', 'sale', 'expense', 'target', 'task'],
-  admin: ['briefing', 'stock', 'sale', 'expense', 'target'],
-  staff: ['briefing', 'stock'],
+  owner: ['briefing', 'stock', 'sale', 'expense', 'target', 'task', 'price', 'customers', 'memory'],
+  admin: ['briefing', 'stock', 'sale', 'expense', 'target', 'price', 'customers', 'memory'],
+  staff: ['briefing', 'stock', 'price', 'customers'],
   viewer: ['briefing']
 };
 
@@ -59,6 +62,35 @@ export async function handleOwnerCommand(message, ctx) {
 
   const biz = await getBusinessContext(db, businessId);
   const bizName = biz?.name || 'your business';
+
+  // --- PENDING SALE CONFIRMATION: "yes" after a sale quote ---
+  if (ctx.sessionId) {
+    if (/^(yes|yeah|yep|confirm|ok|okay|sure|no|nope|cancel|never mind)$/i.test(lower)) {
+      const pending = await getPendingAction(db, ctx.sessionId, businessId);
+      if (pending && pending.action_type === 'sale_quote') {
+        const isYes = /^(yes|yeah|yep|confirm|ok|okay|sure)$/i.test(lower);
+        await clearPendingAction(db, ctx.sessionId, businessId);
+        if (!isYes) {
+          return { answer: `Cancelled. Nothing was recorded.`, quickReplies: ['Brief me', 'Check stock'] };
+        }
+        if (!limits.recordSale) return tierBlocked('recording sales', limits);
+        if (!canDo(role, 'sale')) return roleBlocked();
+        const q = pending.payload || {};
+        if (!q.productId || !q.qty) {
+          return { answer: `That sale confirmation expired. Tell me the sale again, like "sell 2 cabin biscuits".`, quickReplies: ['Brief me'] };
+        }
+        const res = await recordSale(db, businessId, q.productId, q.qty, q.unitPrice, userId);
+        if (res.error) return { answer: `I could not record that sale. Nothing was saved.` };
+        return {
+          answer: `Recorded: ${q.qty} x ${q.productName}, ${formatNGN(q.total)}.`,
+          quickReplies: ['Brief me', 'Check stock']
+        };
+      }
+    } else {
+      // Any other message cancels a stale pending quote
+      await clearPendingAction(db, ctx.sessionId, businessId);
+    }
+  }
 
   // --- REMINDERS (never forget) ---
   if (lower.startsWith('remind me') || lower.match(/^(my reminders|list reminders|reminders|cancel reminder)/)) {
@@ -114,6 +146,13 @@ export async function handleOwnerCommand(message, ctx) {
       }
     }
 
+    try {
+      const mems = await listMemories(db, businessId);
+      if (mems.length > 0) {
+        brief += `\nYou asked me to remember: "${mems[0].memory_value}"\n`;
+      }
+    } catch {}
+
     if (dueReminderNote) brief += dueReminderNote;
 
     return { answer: brief, quickReplies: ['Check stock', 'Record sale', 'Set target'] };
@@ -134,7 +173,28 @@ export async function handleOwnerCommand(message, ctx) {
     return { answer: msg, quickReplies: ['Brief me', 'Record sale'] };
   }
 
-  // --- RECORD SALE: guide to app (complex inventory transactions) ---
+  // --- PRICE LOOKUP: "how much is X", "price of X", "X price" ---
+  // Works on ALL tiers. Never invents a price.
+  const priceMatch = lower.match(/(?:how much is|how much are|how much does|price of|what(?:'s| is) the price of)\s+(.+?)\??$/)
+    || lower.match(/^(.+?)\s+price\??$/);
+  if (priceMatch) {
+    if (!canDo(role, 'price')) return roleBlocked();
+    let term = priceMatch[1].trim().replace(/\s+cost\??$/, '');
+    if (term.length < 2) return null;
+    const products = await findProduct(db, businessId, term);
+    if (products.length === 0) {
+      return { answer: `I do not have "${term}" in your products. I will not guess. Add it in Products first, then ask me again.`, quickReplies: ['Check stock'] };
+    }
+    if (products.length === 1) {
+      const p = products[0];
+      return { answer: `${p.name} is ${formatNGN(p.price)}, ${p.quantity} in stock.`, quickReplies: ['Check stock', 'Brief me'] };
+    }
+    let msg = `I found ${products.length} matches:\n\n`;
+    products.slice(0, 3).forEach(p => { msg += `- ${p.name}: ${formatNGN(p.price)} (${p.quantity} in stock)\n`; });
+    return { answer: msg, quickReplies: ['Check stock'] };
+  }
+
+  // --- RECORD SALE: "sell 2 cabin biscuits" -> quote -> YES confirms ---
   const saleMatch = lower.match(/(?:record sale|sell|record)\s+(\d+)\s+(.+)/);
   if (saleMatch) {
     if (!limits.recordSale) return tierBlocked('recording sales', limits);
@@ -145,13 +205,28 @@ export async function handleOwnerCommand(message, ctx) {
     const products = await findProduct(db, businessId, productSearch);
 
     if (products.length === 0) {
-      return { answer: `I could not find "${productSearch}" in your products. Check the spelling or add it first.`, quickReplies: ['Check stock'] };
+      return { answer: `I could not find "${productSearch}" in your products. I will not guess. Check the spelling or add it first.`, quickReplies: ['Check stock'] };
+    }
+    if (products.length > 1) {
+      let msg = `Which one did you mean?\n\n`;
+      products.slice(0, 3).forEach((p, i) => { msg += `${i + 1}. ${p.name} at ${formatNGN(p.price)}\n`; });
+      msg += `\nSay "sell ${qty}" plus the full name.`;
+      return { answer: msg, quickReplies: ['Check stock'] };
     }
 
     const p = products[0];
+    if (qty > p.quantity) {
+      return { answer: `You only have ${p.quantity} of ${p.name} in stock. I cannot sell ${qty}.`, quickReplies: ['Check stock'] };
+    }
+    const total = qty * p.price;
+    if (ctx.sessionId) {
+      await savePendingAction(db, ctx.sessionId, businessId, 'sale_quote', {
+        productId: p.id, productName: p.name, qty, unitPrice: p.price, total
+      });
+    }
     return {
-      answer: `Found: ${p.name} at ${formatNaira(p.price)} (${p.quantity} in stock).\n\nTo record this sale, tap Sales > New Sale in the app. I will have full sale recording soon!`,
-      quickReplies: ['Brief me', 'Check stock']
+      answer: `${qty} x ${p.name} at ${formatNGN(p.price)} = ${formatNGN(total)}. Reply YES to record this sale.`,
+      quickReplies: ['Yes', 'No']
     };
   }
 
@@ -206,6 +281,43 @@ export async function handleOwnerCommand(message, ctx) {
     return { answer: msg, quickReplies: ['Brief me', 'Set target'] };
   }
 
+  // --- WHO OWES ME / DEBTORS ---
+  if (lower.match(/(who owes me|debtors|list debtors|who.*owes|outstanding debts)/)) {
+    if (!canDo(role, 'customers')) return roleBlocked();
+    const debtors = await getDebtors(db, businessId, 10);
+    if (debtors.length === 0) {
+      return { answer: `Good news, nobody owes ${bizName} right now.`, quickReplies: ['Brief me'] };
+    }
+    let msg = `These customers owe you:\n\n`;
+    debtors.forEach(d => { msg += `- ${d.name}: ${formatNGN(d.owed)}${d.phone ? ` (${d.phone})` : ''}\n`; });
+    const totalOwed = debtors.reduce((s, d) => s + d.owed, 0);
+    msg += `\nTotal owed: ${formatNGN(totalOwed)}`;
+    return { answer: msg, quickReplies: ['Brief me'] };
+  }
+
+  // --- FIND CUSTOMER: "find customer Ada" / "customer Ada" ---
+  const custMatch = lower.match(/(?:find customer|customer)\s+(.+)/);
+  if (custMatch) {
+    if (!canDo(role, 'customers')) return roleBlocked();
+    const term = custMatch[1].trim();
+    if (term.length < 2) return null;
+    const customers = await findCustomer(db, businessId, term);
+    if (customers.length === 0) {
+      return { answer: `I do not have a customer named "${term}" for ${bizName}. I will not guess.`, quickReplies: ['Brief me'] };
+    }
+    if (customers.length > 1) {
+      let msg = `I found ${customers.length} customers:\n\n`;
+      customers.slice(0, 3).forEach(c => { msg += `- ${c.name}${c.phone ? ` (${c.phone})` : ''}\n`; });
+      msg += `\nGive me more of the name.`;
+      return { answer: msg, quickReplies: ['Brief me'] };
+    }
+    const c = customers[0];
+    let msg = `${c.name}${c.phone ? ` (${c.phone})` : ''}\n`;
+    msg += `Owes: ${formatNGN(c.owed)}\n`;
+    msg += c.last_purchase ? `Last purchase: ${String(c.last_purchase).slice(0, 10)}` : `No purchases recorded yet.`;
+    return { answer: msg, quickReplies: ['Brief me'] };
+  }
+
   // --- WEEK SUMMARY ---
   if (lower.match(/(week|weekly|7 days|last 7)/)) {
     if (!limits.briefing) return tierBlocked('reports', limits);
@@ -217,17 +329,56 @@ export async function handleOwnerCommand(message, ctx) {
     return { answer: msg, quickReplies: ['Brief me'] };
   }
 
+  // --- REMEMBER: "remember that ..." / "note that ..." / "do not forget ..." ---
+  const memMatch = lower.match(/^(?:remember that|note that|do not forget that|dont forget that|don't forget that)\s+(.+)/);
+  if (memMatch) {
+    if (!canDo(role, 'memory')) return roleBlocked();
+    const text = memMatch[1].trim();
+    if (text.length < 3) return { answer: `What should I remember? Say "remember that ..." followed by the thing.` };
+    const key = text.split(/\s+/).slice(0, 5).join(' ').toLowerCase();
+    const res = await saveMemory(db, businessId, key, text, userId);
+    if (res.error) return { answer: `I could not save that memory. Try again.` };
+    return { answer: `Got it, I will remember: "${text}".`, quickReplies: ['Brief me'] };
+  }
+
+  // --- WHAT DO YOU REMEMBER / LIST MEMORIES ---
+  if (lower.match(/(what do you remember|list memories|your memories|show memories|what.*remember)/)) {
+    if (!canDo(role, 'memory')) return roleBlocked();
+    const mems = await listMemories(db, businessId);
+    if (mems.length === 0) {
+      return { answer: `I am not holding any memories for ${bizName} yet. Say "remember that ..." and I will keep it.`, quickReplies: ['Brief me'] };
+    }
+    let msg = `Here is what I remember for ${bizName}:\n\n`;
+    mems.slice(0, 10).forEach((m, i) => { msg += `${i + 1}. ${m.memory_value}\n`; });
+    return { answer: msg, quickReplies: ['Brief me'] };
+  }
+
+  // --- FORGET: "forget ..." ---
+  const forgetMatch = lower.match(/^forget\s+(.+)/);
+  if (forgetMatch) {
+    if (!canDo(role, 'memory')) return roleBlocked();
+    const res = await forgetMemory(db, businessId, forgetMatch[1].trim().toLowerCase());
+    if (res.error) return { answer: `I could not forget that. Try again.` };
+    if (!res.deleted) return { answer: `I do not have a memory about that.` };
+    return { answer: `Forgotten. I will not bring it up again.`, quickReplies: ['Brief me'] };
+  }
+
   // --- HELP ---
   if (lower.match(/^(help|what can you do|commands)/)) {
     let msg = `Here is what I can do for ${bizName}:\n\n`;
     msg += `- "Brief me" - daily business summary\n`;
     msg += `- "Check stock" - low stock alerts\n`;
-    if (limits.recordSale) msg += `- "Record sale 2 rice" - record a sale\n`;
+    msg += `- "How much is cabin biscuits" - price lookup\n`;
+    msg += `- "Who owes me" - customers with debts\n`;
+    msg += `- "Find customer Ada" - customer details\n`;
+    if (limits.recordSale) msg += `- "Sell 2 cabin biscuits" - record a sale (I will ask you to confirm)\n`;
     if (limits.recordExpense) msg += `- "Record expense 5000 fuel" - record an expense\n`;
     if (limits.targets) msg += `- "Set target 100000 sales this week" - set a goal\n`;
     if (limits.targets) msg += `- "My targets" - check goal progress\n`;
     if (limits.tasks) msg += `- "Remind me to call supplier tomorrow at 9am" - never forget\n`;
     if (limits.tasks) msg += `- "My reminders" - see all reminders\n`;
+    msg += `- "Remember that supplier Ade delivers on Mondays" - I keep it in mind\n`;
+    msg += `- "What do you remember" - see my memories\n`;
     msg += `- "Week summary" - last 7 days\n`;
     if (limits.note) msg += `\n${limits.note}`;
     return { answer: msg, quickReplies: ['Brief me', 'Check stock'] };
