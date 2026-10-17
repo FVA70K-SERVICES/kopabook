@@ -128,10 +128,9 @@ export default function PlanCard() {
         </li>
         <li style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Sales this week</span><strong>{u.salesThisWeek} of {fmtLimit(l.salesPerWeek)}</strong>
+            <span>Sales this week</span><strong>{u.salesThisWeek}</strong>
           </div>
-          {bar(u.salesThisWeek, l.salesPerWeek)}
-          <small className="hint">Resets every Monday. Recording a sale is never blocked.</small>
+          <small className="hint">Usage only, not a limit. Recording a sale is never blocked.</small>
         </li>
         <li style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>

@@ -291,7 +291,6 @@ export function PricingPage() {
             <h3>Add-ons, billed separately</h3>
             <p style={{ color: "var(--muted)" }}>Optional extras on top of any plan.</p>
             <ul>
-              <li>Extra business on Starter: NGN 500 per month, per business.</li>
               <li>Custom domain: at cost.</li>
             </ul>
           </div>
@@ -583,7 +582,7 @@ export function HotelsLandingPage() {
             <div className="card"><div className="icon">🧾</div><h3>Guest folios</h3><p>Room charges post automatically. Add restaurant, bar, laundry and transport, then record payments against the bill.</p></div>
             <div className="card"><div className="icon">💳</div><h3>Checkout in seconds</h3><p>Record the balance as it is settled by cash, transfer or POS, and the room frees up instantly. KopaBook never touches the money, it only keeps the record.</p></div>
             <div className="card"><div className="icon">📊</div><h3>Know your occupancy</h3><p>Live occupancy rate, arrivals and departures today, in-house guests and cash collected.</p></div>
-            <div className="card"><div className="icon">💾</div><h3>Backups included</h3><p>One-tap full backups of your entire hotel data to your own cloud storage.</p></div>
+            <div className="card"><div className="icon">💾</div><h3>Backups included</h3><p>One-tap full backups of your entire hotel data to KopaBook's secure storage, downloadable anytime.</p></div>
           </div>
         </div>
       </section>

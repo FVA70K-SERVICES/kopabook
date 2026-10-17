@@ -144,6 +144,57 @@ export function getCryptoPriceUsdCents(tier, cycle, country) {
   return { usdCents: Math.max(CRYPTO_MIN_USD_CENTS, usdCents) };
 }
 
+// DB-backed price source. The marketing page and the admin panel read prices
+// from the subscription_plans table, so checkout must too: hardcoded numbers
+// here and the DB price book can silently diverge otherwise.
+//
+// Schema note (migrations/0029_subscription_plans.sql): the table has columns
+// (tier, billing_cycle, amount_kobo, currency, active), not (tier, country,
+// period, amount). Only the NGN home-market prices live in the DB, so this
+// returns a price only for Nigeria; other countries keep the hardcoded PPP
+// prices below. Returns { amount, currency } in the smallest currency unit,
+// or null when the DB read fails or has no valid row, so callers can fall
+// back to the hardcoded constants and checkout never breaks.
+export async function getPricedb(db, tier, country, period) {
+  try {
+    tier = String(tier || "").toLowerCase();
+    period = String(period || "monthly").toLowerCase();
+    if (!["starter", "pro", "solo"].includes(tier)) return null;
+    if (!["monthly", "yearly"].includes(period)) return null;
+    if (country !== "Nigeria") return null;
+    const row = await db.prepare(
+      `SELECT amount_kobo, currency FROM subscription_plans
+       WHERE tier = ? AND billing_cycle = ? AND active = 1 LIMIT 1`
+    ).bind(tier, period).first();
+    if (!row) return null;
+    const amount = Math.floor(Number(row.amount_kobo));
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const currency = String(row.currency || "NGN").toUpperCase();
+    if (currency !== "NGN") return null;
+    return { amount, currency };
+  } catch {
+    return null;
+  }
+}
+
+// DB-backed crypto quote for a tier/cycle/country, or null to fall back to
+// the hardcoded crypto prices. Nigeria's NGN DB price is converted at
+// NGN_PER_USD, and the $2 crypto minimum is enforced here too.
+export async function getCryptoPricedbUsdCents(db, tier, cycle, country) {
+  try {
+    const p = await getPricedb(db, tier, country, cycle);
+    if (!p) return null;
+    let usdCents;
+    if (p.currency === "NGN") usdCents = Math.max(1, Math.round(Number(p.amount) / NGN_PER_USD));
+    else if (p.currency === "USD") usdCents = Math.round(Number(p.amount));
+    else return null;
+    if (!Number.isFinite(usdCents) || usdCents <= 0) return null;
+    return { usdCents: Math.max(CRYPTO_MIN_USD_CENTS, usdCents) };
+  } catch {
+    return null;
+  }
+}
+
 // The user's country for pricing. Read from their first business
 // (businesses.country exists since migration 0020). There is no
 // users.country column, so never query it. Falls back to Nigeria and

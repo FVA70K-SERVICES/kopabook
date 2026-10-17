@@ -1,12 +1,25 @@
 // /api/hotel/overview — GET today's hotel stats: occupancy, arrivals,
 // departures, in-house guests, revenue collected today.
 import { json, getAuthContext, requireAuth } from "../_utils";
+import { getBusinessOwnerTier } from "../billing";
+
+// Tier gate: paid feature, business-scoped (staff act under the owner's plan).
+async function requireFeatureTier(db, businessId) {
+  const { tier } = await getBusinessOwnerTier(db, businessId);
+  if (!["pro", "solo"].includes(tier)) {
+    return json({ ok: false, upgradeRequired: true, message: "Hotel operations is a Pro feature. Upgrade to use it." }, 403);
+  }
+  return null;
+}
+
 
 export async function onRequestGet(context) {
   try {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const db = context.env.KOPABOOK_DB;
     const today = new Date().toISOString().slice(0, 10);
     const b = auth.business.id;

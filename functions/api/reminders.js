@@ -2,12 +2,25 @@
 // Reminders are sent by the merchant through WhatsApp (wa.me links); this API
 // only records what was sent so the app knows who is due for a nudge.
 import { json, getAuthContext, requireAuth, audit } from "./_utils";
+import { getBusinessOwnerTier } from "./billing";
+
+// Tier gate: paid feature, business-scoped (staff act under the owner's plan).
+async function requireFeatureTier(db, businessId) {
+  const { tier } = await getBusinessOwnerTier(db, businessId);
+  if (!["pro", "solo", "starter"].includes(tier)) {
+    return json({ ok: false, upgradeRequired: true, message: "WhatsApp debt reminders are a Starter feature. Upgrade to use it." }, 403);
+  }
+  return null;
+}
+
 
 export async function onRequestGet(context) {
   try {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
 
     const logs = await context.env.KOPABOOK_DB.prepare(
       `SELECT r.*, c.name AS customer_name, u.full_name AS staff_name
@@ -30,6 +43,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
 
     const body = await context.request.json().catch(() => ({}));
     const kind = ["debt", "broadcast", "staff"].includes(body.kind) ? body.kind : "debt";

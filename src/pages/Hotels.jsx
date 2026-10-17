@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmt, todayISO } from "../lib/api";
+import { api, fmt, nav, todayISO } from "../lib/api";
 
 const STATUS_COLORS = {
   vacant: "#16a34a",
@@ -23,6 +23,7 @@ export default function HotelsPage({ session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modes, setModes] = useState([]);
+  const [needsUpgrade, setNeedsUpgrade] = useState(false);
 
   // Room form
   const [showRoomForm, setShowRoomForm] = useState(false);
@@ -68,7 +69,11 @@ export default function HotelsPage({ session }) {
       setBookings(b.bookings || []);
       setModes((m.modes || []).filter((x) => x.enabled !== 0).map((x) => x.name));
       setError("");
-    } catch (e) { setError(e.message); }
+      setNeedsUpgrade(false);
+    } catch (e) {
+      setError(e.message);
+      if (e.upgradeRequired) setNeedsUpgrade(true);
+    }
     setLoading(false);
   }
 
@@ -211,6 +216,27 @@ export default function HotelsPage({ session }) {
   }
 
   const modeOptions = modes.length ? modes : ["Cash", "Bank Transfer", "POS / Card"];
+
+  // Hotel operations is a Pro feature: show the upgrade prompt instead of a
+  // broken page when the hotel API returns upgradeRequired.
+  if (needsUpgrade) {
+    return (
+      <>
+        <div className="page-head">
+          <h1>🏨 Hotels</h1>
+        </div>
+        <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
+          <div style={{ fontSize: 44, marginBottom: 12 }}>🏨</div>
+          <h3 style={{ marginTop: 0 }}>Hotel operations is a Pro feature</h3>
+          <p style={{ color: "var(--muted)", maxWidth: 460, margin: "0 auto 20px" }}>
+            Room boards, bookings, guest folios and checkout are available on Pro and Solo plans.
+            Upgrade to run your full front desk in KopaBook.
+          </p>
+          <button className="btn btn-primary" onClick={() => nav("/app/settings")}>See plans and upgrade</button>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

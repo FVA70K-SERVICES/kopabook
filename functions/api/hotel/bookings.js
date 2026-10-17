@@ -1,6 +1,17 @@
 // /api/hotel/bookings — GET list, POST create (with availability check),
 // PATCH change status: check_in, check_out handled via folio checkout, cancel, no_show.
 import { json, getAuthContext, requireAuth, requireHotelRole, audit } from "../_utils";
+import { getBusinessOwnerTier } from "../billing";
+
+// Tier gate: paid feature, business-scoped (staff act under the owner's plan).
+async function requireFeatureTier(db, businessId) {
+  const { tier } = await getBusinessOwnerTier(db, businessId);
+  if (!["pro", "solo"].includes(tier)) {
+    return json({ ok: false, upgradeRequired: true, message: "Hotel operations is a Pro feature. Upgrade to use it." }, 403);
+  }
+  return null;
+}
+
 
 function nightsBetween(checkIn, checkOut) {
   const ms = new Date(checkOut) - new Date(checkIn);
@@ -22,6 +33,8 @@ export async function onRequestGet(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const url = new URL(context.request.url);
     const status = url.searchParams.get("status") || "";
     const date = url.searchParams.get("date") || "";
@@ -48,6 +61,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const roleDenied = requireHotelRole(auth, ["hotel_manager", "receptionist"]);
     if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));
@@ -118,6 +133,8 @@ export async function onRequestPatch(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const roleDenied = requireHotelRole(auth, ["hotel_manager", "receptionist"]);
     if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));

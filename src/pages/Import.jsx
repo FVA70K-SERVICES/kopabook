@@ -29,11 +29,13 @@ export default function ImportPage() {
   const [importing, setImporting] = useState(false);
   const [reviewQueue, setReviewQueue] = useState(loadReviewQueue);
   const [parseError, setParseError] = useState("");
+  const [billing, setBilling] = useState(null);
 
   useEffect(() => {
     api.get("/api/products")
       .then((d) => setProducts(d.products || []))
       .catch((e) => setProdError(e.message));
+    api.get("/api/billing").then(setBilling).catch(() => {});
   }, []);
 
   const productIndex = useMemo(() => {
@@ -173,6 +175,27 @@ export default function ImportPage() {
   }
 
   const importableCount = matched.filter((m) => m.product).length;
+
+  // CSV import is a Starter feature. Free accounts see the upgrade prompt
+  // instead of the importer (server enforces this too).
+  if (billing && billing.tier === "free") {
+    return (
+      <>
+        <div className="page-head">
+          <h1>Import marketplace sales</h1>
+        </div>
+        <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
+          <div style={{ fontSize: 44, marginBottom: 12 }}>📥</div>
+          <h3 style={{ marginTop: 0 }}>CSV import is a Starter feature</h3>
+          <p style={{ color: "var(--muted)", maxWidth: 460, margin: "0 auto 20px" }}>
+            Importing marketplace sales reports from CSV files is available on Starter, Solo and Pro plans.
+            Upgrade once and pull all your Jumia and Konga sales in automatically.
+          </p>
+          <button className="btn btn-primary" onClick={() => nav("/app/settings")}>See plans and upgrade</button>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

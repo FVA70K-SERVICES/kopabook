@@ -1,5 +1,16 @@
 // /api/hotel/rooms — GET list, POST create, PATCH update, DELETE remove.
 import { json, getAuthContext, requireAuth, requireHotelRole, audit } from "../_utils";
+import { getBusinessOwnerTier } from "../billing";
+
+// Tier gate: paid feature, business-scoped (staff act under the owner's plan).
+async function requireFeatureTier(db, businessId) {
+  const { tier } = await getBusinessOwnerTier(db, businessId);
+  if (!["pro", "solo"].includes(tier)) {
+    return json({ ok: false, upgradeRequired: true, message: "Hotel operations is a Pro feature. Upgrade to use it." }, 403);
+  }
+  return null;
+}
+
 
 const STATUSES = ["vacant", "occupied", "reserved", "maintenance"];
 
@@ -8,6 +19,8 @@ export async function onRequestGet(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const db = context.env.KOPABOOK_DB;
     const rooms = await db.prepare(
       `SELECT r.*,
@@ -27,6 +40,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const roleDenied = requireHotelRole(auth, ["hotel_manager"]);
     if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));
@@ -61,6 +76,8 @@ export async function onRequestPatch(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const body = await context.request.json().catch(() => ({}));
     // Status-only updates (housekeeping) are open to housekeepers;
     // editing room details or rates needs a manager.
@@ -108,6 +125,8 @@ export async function onRequestDelete(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const roleDenied = requireHotelRole(auth, []);
     if (roleDenied) return roleDenied;
     const id = Number(new URL(context.request.url).searchParams.get("id"));

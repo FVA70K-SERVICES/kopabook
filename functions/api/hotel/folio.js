@@ -5,6 +5,17 @@
 // POST { action: "checkout", bookingId, amount?, mode?, note? } — optional final
 //   payment, then closes the booking and frees the room.
 import { json, getAuthContext, requireAuth, requireHotelRole, audit } from "../_utils";
+import { getBusinessOwnerTier } from "../billing";
+
+// Tier gate: paid feature, business-scoped (staff act under the owner's plan).
+async function requireFeatureTier(db, businessId) {
+  const { tier } = await getBusinessOwnerTier(db, businessId);
+  if (!["pro", "solo"].includes(tier)) {
+    return json({ ok: false, upgradeRequired: true, message: "Hotel operations is a Pro feature. Upgrade to use it." }, 403);
+  }
+  return null;
+}
+
 
 const CATEGORIES = ["room", "restaurant", "bar", "laundry", "transport", "other"];
 
@@ -36,6 +47,8 @@ export async function onRequestGet(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const bookingId = Number(new URL(context.request.url).searchParams.get("bookingId"));
     if (!bookingId) return json({ ok: false, message: "Booking id is required." }, 400);
     const folio = await getFolio(context.env.KOPABOOK_DB, auth.business.id, bookingId);
@@ -51,6 +64,8 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
     const roleDenied = requireHotelRole(auth, ["hotel_manager", "receptionist"]);
     if (roleDenied) return roleDenied;
     const body = await context.request.json().catch(() => ({}));

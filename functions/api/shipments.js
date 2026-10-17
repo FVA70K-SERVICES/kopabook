@@ -1,6 +1,21 @@
 // /api/shipments — GET list, POST create tracking, PATCH update status.
 // Lets a store generate a tracking number when a sold product ships.
 import { json, getAuthContext, requireAuth, audit, toSqliteDate } from "./_utils";
+import { getBusinessOwnerTier } from "./billing";
+
+// Tier gate: shipment tracking is a Pro feature (solo gets Pro features for
+// one business). Business-scoped: staff act under the owner's plan.
+async function requireProTier(db, businessId) {
+  const { tier } = await getBusinessOwnerTier(db, businessId);
+  if (tier !== "pro" && tier !== "solo") {
+    return json({
+      ok: false,
+      upgradeRequired: true,
+      message: "Shipment tracking is a Pro feature. Upgrade to use it.",
+    }, 403);
+  }
+  return null;
+}
 
 const STATUSES = ["pending", "shipped", "delivered", "cancelled"];
 
@@ -17,6 +32,9 @@ export async function onRequestGet(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+
+    const tierGate = await requireProTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
 
     const url = new URL(context.request.url);
     const status = url.searchParams.get("status");
@@ -41,6 +59,9 @@ export async function onRequestPost(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+
+    const tierGate = await requireProTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
 
     const body = await context.request.json().catch(() => ({}));
     const saleId = Number(body.saleId) || null;
@@ -99,6 +120,9 @@ export async function onRequestPatch(context) {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+
+    const tierGate = await requireProTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
 
     const body = await context.request.json().catch(() => ({}));
     const id = Number(body.id) || null;

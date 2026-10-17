@@ -3,7 +3,7 @@
 // Returns the Paystack authorization URL; the user pays there, then returns.
 import { json, getAuthContext, requireAuth } from "../_utils";
 import { LIMITS } from "../billing";
-import { getPrice, PAYSTACK_CURRENCIES, getUserCountry } from "../_pricing";
+import { getPrice, PAYSTACK_CURRENCIES, getUserCountry, getPricedb } from "../_pricing";
 import { checkRateLimit } from "../_webhook_security";
 
 export async function onRequestPost(context) {
@@ -34,7 +34,11 @@ export async function onRequestPost(context) {
     // Get user's country for localized pricing (from their business; never throws)
     const userCountry = await getUserCountry(db, auth.user.id);
 
-    const price = getPrice(tier, cycle, userCountry);
+    // Single price source: the DB price book (subscription_plans) first,
+    // hardcoded country prices only as a fallback if the DB read fails or
+    // has no valid row, so the two can never silently diverge.
+    let price = await getPricedb(db, tier, userCountry, cycle);
+    if (!price) price = getPrice(tier, cycle, userCountry);
     if (!price) {
       return json({ ok: false, message: "This plan is not available right now." }, 400);
     }
@@ -42,6 +46,9 @@ export async function onRequestPost(context) {
     // Only charge currencies our Paystack account actually supports.
     // Nigeria pays NGN; everyone else pays USD. Crypto covers the rest.
     const amount = Number(price.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return json({ ok: false, message: "This plan is not available right now." }, 400);
+    }
     const currency = PAYSTACK_CURRENCIES.includes(price.currency) ? price.currency : "USD";
     const reference = `kopa_${auth.user.id}_${Date.now()}`;
 

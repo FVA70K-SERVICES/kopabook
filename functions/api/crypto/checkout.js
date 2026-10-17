@@ -3,7 +3,7 @@
 // then submits the transaction hash. Nothing activates until the transaction is
 // verified on the blockchain by an admin.
 import { json, getAuthContext, requireAuth } from "../_utils";
-import { getCryptoPriceUsdCents, getUserCountry } from "../_pricing";
+import { getCryptoPriceUsdCents, getCryptoPricedbUsdCents, getUserCountry } from "../_pricing";
 import { LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
 import { getBtcPriceUsd, isValidCryptoAddress, explorerUrl } from "./_verify";
@@ -41,8 +41,10 @@ export async function onRequestPost(context) {
 
     const userCountry = await getUserCountry(db, auth.user.id);
 
-    // Crypto settles in USD value (country-adjusted; NGN converted at a fixed rate).
-    const cryptoPrice = getCryptoPriceUsdCents(tier, cycle, userCountry);
+    // Crypto settles in USD value (country-adjusted; NGN converted at a fixed
+    // rate). DB price book first, hardcoded country prices as fallback.
+    let cryptoPrice = await getCryptoPricedbUsdCents(db, tier, cycle, userCountry);
+    if (!cryptoPrice) cryptoPrice = getCryptoPriceUsdCents(tier, cycle, userCountry);
     if (!cryptoPrice) {
       return json({ ok: false, message: "This plan is not available right now." }, 400);
     }
