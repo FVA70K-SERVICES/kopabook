@@ -54,11 +54,52 @@ function canDo(role, action) {
   return allowed.includes(action);
 }
 
+// Plain-words description of what each role can ask the bot to do
+const ROLE_ABILITIES = {
+  owner: 'briefings, stock checks, price lookups, customer lookups, sales, expenses, targets, reminders and memories',
+  admin: 'briefings, stock checks, price lookups, customer lookups, sales, expenses, targets and reminders',
+  staff: 'price checks ("how much is X"), stock levels, customer and debtor lookups, and the daily briefing',
+  viewer: 'the daily briefing'
+};
+
+const ACTION_LABELS = {
+  briefing: 'briefings',
+  stock: 'stock checks',
+  sale: 'recording sales',
+  expense: 'recording expenses',
+  target: 'setting targets',
+  task: 'reminders and tasks',
+  memory: 'saving memories',
+  customers: 'customer lookups',
+  price: 'price checks'
+};
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function firstName(userName) {
+  if (!userName || userName === 'Visitor') return null;
+  return String(userName).split(' ')[0];
+}
+
+// Warm, personal limit response: names the person, states the boundary,
+// reminds them of their team role, and lists exactly what they CAN do.
+function roleBlocked(action, role, userName) {
+  const nm = firstName(userName);
+  const nameBit = nm ? `, ${nm}` : '';
+  const roleWord = role === 'staff' ? 'staff' : role === 'viewer' ? 'a viewer' : `an ${role}`;
+  const canDoList = ROLE_ABILITIES[role] || ROLE_ABILITIES.viewer;
+  return {
+    answer: `That one is for owners and admins${nameBit}. As ${roleWord}, I can help you with ${canDoList}. What do you need?`,
+    quickReplies: ['Brief me', 'Check stock']
+  };
+}
+
 export async function handleOwnerCommand(message, ctx) {
   const { db, businessId, userId, userName, userRole, tier } = ctx;
   const lower = message.toLowerCase().trim();
   const limits = BOT_TIER_LIMITS[tier] || BOT_TIER_LIMITS.free;
   const role = userRole || 'owner';
+  const nm = firstName(userName); // for warm, personal replies
 
   const biz = await getBusinessContext(db, businessId);
   const bizName = biz?.name || 'your business';
@@ -74,7 +115,7 @@ export async function handleOwnerCommand(message, ctx) {
           return { answer: `Cancelled. Nothing was recorded.`, quickReplies: ['Brief me', 'Check stock'] };
         }
         if (!limits.recordSale) return tierBlocked('recording sales', limits);
-        if (!canDo(role, 'sale')) return roleBlocked();
+        if (!canDo(role, 'sale')) return roleBlocked('sale', role, userName);
         const q = pending.payload || {};
         if (!q.productId || !q.qty) {
           return { answer: `That sale confirmation expired. Tell me the sale again, like "sell 2 cabin biscuits".`, quickReplies: ['Brief me'] };
@@ -82,7 +123,7 @@ export async function handleOwnerCommand(message, ctx) {
         const res = await recordSale(db, businessId, q.productId, q.qty, q.unitPrice, userId);
         if (res.error) return { answer: `I could not record that sale. Nothing was saved.` };
         return {
-          answer: `Recorded: ${q.qty} x ${q.productName}, ${formatNGN(q.total)}.`,
+          answer: `Done${nm ? `, ${nm}` : ''}! Recorded: ${q.qty} x ${q.productName}, ${formatNGN(q.total)}.`,
           quickReplies: ['Brief me', 'Check stock']
         };
       }
@@ -111,7 +152,7 @@ export async function handleOwnerCommand(message, ctx) {
   // --- BRIEF ME ---
   if (lower.match(/^(brief|brief me|morning brief|daily brief|summary|how is business|business update)/)) {
     if (!limits.briefing) return tierBlocked('briefings', limits);
-    if (!canDo(role, 'briefing')) return roleBlocked();
+    if (!canDo(role, 'briefing')) return roleBlocked('briefing', role, userName);
 
     const [sales, expenses, lowStock, owed, targets] = await Promise.all([
       getTodaySales(db, businessId),
@@ -121,7 +162,12 @@ export async function handleOwnerCommand(message, ctx) {
       getTargets(db, businessId)
     ]);
 
-    let brief = `Good day, ${userName || 'boss'}. Here is your briefing for ${bizName}:\n\n`;
+    const greetings = [
+      `Good day${nm ? `, ${nm}` : ''}. Here is your briefing for ${bizName}:`,
+      `Here is how ${bizName} is doing today${nm ? `, ${nm}` : ''}:`,
+      `Your business update${nm ? `, ${nm}` : ''}. Here is ${bizName} today:`
+    ];
+    let brief = pick(greetings) + `\n\n`;
     brief += `Sales today: ${formatNaira(sales.total)} (${sales.count} sales)\n`;
     brief += `Expenses today: ${formatNaira(expenses.total)}\n`;
     brief += `Net: ${formatNaira(sales.total - expenses.total)}\n\n`;
@@ -161,7 +207,7 @@ export async function handleOwnerCommand(message, ctx) {
   // --- CHECK STOCK ---
   if (lower.match(/(check stock|stock level|low stock|inventory|what.*low)/)) {
     if (!limits.stockAlerts) return tierBlocked('stock alerts', limits);
-    if (!canDo(role, 'stock')) return roleBlocked();
+    if (!canDo(role, 'stock')) return roleBlocked('stock', role, userName);
 
     const low = await getLowStock(db, businessId, 10);
     if (low.length === 0) {
@@ -178,7 +224,7 @@ export async function handleOwnerCommand(message, ctx) {
   const priceMatch = lower.match(/(?:how much is|how much are|how much does|price of|what(?:'s| is) the price of)\s+(.+?)\??$/)
     || lower.match(/^(.+?)\s+price\??$/);
   if (priceMatch) {
-    if (!canDo(role, 'price')) return roleBlocked();
+    if (!canDo(role, 'price')) return roleBlocked('price', role, userName);
     let term = priceMatch[1].trim().replace(/\s+cost\??$/, '');
     if (term.length < 2) return null;
     const products = await findProduct(db, businessId, term);
@@ -187,7 +233,12 @@ export async function handleOwnerCommand(message, ctx) {
     }
     if (products.length === 1) {
       const p = products[0];
-      return { answer: `${p.name} is ${formatNGN(p.price)}, ${p.quantity} in stock.`, quickReplies: ['Check stock', 'Brief me'] };
+      const answers = [
+        `${p.name} is ${formatNGN(p.price)}, ${p.quantity} in stock.`,
+        nm ? `${nm}, ${p.name} goes for ${formatNGN(p.price)}. We have ${p.quantity} in stock.` : `${p.name} goes for ${formatNGN(p.price)}. We have ${p.quantity} in stock.`,
+        `${p.name}: ${formatNGN(p.price)} each, ${p.quantity} available. Anything else you need${nm ? `, ${nm}` : ''}?`
+      ];
+      return { answer: pick(answers), quickReplies: ['Check stock', 'Brief me'] };
     }
     let msg = `I found ${products.length} matches:\n\n`;
     products.slice(0, 3).forEach(p => { msg += `- ${p.name}: ${formatNGN(p.price)} (${p.quantity} in stock)\n`; });
@@ -198,7 +249,7 @@ export async function handleOwnerCommand(message, ctx) {
   const saleMatch = lower.match(/(?:record sale|sell|record)\s+(\d+)\s+(.+)/);
   if (saleMatch) {
     if (!limits.recordSale) return tierBlocked('recording sales', limits);
-    if (!canDo(role, 'sale')) return roleBlocked();
+    if (!canDo(role, 'sale')) return roleBlocked('sale', role, userName);
 
     const qty = parseInt(saleMatch[1]);
     const productSearch = saleMatch[2].trim();
@@ -234,7 +285,7 @@ export async function handleOwnerCommand(message, ctx) {
   const expMatch = lower.match(/(?:record expense|add expense|expense)\s+(\d+)\s*(.+)?/);
   if (expMatch) {
     if (!limits.recordExpense) return tierBlocked('recording expenses', limits);
-    if (!canDo(role, 'expense')) return roleBlocked();
+    if (!canDo(role, 'expense')) return roleBlocked('expense', role, userName);
 
     const amount = parseInt(expMatch[1]);
     const desc = (expMatch[2] || 'Expense').trim();
@@ -248,7 +299,7 @@ export async function handleOwnerCommand(message, ctx) {
   const targetMatch = lower.match(/(?:set target|new target|target)\s+(\d+)\s*(sales?)?\s*(today|this week|week|this month|month)?/);
   if (targetMatch) {
     if (!limits.targets) return tierBlocked('targets', limits);
-    if (!canDo(role, 'target')) return roleBlocked();
+    if (!canDo(role, 'target')) return roleBlocked('target', role, userName);
 
     const value = parseInt(targetMatch[1]);
     let period = 'today';
@@ -268,6 +319,7 @@ export async function handleOwnerCommand(message, ctx) {
   // --- CHECK TARGETS ---
   if (lower.match(/(my targets|check.*target|target progress|goals)/)) {
     if (!limits.targets) return tierBlocked('targets', limits);
+    if (!canDo(role, 'target')) return roleBlocked('target', role, userName);
     const targets = await getTargets(db, businessId);
     if (targets.length === 0) {
       return { answer: `You have no active targets. Say "set target 50000 sales today" to create one.`, quickReplies: ['Brief me'] };
@@ -283,7 +335,7 @@ export async function handleOwnerCommand(message, ctx) {
 
   // --- WHO OWES ME / DEBTORS ---
   if (lower.match(/(who owes me|debtors|list debtors|who.*owes|outstanding debts)/)) {
-    if (!canDo(role, 'customers')) return roleBlocked();
+    if (!canDo(role, 'customers')) return roleBlocked('customers', role, userName);
     const debtors = await getDebtors(db, businessId, 10);
     if (debtors.length === 0) {
       return { answer: `Good news, nobody owes ${bizName} right now.`, quickReplies: ['Brief me'] };
@@ -298,7 +350,7 @@ export async function handleOwnerCommand(message, ctx) {
   // --- FIND CUSTOMER: "find customer Ada" / "customer Ada" ---
   const custMatch = lower.match(/(?:find customer|customer)\s+(.+)/);
   if (custMatch) {
-    if (!canDo(role, 'customers')) return roleBlocked();
+    if (!canDo(role, 'customers')) return roleBlocked('customers', role, userName);
     const term = custMatch[1].trim();
     if (term.length < 2) return null;
     const customers = await findCustomer(db, businessId, term);
@@ -332,18 +384,18 @@ export async function handleOwnerCommand(message, ctx) {
   // --- REMEMBER: "remember that ..." / "note that ..." / "do not forget ..." ---
   const memMatch = lower.match(/^(?:remember that|note that|do not forget that|dont forget that|don't forget that)\s+(.+)/);
   if (memMatch) {
-    if (!canDo(role, 'memory')) return roleBlocked();
+    if (!canDo(role, 'memory')) return roleBlocked('memory', role, userName);
     const text = memMatch[1].trim();
     if (text.length < 3) return { answer: `What should I remember? Say "remember that ..." followed by the thing.` };
     const key = text.split(/\s+/).slice(0, 5).join(' ').toLowerCase();
     const res = await saveMemory(db, businessId, key, text, userId);
     if (res.error) return { answer: `I could not save that memory. Try again.` };
-    return { answer: `Got it, I will remember: "${text}".`, quickReplies: ['Brief me'] };
+    return { answer: pick([`Got it, I will remember: "${text}".`, `Noted${nm ? `, ${nm}` : ''}! I will remember: "${text}".`]), quickReplies: ['Brief me'] };
   }
 
   // --- WHAT DO YOU REMEMBER / LIST MEMORIES ---
   if (lower.match(/(what do you remember|list memories|your memories|show memories|what.*remember)/)) {
-    if (!canDo(role, 'memory')) return roleBlocked();
+    if (!canDo(role, 'memory')) return roleBlocked('memory', role, userName);
     const mems = await listMemories(db, businessId);
     if (mems.length === 0) {
       return { answer: `I am not holding any memories for ${bizName} yet. Say "remember that ..." and I will keep it.`, quickReplies: ['Brief me'] };
@@ -356,29 +408,29 @@ export async function handleOwnerCommand(message, ctx) {
   // --- FORGET: "forget ..." ---
   const forgetMatch = lower.match(/^forget\s+(.+)/);
   if (forgetMatch) {
-    if (!canDo(role, 'memory')) return roleBlocked();
+    if (!canDo(role, 'memory')) return roleBlocked('memory', role, userName);
     const res = await forgetMemory(db, businessId, forgetMatch[1].trim().toLowerCase());
     if (res.error) return { answer: `I could not forget that. Try again.` };
     if (!res.deleted) return { answer: `I do not have a memory about that.` };
     return { answer: `Forgotten. I will not bring it up again.`, quickReplies: ['Brief me'] };
   }
 
-  // --- HELP ---
-  if (lower.match(/^(help|what can you do|commands)/)) {
-    let msg = `Here is what I can do for ${bizName}:\n\n`;
+  // --- HELP: role-aware, lists only what THIS person can do ---
+  if (lower.match(/^(help|what can you do|commands|what are my limits|my limits|what are my permissions)/)) {
+    let msg = `Here is what I can do for you${nm ? `, ${nm}` : ''}:\n\n`;
     msg += `- "Brief me" - daily business summary\n`;
-    msg += `- "Check stock" - low stock alerts\n`;
-    msg += `- "How much is cabin biscuits" - price lookup\n`;
-    msg += `- "Who owes me" - customers with debts\n`;
-    msg += `- "Find customer Ada" - customer details\n`;
-    if (limits.recordSale) msg += `- "Sell 2 cabin biscuits" - record a sale (I will ask you to confirm)\n`;
-    if (limits.recordExpense) msg += `- "Record expense 5000 fuel" - record an expense\n`;
-    if (limits.targets) msg += `- "Set target 100000 sales this week" - set a goal\n`;
-    if (limits.targets) msg += `- "My targets" - check goal progress\n`;
-    if (limits.tasks) msg += `- "Remind me to call supplier tomorrow at 9am" - never forget\n`;
-    if (limits.tasks) msg += `- "My reminders" - see all reminders\n`;
-    msg += `- "Remember that supplier Ade delivers on Mondays" - I keep it in mind\n`;
-    msg += `- "What do you remember" - see my memories\n`;
+    if (canDo(role, 'stock')) msg += `- "Check stock" - low stock alerts\n`;
+    if (canDo(role, 'price')) msg += `- "How much is cabin biscuits" - price lookup\n`;
+    if (canDo(role, 'customers')) msg += `- "Who owes me" - customers with debts\n`;
+    if (canDo(role, 'customers')) msg += `- "Find customer Ada" - customer details\n`;
+    if (canDo(role, 'sale') && limits.recordSale) msg += `- "Sell 2 cabin biscuits" - record a sale (I will ask you to confirm)\n`;
+    if (canDo(role, 'expense') && limits.recordExpense) msg += `- "Record expense 5000 fuel" - record an expense\n`;
+    if (canDo(role, 'target') && limits.targets) msg += `- "Set target 100000 sales this week" - set a goal\n`;
+    if (canDo(role, 'target') && limits.targets) msg += `- "My targets" - check goal progress\n`;
+    if (canDo(role, 'task') && limits.tasks) msg += `- "Remind me to call supplier tomorrow at 9am" - never forget\n`;
+    if (canDo(role, 'task') && limits.tasks) msg += `- "My reminders" - see all reminders\n`;
+    if (canDo(role, 'memory')) msg += `- "Remember that supplier Ade delivers on Mondays" - I keep it in mind\n`;
+    if (canDo(role, 'memory')) msg += `- "What do you remember" - see my memories\n`;
     msg += `- "Week summary" - last 7 days\n`;
     if (limits.note) msg += `\n${limits.note}`;
     return { answer: msg, quickReplies: ['Brief me', 'Check stock'] };
@@ -391,12 +443,5 @@ function tierBlocked(feature, limits) {
   return {
     answer: `Your current plan does not include ${feature}. ${limits.note || 'Upgrade to unlock this.'}`,
     quickReplies: ['Pricing', 'Brief me']
-  };
-}
-
-function roleBlocked() {
-  return {
-    answer: `Your staff role does not have permission for that action. Ask the business owner.`,
-    quickReplies: ['Brief me', 'Check stock']
   };
 }
