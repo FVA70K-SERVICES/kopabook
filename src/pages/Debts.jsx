@@ -45,6 +45,9 @@ export default function DebtsPage({ session }) {
   const [queue, setQueue] = useState(null); // { list, idx }
   const [channel, setChannel] = useState("whatsapp");
   const [payModes, setPayModes] = useState([]);
+  // Debt reminders are a Starter+ feature (see pricing page).
+  const [tier, setTier] = useState(null);
+  const canRemind = tier !== null && tier !== "free";
 
   useEffect(() => {
     api.get("/api/payment-modes").then((d) => {
@@ -58,6 +61,12 @@ export default function DebtsPage({ session }) {
     api.get("/api/business")
       .then((d) => setBiz({ name: d.business?.name || "", reminderTemplate: d.business?.reminder_template || "" }))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.get("/api/billing")
+      .then((d) => setTier(d.tier || "free"))
+      .catch(() => setTier("free"));
   }, []);
 
   function reminderText(debtor) {
@@ -191,7 +200,7 @@ export default function DebtsPage({ session }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <ChannelPicker value={channel} onChange={setChannel} />
           <button className="btn btn-primary btn-sm" onClick={openAddingDebt}>＋ Add debt</button>
-          {dueDebtors.length > 0 && (
+          {dueDebtors.length > 0 && canRemind && (
             <button className="btn btn-primary btn-sm" onClick={startQueue}>
               Remind all due ({dueDebtors.filter((d) => d.phone).length})
             </button>
@@ -210,6 +219,12 @@ export default function DebtsPage({ session }) {
         A debtor is due for a nudge when they have not been reminded in {DUE_DAYS} days.
         Reminders open WhatsApp with your template message; nothing sends automatically.
       </p>
+      {tier === "free" && (
+        <div className="alert" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span>WhatsApp debt reminders come with Starter (NGN 1,000/mo). Upgrade to nudge debtors in one tap.</span>
+          <button className="btn btn-primary btn-sm" onClick={() => nav("/app/settings")}>See plans</button>
+        </div>
+      )}
 
       <div className="metric-grid">
         <div className="metric-card bad"><span>Total outstanding</span><strong>{fmt(data.total)}</strong></div>
@@ -242,9 +257,9 @@ export default function DebtsPage({ session }) {
                         <button className="btn btn-secondary btn-sm" onClick={() => toggleHistory(d)}>
                           {expandedId === d.id ? "Hide" : "History"}
                         </button>
-                        {d.phone
+                        {canRemind && (d.phone
                           ? <button className="btn btn-secondary btn-sm" onClick={() => openReminder(d, d.phone)}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>
-                          : <button className="btn btn-secondary btn-sm" onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>}
+                          : <button className="btn btn-secondary btn-sm" onClick={() => { setAskPhone(d); setPhoneInput(""); }}>Remind via {channel === "sms" ? "SMS" : channel === "telegram" ? "Telegram" : "WhatsApp"}</button>)}
                       </div>
                       {askPhone && askPhone.id === d.id && (
                         <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
