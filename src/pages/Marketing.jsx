@@ -96,19 +96,32 @@ export function LandingPage() {
       <section id="how-it-works" className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
         <div className="wrap">
           <h2>How it works</h2>
+          <p className="sub" style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 30px" }}>Watch the tour, then take full control of your sales, stock, staff, money and customers, all in one place.</p>
           <div style={{ maxWidth: 760, margin: "0 auto 30px" }}>
             <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
               <iframe src="https://www.youtube.com/embed/nJeMpDLDKUo" title="KopaBook: How It Works - The Free Record Book for Your Business" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
             </div>
             <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Part 1: the full 3-minute tour of KopaBook.</p>
           </div>
-          <div style={{ maxWidth: 760, margin: "0 auto 30px" }}>
+          <div style={{ maxWidth: 760, margin: "0 auto 40px" }}>
             <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
               <iframe src="https://www.youtube.com/embed/ZlytQSNBwnk" title="KopaBook: How It Works Part 2 - Kopa Bot, Shipments, API and More" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
             </div>
             <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Part 2: Kopa Bot, customers, shipments, the API and everything else, in 2 minutes.</p>
           </div>
-          <div className="steps narrow" style={{ margin: "30px auto" }}>
+          <h3 style={{ textAlign: "center", marginBottom: 8 }}>You are in control of everything</h3>
+          <p style={{ textAlign: "center", color: "var(--muted)", maxWidth: 620, margin: "0 auto 28px" }}>Every part of your business, tracked and managed from your phone. Nothing slips through.</p>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", marginBottom: 40 }}>
+            <div className="card"><div className="icon">💰</div><h3>Sales control</h3><p>Record every sale in seconds. Cash, transfer or POS, and partial payments automatically become debts on the customer's ledger.</p></div>
+            <div className="card"><div className="icon">📦</div><h3>Stock control</h3><p>Every sale deducts stock instantly. Low-stock alerts tell you what to restock before you run out, and every movement is written to a ledger.</p></div>
+            <div className="card"><div className="icon">👥</div><h3>Staff control</h3><p>Give attendants, cashiers and managers their own roles with exact permissions: who can discount, who sees profit, who manages products. You stay in charge.</p></div>
+            <div className="card"><div className="icon">💸</div><h3>Expense control</h3><p>Log daily expenses by category in seconds and see exactly where your money goes, day by day.</p></div>
+            <div className="card"><div className="icon">📒</div><h3>Debt control</h3><p>Every customer gets a ledger. They can pay bit by bit, overpayments come back as change, and you can send payment reminders straight to WhatsApp.</p></div>
+            <div className="card"><div className="icon">🤖</div><h3>Kopa Bot, your assistant</h3><p>Ask "how much is cabin biscuits" and get the real price instantly. Tell it "sell 2 cabin biscuits" and it records the sale. It remembers what you tell it and briefs you every morning.</p></div>
+            <div className="card"><div className="icon">📊</div><h3>Reports that tell the truth</h3><p>Daily summaries, top products, expense breakdowns and debtor lists, computed from your real records, ready to review or export.</p></div>
+            <div className="card"><div className="icon">🧾</div><h3>Receipts everywhere</h3><p>Share receipts to WhatsApp in one tap or print them on 58mm and 80mm thermal printers with your business name and phone.</p></div>
+          </div>
+          <div className="steps narrow" style={{ margin: "0 auto 30px" }}>
             <div className="step"><div className="n">1</div><div><strong>Add your products once.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Name, price, opening stock. Done in minutes.</p></div></div>
             <div className="step"><div className="n">2</div><div><strong>Record sales as they happen.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Pick products, take payment, done. Partial payments become debts automatically.</p></div></div>
             <div className="step"><div className="n">3</div><div><strong>See your day clearly.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Sales, expenses, debts and low stock, live on one dashboard.</p></div></div>
