@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import Layout from "./components/Layout";
 import { api, nav, setCurrency } from "./lib/api";
 import {
@@ -18,16 +18,16 @@ import ImportPage from "./pages/Import";
 import ExpensesPage from "./pages/Expenses";
 import CustomersPage from "./pages/Customers";
 import CustomerDetailPage from "./pages/CustomerDetail";
-import HotelsPage from "./pages/Hotels";
+const HotelsPage = lazy(() => import("./pages/Hotels"));
 import DebtsPage from "./pages/Debts";
-import MessagesPage from "./pages/Messages";
-import ReportsPage from "./pages/Reports";
-import StaffPage from "./pages/Staff";
+const MessagesPage = lazy(() => import("./pages/Messages"));
+const ReportsPage = lazy(() => import("./pages/Reports"));
+const StaffPage = lazy(() => import("./pages/Staff"));
 import SettingsPage from "./pages/Settings";
 import ActivityPage from "./pages/Activity";
 import NotebookPage from "./pages/Notebook";
 import CalculatorPage from "./pages/Calculator";
-import AdminPage from "./pages/Admin";
+const AdminPage = lazy(() => import("./pages/Admin"));
 import { NAV_MODULES, modulesForRole, orgTypeFor } from "./lib/businessTypes";
 
 function useSession() {
@@ -143,7 +143,13 @@ function AppRoute({ session }) {
         </div>
       );
     }
-    return <Layout session={session}>{page}</Layout>;
+    return (
+      <Layout session={session}>
+        <Suspense fallback={<div className="loading">Loading section...</div>}>
+          <div id="main">{page}</div>
+        </Suspense>
+      </Layout>
+    );
   }
 
   return <NotFoundPage />;
