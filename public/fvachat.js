@@ -346,11 +346,17 @@
     const div = document.createElement('div');
     div.className = 'fva-msg bot';
     const time = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    div.innerHTML = '<div class="bot-label">🤖 ' + escapeHtml(BOT_NAME) + '</div>' + escapeHtml(text) + '<div class="time">' + time + '</div>';
+    div.innerHTML = '<div class="bot-label">🤖 ' + escapeHtml(BOT_NAME) + '</div>' + formatMsg(text) + '<div class="time">' + time + '</div>';
     wrap.appendChild(div);
     wrap.scrollTop = wrap.scrollHeight;
   }
 
+  function formatMsg(s) {
+    var h = escapeHtml(s).split('\\n').join('\n');
+    h = h.replace(/\n/g, '<br>');
+    h = h.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+    return h;
+  }
   function escapeHtml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
