@@ -3,7 +3,7 @@ import { getBotResponse, shouldEscalate } from './fvabot.js';
 import { handleOrderMessage } from './order-flow.js';
 import { handleBookingMessage } from './booking-flow.js';
 import { DEFAULT_MEMORY } from './business-memory.js';
-import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName, nameWelcome, WARM_CLARIFIERS } from './kopabook-knowledge.js';
+import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName, nameWelcome, WARM_CLARIFIERS, isBusinessDataQuestion, PUBLIC_LOCKDOWN_ANSWER } from './kopabook-knowledge.js';
 import { handleOwnerCommand } from './bot-owner.js';
 import { handleFollowUp } from './bot-memory.js';
 import { getAIResponse, shouldUseAI } from './bot-ai.js';
@@ -164,8 +164,26 @@ export async function onRequestPost({ request, env }) {
           result = getEscalationResponse(clean, visitorName);
         }
 
-        // Owner/staff mode: try business commands first
-        if (!result && ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
+        // 2b) PUBLIC BOT LOCKDOWN: on the public marketing site (siteId
+        // 'kopabook'), business-data questions get the lockdown answer
+        // immediately, before AI or knowledge, so no path can leak a
+        // store's private business info on the public site.
+        if (!result && sid === 'kopabook' && isBusinessDataQuestion(clean)) {
+          result = {
+            answer: PUBLIC_LOCKDOWN_ANSWER,
+            quickReplies: ['Pricing', 'Features', 'Talk to human'],
+            escalate: false,
+            confidence: 'high'
+          };
+        }
+
+        // Owner/staff mode: try business commands first.
+        // PUBLIC BOT SCOPE: the public marketing site (siteId 'kopabook')
+        // is a product-info bot ONLY. Its job: answer questions about
+        // KopaBook the product (pricing, features, how to start, support).
+        // It must NEVER touch any business's private data, so ownerCtx is
+        // ignored entirely for that site, even if one is present.
+        if (!result && ownerCtx && ownerCtx.businessId && ownerCtx.userId && sid !== 'kopabook') {
           try {
             const ownerResult = await handleOwnerCommand(clean, {
               db: env.KOPABOOK_DB,
