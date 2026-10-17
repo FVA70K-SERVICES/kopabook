@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmt, nav } from "../lib/api";
+import { waLink, receiptText } from "../lib/whatsapp";
 
 // Printable receipts, sized for Nigerian thermal printers (58mm / 80mm).
 // Opened outside the app Layout so printing outputs only the receipt.
@@ -58,6 +59,7 @@ function Row({ label, value, bold }) {
 export function SaleReceiptPage({ saleId }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [waPhone, setWaPhone] = useState("");
 
   useEffect(() => {
     if (saleId === "0") {
@@ -77,7 +79,7 @@ export function SaleReceiptPage({ saleId }) {
       return;
     }
     api.get(`/api/receipts/sale?id=${saleId}`)
-      .then(setData)
+      .then((d) => { setData(d); setWaPhone(d.sale?.customer_phone || ""); })
       .catch((e) => setError(e.message));
   }, [saleId]);
 
@@ -88,8 +90,34 @@ export function SaleReceiptPage({ saleId }) {
   const width = business.receipt_paper_width || "80mm";
   const date = (sale.created_at || "").slice(0, 16).replace("T", " ");
 
+  const waText = receiptText({
+    saleNumber: sale.sale_number,
+    total: money(sale.total_amount),
+    businessName: business.name,
+    balanceDue: Number(sale.balance_due) > 0 ? money(sale.balance_due) : null,
+    items: (items || []).map((it) => ({
+      qty: it.quantity,
+      name: it.product_name || "Item",
+      unitPrice: money(it.unit_price),
+      unit: it.product_unit || undefined,
+    })),
+  });
+
   return (
     <ReceiptShell width={width}>
+      <div className="noprint" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input
+          value={waPhone}
+          onChange={(e) => setWaPhone(e.target.value)}
+          placeholder="Customer WhatsApp number (080...)"
+          aria-label="Customer WhatsApp number"
+          inputMode="tel"
+          style={{ flex: 1 }}
+        />
+        <a className="btn btn-secondary btn-sm" target="_blank" rel="noreferrer" href={waLink(waPhone, waText)}>
+          Share on WhatsApp
+        </a>
+      </div>
       <ReceiptHeader business={business} />
       <div className="r-center r-title">SALES RECEIPT</div>
       <Row label={`Receipt: ${sale.sale_number || "#" + sale.id}`} value={date} />
