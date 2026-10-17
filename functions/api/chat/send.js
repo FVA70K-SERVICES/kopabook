@@ -174,6 +174,7 @@ export async function onRequestPost({ request, env }) {
               userName: ownerCtx.userName,
               userRole: ownerCtx.userRole || 'owner',
               tier: plan || 'free',
+              sessionId,
               history: recentMessages
             });
             if (ownerResult) result = ownerResult;
