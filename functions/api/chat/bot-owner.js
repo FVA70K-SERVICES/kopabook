@@ -233,15 +233,16 @@ export async function handleOwnerCommand(message, ctx) {
     }
     if (products.length === 1) {
       const p = products[0];
+      const unit = p.unit && p.unit !== 'piece' ? ` per ${p.unit}` : '';
       const answers = [
-        `${p.name} is ${formatNGN(p.price)}, ${p.quantity} in stock.`,
-        nm ? `${nm}, ${p.name} goes for ${formatNGN(p.price)}. We have ${p.quantity} in stock.` : `${p.name} goes for ${formatNGN(p.price)}. We have ${p.quantity} in stock.`,
-        `${p.name}: ${formatNGN(p.price)} each, ${p.quantity} available. Anything else you need${nm ? `, ${nm}` : ''}?`
+        `${p.name} is ${formatNGN(p.price)}${unit}, ${p.quantity} in stock.`,
+        nm ? `${nm}, ${p.name} goes for ${formatNGN(p.price)}${unit}. We have ${p.quantity} in stock.` : `${p.name} goes for ${formatNGN(p.price)}${unit}. We have ${p.quantity} in stock.`,
+        `${p.name}: ${formatNGN(p.price)}${unit}, ${p.quantity} available. Anything else you need${nm ? `, ${nm}` : ''}?`
       ];
       return { answer: pick(answers), quickReplies: ['Check stock', 'Brief me'] };
     }
     let msg = `I found ${products.length} matches:\n\n`;
-    products.slice(0, 3).forEach(p => { msg += `- ${p.name}: ${formatNGN(p.price)} (${p.quantity} in stock)\n`; });
+    products.slice(0, 3).forEach(p => { const u = p.unit && p.unit !== 'piece' ? ` per ${p.unit}` : ''; msg += `- ${p.name}: ${formatNGN(p.price)}${u} (${p.quantity} in stock)\n`; });
     return { answer: msg, quickReplies: ['Check stock'] };
   }
 
