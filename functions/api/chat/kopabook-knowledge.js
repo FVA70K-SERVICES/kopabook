@@ -61,7 +61,34 @@ export const WARM_CLARIFIERS = [
   'I want to get this right for you. Is it about your business records, our plans, or something else?',
 ];
 
+// PUBLIC BOT LOCKDOWN: the public bot (kopabook.com site) talks ONLY about
+// KopaBook the product (pricing, features, how to start, support contact).
+// It must never answer about any store's private business data
+// (products, prices, stock, customers, sales, debts).
+export const PUBLIC_LOCKDOWN_ANSWER = 'I can only tell you about KopaBook itself, not any store\'s private business. For product prices, please check with the store directly.';
+
+const BUSINESS_DATA_SIGNALS = [
+  'who owes me', 'debtors', 'my stock', 'my customers', 'my sales',
+  'find customer', 'my business', 'my inventory', 'my products',
+  'customer owes', 'stock level', 'my expenses', 'my staff', 'my debts'
+];
+
+export function isBusinessDataQuestion(message) {
+  const lower = String(message || '').toLowerCase();
+  if (BUSINESS_DATA_SIGNALS.some(s => lower.includes(s))) return true;
+  // "how much is X" / "price of X" about a product, not about KopaBook plans
+  if (/how much (is|are|does)/.test(lower) && !/kopabook|plan|subscription|starter|pro|solo|pricing/.test(lower)) return true;
+  if (/price of /.test(lower) && !/kopabook|plan|subscription/.test(lower)) return true;
+  return false;
+}
+
 export const KOPABOOK_KNOWLEDGE = [
+  {
+    // Lockdown entry (backup to the guard in send.js): never discuss private store data
+    patterns: ['who owes me', 'debtors', 'my stock', 'my customers', 'my sales', 'find customer', 'my business', 'my inventory', 'my products'],
+    answer: PUBLIC_LOCKDOWN_ANSWER,
+    quickReplies: ['Pricing', 'Features', 'Talk to human']
+  },
   {
     patterns: ['price', 'cost', 'how much', 'pricing', 'fee', 'subscription', 'plan'],
     answer: 'KopaBook is free to start! Here are the plans:\n\n- Free: 2 businesses, 100 products, 2 staff (free forever)\n- Starter: NGN 1,000/month (5 businesses, 1,000 products, 5 staff)\n- Solo: NGN 5,000/month (1 business plus an AI worker)\n- Pro: NGN 2,500/month (unlimited everything)\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want help picking one?',
