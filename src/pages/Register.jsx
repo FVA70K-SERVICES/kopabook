@@ -60,8 +60,8 @@ export default function RegisterPage({ preset }) {
             <h1 style={{ marginTop: 0 }}>What are you registering?</h1>
             <p className="hint">Pick your organization type from the list. Your dashboard will carry the tools that fit it.</p>
             <div className="field">
-              <label>Organization type *</label>
-              <select value={orgKey} onChange={(e) => setOrgKey(e.target.value)} autoFocus>
+              <label htmlFor="reg-org-type">Organization type *</label>
+              <select id="reg-org-type" value={orgKey} onChange={(e) => setOrgKey(e.target.value)} autoFocus>
                 <option value="">Select your business type...</option>
                 {ORG_TYPES.map((t) => (
                   <option key={t.key} value={t.key}>{t.icon} {t.label}</option>
@@ -81,37 +81,37 @@ export default function RegisterPage({ preset }) {
             <p className="hint">Free to start. Your {orgKey === "other" ? "business" : org.label.toLowerCase()} gets its own private dashboard with {org.tagline.toLowerCase()}</p>
             {status.error && <div className="alert alert-error">{status.error}</div>}
             <form onSubmit={submit}>
-              <div className="field"><label>{nameLabel}</label><input value={form.businessName} onChange={(e) => set("businessName", e.target.value)} required placeholder={namePlaceholder} /></div>
+              <div className="field"><label htmlFor="reg-business-name">{nameLabel}</label><input id="reg-business-name" value={form.businessName} onChange={(e) => set("businessName", e.target.value)} required placeholder={namePlaceholder} /></div>
               {orgKey === "other" && (
-                <div className="field"><label>What kind of business is it?</label><input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="e.g. Logistics company, Laundry, Farm..." /></div>
+                <div className="field"><label htmlFor="reg-custom-type">What kind of business is it?</label><input id="reg-custom-type" value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="e.g. Logistics company, Laundry, Farm..." /></div>
               )}
               <div className="field"><div className="row2">
-                <div><label>Your full name *</label><input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} required placeholder="Your name" /></div>
-                <div><label>Phone</label><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="080..." /></div>
+                <div><label htmlFor="reg-full-name">Your full name *</label><input id="reg-full-name" value={form.fullName} onChange={(e) => set("fullName", e.target.value)} required placeholder="Your name" /></div>
+                <div><label htmlFor="reg-phone">Phone</label><input id="reg-phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="080..." /></div>
               </div></div>
               <div className="field"><div className="row2">
-                <div><label>Email *</label><input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} required /></div>
-                <div><label>Password *</label><input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} placeholder="8+ characters" /></div>
+                <div><label htmlFor="reg-email">Email *</label><input id="reg-email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)} required /></div>
+                <div><label htmlFor="reg-password">Password *</label><input id="reg-password" type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} placeholder="8+ characters" /></div>
               </div></div>
               <div className="field"><div className="row2">
-                <div><label>Country</label><select value={form.country} onChange={(e) => set("country", e.target.value)}>
+                <div><label htmlFor="reg-country">Country</label><select id="reg-country" value={form.country} onChange={(e) => set("country", e.target.value)}>
                   {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select></div>
-                <div><label>Currency</label><select value={form.currency} onChange={(e) => set("currency", e.target.value)}>
+                <div><label htmlFor="reg-currency">Currency</label><select id="reg-currency" value={form.currency} onChange={(e) => set("currency", e.target.value)}>
                   {WORLD_CURRENCIES.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
                 </select></div>
               </div></div>
               <div className="field"><div className="row2">
-                <div><label>{form.country === "Nigeria" ? "State" : "State / region"}</label>
+                <div><label htmlFor="reg-state">{form.country === "Nigeria" ? "State" : "State / region"}</label>
                 {form.country === "Nigeria" ? (
-                  <select value={form.state} onChange={(e) => set("state", e.target.value)}>
+                  <select id="reg-state" value={form.state} onChange={(e) => set("state", e.target.value)}>
                     <option value="">Select...</option>
                     {NIGERIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 ) : (
-                  <input value={form.state} onChange={(e) => set("state", e.target.value)} placeholder="State or region" />
+                  <input id="reg-state" value={form.state} onChange={(e) => set("state", e.target.value)} placeholder="State or region" />
                 )}</div>
-                <div><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder={form.country === "Nigeria" ? "e.g. Asaba" : "e.g. Accra"} /></div>
+                <div><label htmlFor="reg-city">City</label><input id="reg-city" value={form.city} onChange={(e) => set("city", e.target.value)} placeholder={form.country === "Nigeria" ? "e.g. Asaba" : "e.g. Accra"} /></div>
               </div></div>
               <HumanCheck onToken={setHumanToken} />
               <button className="btn btn-primary btn-block" disabled={status.loading}>
