@@ -30,8 +30,8 @@ export function LoginPage() {
           <p className="hint">Sign in to your KopaBook business.</p>
           {status.error && <div className="alert alert-error">{status.error}</div>}
           <form onSubmit={submit}>
-            <div className="field"><label>Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" /></div>
-            <div className="field"><label>Password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Your password" /></div>
+            <div className="field"><label htmlFor="auth-email">Email</label><input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" /></div>
+            <div className="field"><label htmlFor="auth-password">Password</label><input id="auth-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Your password" /></div>
             <button className="btn btn-primary btn-block" disabled={status.loading}>
               {status.loading ? "Signing in..." : "Sign in"}
             </button>
@@ -82,7 +82,7 @@ export function ForgotPasswordPage() {
             Enter your account email and we will send you a reset link. It works once and expires in 1 hour.
           </p>
           <form onSubmit={submit}>
-            <div className="field"><label>Account email *</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" /></div>
+            <div className="field"><label htmlFor="auth-reset-email">Account email *</label><input id="auth-reset-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" /></div>
             <HumanCheck onToken={setHumanToken} />
             <button className="btn btn-primary btn-block" disabled={status.loading}>
               {status.loading ? "Sending..." : "Send reset link"}
@@ -137,8 +137,8 @@ export function ResetPasswordPage() {
           {!status.ok && (
             <form onSubmit={submit}>
               <div className="field"><div className="row2">
-                <div><label>New password *</label><input type="password" value={form.newPassword} onChange={(e) => set("newPassword", e.target.value)} required minLength={8} /></div>
-                <div><label>Confirm *</label><input type="password" value={form.confirm} onChange={(e) => set("confirm", e.target.value)} required minLength={8} /></div>
+                <div><label htmlFor="auth-new-password">New password *</label><input id="auth-new-password" type="password" value={form.newPassword} onChange={(e) => set("newPassword", e.target.value)} required minLength={8} /></div>
+                <div><label htmlFor="auth-confirm-password">Confirm *</label><input id="auth-confirm-password" type="password" value={form.confirm} onChange={(e) => set("confirm", e.target.value)} required minLength={8} /></div>
               </div></div>
               <button className="btn btn-primary btn-block" disabled={status.loading || !token}>
                 {status.loading ? "Resetting..." : "Reset password"}
