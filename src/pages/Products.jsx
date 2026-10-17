@@ -190,33 +190,33 @@ export default function ProductsPage({ session }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>{editing ? "Edit product" : "Add product"}</h2>
             <form onSubmit={save}>
-              <div className="field"><label>Name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
+              <div className="field"><label htmlFor="product-name">Name *</label><input id="product-name" value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
               <div className="field"><div className="row2">
-                <div><label>Product ID (auto if blank)</label><input value={form.sku} onChange={(e) => set("sku", e.target.value)} placeholder="e.g. KB-0001" /></div>
-                <div><label>Category</label><input value={form.category} onChange={(e) => set("category", e.target.value)} /></div>
+                <div><label htmlFor="product-sku">Product ID (auto if blank)</label><input id="product-sku" value={form.sku} onChange={(e) => set("sku", e.target.value)} placeholder="e.g. KB-0001" /></div>
+                <div><label htmlFor="product-category">Category</label><input id="product-category" value={form.category} onChange={(e) => set("category", e.target.value)} /></div>
               </div></div>
               <div className="field"><div className="row2">
-                <div><label>Selling price *</label><input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set("unitPrice", e.target.value)} required /></div>
-                <div><label>Unit</label><select value={form.unit || "piece"} onChange={(e) => set("unit", e.target.value)}>
+                <div><label htmlFor="product-price">Selling price *</label><input id="product-price" type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set("unitPrice", e.target.value)} required /></div>
+                <div><label htmlFor="product-unit">Unit</label><select id="product-unit" value={form.unit || "piece"} onChange={(e) => set("unit", e.target.value)}>
                   {UNIT_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
                 </select></div>
               </div></div>
               <div className="field"><div className="row2">
-                <div><label>Cost price</label><input type="number" min="0" step="0.01" value={form.costPrice} onChange={(e) => set("costPrice", e.target.value)} /></div>
-                <div><label>Low-stock alert at</label><input type="number" min="0" step="0.01" value={form.lowStockThreshold} onChange={(e) => set("lowStockThreshold", e.target.value)} /></div>
+                <div><label htmlFor="product-cost">Cost price</label><input id="product-cost" type="number" min="0" step="0.01" value={form.costPrice} onChange={(e) => set("costPrice", e.target.value)} /></div>
+                <div><label htmlFor="product-lowstock">Low-stock alert at</label><input id="product-lowstock" type="number" min="0" step="0.01" value={form.lowStockThreshold} onChange={(e) => set("lowStockThreshold", e.target.value)} /></div>
               </div></div>
               {!editing && (
-                <div className="field"><label>Opening stock (in {form.unit || "piece"})</label><input type="number" step="0.01" value={form.openingQuantity} onChange={(e) => set("openingQuantity", e.target.value)} /></div>
+                <div className="field"><label htmlFor="product-opening">Opening stock (in {form.unit || "piece"})</label><input id="product-opening" type="number" step="0.01" value={form.openingQuantity} onChange={(e) => set("openingQuantity", e.target.value)} /></div>
               )}
               {editing && (
-                <div className="field"><label>Photo</label>
+                <div className="field"><label htmlFor="product-photo">Photo</label>
                   {editing.photo_key && (
                     <div style={{ marginBottom: 8 }}>
                       <img src={`/api/product-photo?key=${encodeURIComponent(editing.photo_key)}`} alt=""
                         style={{ width: 120, height: 120, objectFit: "cover", borderRadius: 12 }} />
                     </div>
                   )}
-                  <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files[0] || null)} />
+                  <input id="product-photo" type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files[0] || null)} />
                   <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                     <button type="button" className="btn btn-secondary btn-sm" disabled={!photoFile || uploading} onClick={uploadPhoto}>
                       {uploading ? "Uploading..." : "Upload photo"}
@@ -239,8 +239,8 @@ export default function ProductsPage({ session }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>Adjust stock</h2>
             <p style={{ color: "var(--muted)" }}>Use a positive number to add stock, negative to remove.</p>
-            <div className="field"><label>Quantity change (in {(products.find((p) => p.id === adjusting) || {}).unit || "piece"})</label><input type="number" step="0.01" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder="e.g. 10 or -3" /></div>
-            <div className="field"><label>Note</label><input value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="Reason for adjustment" /></div>
+            <div className="field"><label htmlFor="adjust-qty">Quantity change (in {(products.find((p) => p.id === adjusting) || {}).unit || "piece"})</label><input id="adjust-qty" type="number" step="0.01" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder="e.g. 10 or -3" /></div>
+            <div className="field"><label htmlFor="adjust-note">Note</label><input id="adjust-note" value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="Reason for adjustment" /></div>
             <button className="btn btn-primary btn-block" onClick={() => adjust(products.find((p) => p.id === adjusting))}>Apply adjustment</button>
           </div>
         </div>
