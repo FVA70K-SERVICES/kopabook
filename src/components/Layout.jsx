@@ -77,9 +77,41 @@ export default function Layout({ session, children }) {
 
   const navCls = (to) => (path === to || path.startsWith(to + "/") ? "active" : "");
 
+  // Escape closes the mobile drawer.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open ]);
+
   return (
     <div className="app">
       <aside className={"sidebar" + (open ? " open" : "") + (collapsed ? " collapsed" : "")}>
+        {open && (
+          <button
+            onClick={() => setOpen(false)}
+            aria-label="Close menu"
+            title="Close menu"
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              background: "rgba(255,255,255,0.08)",
+              border: "0",
+              borderRadius: 8,
+              width: 30,
+              height: 30,
+              cursor: "pointer",
+              color: "#d7e3da",
+              fontSize: 16,
+              lineHeight: 1,
+              zIndex: 101,
+            }}
+          >
+            ✕
+          </button>
+        )}
         <div className="brand-row">
           <div className="brand">{collapsed ? "K" : <Logo />}</div>
           <button className="collapse-btn" onClick={toggleCollapse}
@@ -119,6 +151,19 @@ export default function Layout({ session, children }) {
           <button onClick={logout}>Log out</button>
         </div>
       </aside>
+
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.4)",
+            zIndex: 99,
+          }}
+        />
+      )}
 
       <div className="main">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 0" }}>

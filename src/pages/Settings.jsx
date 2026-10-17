@@ -54,14 +54,14 @@ export default function SettingsPage({ session }) {
     api.get("/api/business")
       .then((d) => {
         setForm({
-          name: d.business.name || "", businessType: d.business.business_type || "",
-          customType: d.business.custom_type || "",
-          state: d.business.state || "", city: d.business.city || "", country: d.business.country || "Nigeria",
-          timezone: d.business.timezone || "Africa/Lagos", currency: d.business.currency || "NGN",
-          brandColor: d.business.brand_color || "#166534", tagline: d.business.tagline || "",
-          reminderTemplate: d.business.reminder_template || "",
-          receiptPhone: d.business.receipt_phone || "", receiptAddress: d.business.receipt_address || "",
-          receiptFooter: d.business.receipt_footer || "", receiptPaperWidth: d.business.receipt_paper_width || "80mm",
+          name: d.business?.name || "", businessType: d.business?.business_type || "",
+          customType: d.business?.custom_type || "",
+          state: d.business?.state || "", city: d.business?.city || "", country: d.business?.country || "Nigeria",
+          timezone: d.business?.timezone || "Africa/Lagos", currency: d.business?.currency || "NGN",
+          brandColor: d.business?.brand_color || "#166534", tagline: d.business?.tagline || "",
+          reminderTemplate: d.business?.reminder_template || "",
+          receiptPhone: d.business?.receipt_phone || "", receiptAddress: d.business?.receipt_address || "",
+          receiptFooter: d.business?.receipt_footer || "", receiptPaperWidth: d.business?.receipt_paper_width || "80mm",
         });
         setLoading(false);
       })

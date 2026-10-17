@@ -1,18 +1,33 @@
 // Tiny API client for KopaBook.
 
+// Every request gets a 30s ceiling so a stalled network can never hang the app.
+const REQUEST_TIMEOUT_MS = 30000;
+
 async function request(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    ...options,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.ok === false) {
-    const err = new Error(data.message || `Request failed (${res.status})`);
-    if (data.upgradeRequired) err.upgradeRequired = true;
-    throw err;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      ...options,
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      const err = new Error(data.message || `Request failed (${res.status})`);
+      if (data.upgradeRequired) err.upgradeRequired = true;
+      throw err;
+    }
+    return data;
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new Error("Request timed out. Check your connection and try again.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return data;
 }
 
 export const api = {

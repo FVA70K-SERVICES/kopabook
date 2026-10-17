@@ -16,6 +16,10 @@ export default function DebtsPage({ session }) {
   const [data, setData] = useState({ total: 0, count: 0, debtors: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // loadError/loadedOk track the main debts list load: the "clean book"
+  // empty state only shows when the load actually succeeded with zero debts.
+  const [loadError, setLoadError] = useState("");
+  const [loadedOk, setLoadedOk] = useState(false);
   const [paying, setPaying] = useState(null);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("cash");
@@ -81,10 +85,16 @@ export default function DebtsPage({ session }) {
 
   async function load() {
     setLoading(true);
+    setLoadedOk(false);
+    setLoadError("");
     try {
       const d = await api.get("/api/debts");
-      setData(d); setError("");
-    } catch (e) { setError(e.message); }
+      setData({ total: d.total || 0, count: d.count || 0, debtors: d.debtors || [] });
+      setError("");
+      setLoadedOk(true);
+    } catch (e) {
+      setLoadError(e.message || "Could not load debts. Check your connection and try again.");
+    }
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -190,6 +200,12 @@ export default function DebtsPage({ session }) {
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+      {loadError && (
+        <div className="alert alert-error" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span>{loadError}</span>
+          <button className="btn btn-secondary btn-sm" onClick={load}>Retry</button>
+        </div>
+      )}
       <p className="hint" style={{ marginTop: 0 }}>
         A debtor is due for a nudge when they have not been reminded in {DUE_DAYS} days.
         Reminders open WhatsApp with your template message; nothing sends automatically.
@@ -283,7 +299,7 @@ export default function DebtsPage({ session }) {
               })}
             </tbody>
           </table>
-          {data.debtors.length === 0 && <p className="empty">No outstanding debts. Clean book.</p>}
+          {!loading && loadedOk && data.debtors.length === 0 && <p className="empty">No outstanding debts. Clean book.</p>}
         </div>
       )}
 

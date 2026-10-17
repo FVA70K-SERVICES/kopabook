@@ -1,7 +1,7 @@
 /* KopaBook service worker: offline-first app shell, network-first API reads.
    Non-GET API calls are never intercepted so queued mutations flow through. */
 
-const SHELL_CACHE = "kopabook-shell-v3";
+const SHELL_CACHE = "kopabook-shell-v4";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 
@@ -9,7 +9,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(SHELL_CACHE)
-      .then((cache) => cache.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"]))
+      .then((cache) => cache.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", "/logo.png", "/founder.jpg", "/icon-maskable-512.png"]))
       .then(() => self.skipWaiting())
       .catch(() => self.skipWaiting())
   );
@@ -40,6 +40,19 @@ async function cacheFirst(request) {
     cache.put(request, res.clone());
   }
   return res;
+}
+
+// Navigation requests (page loads and deep links like /app/*, /login, /pricing):
+// try the network first for freshness, but fall back to the cached /index.html
+// so offline refreshes never show the browser error page.
+async function navigationHandler(request) {
+  try {
+    const res = await fetch(request);
+    if (res && res.ok) return res;
+  } catch (err) { /* offline: serve the cached shell below */ }
+  const shell = await caches.match("/index.html", { cacheName: SHELL_CACHE });
+  if (shell) return shell;
+  return new Response("You are offline", { status: 503, headers: { "Content-Type": "text/plain" } });
 }
 
 async function networkFirstApi(request) {
@@ -73,6 +86,11 @@ self.addEventListener("fetch", (event) => {
 
   if (request.method === "GET" && url.pathname.startsWith("/api/")) {
     event.respondWith(networkFirstApi(request));
+    return;
+  }
+
+  if (request.method === "GET" && request.mode === "navigate") {
+    event.respondWith(navigationHandler(request));
     return;
   }
 
