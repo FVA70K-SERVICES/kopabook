@@ -72,7 +72,7 @@ export async function getWeekSales(db, businessId) {
 export async function findProduct(db, businessId, searchTerm) {
   try {
     const r = await db.prepare(`
-      SELECT p.id, p.name, p.unit_price as price, COALESCE(i.quantity_on_hand, 0) as quantity
+      SELECT p.id, p.name, p.unit_price as price, COALESCE(p.unit, 'piece') as unit, COALESCE(i.quantity_on_hand, 0) as quantity
       FROM products p
       LEFT JOIN inventory_items i ON i.product_id = p.id
       WHERE p.business_id = ? AND p.is_active = 1 AND p.name LIKE ? LIMIT 5
