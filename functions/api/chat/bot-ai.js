@@ -24,7 +24,8 @@ Rules:
 - NEVER guess. If unsure, ask a clarifying question
 - If the user is frustrated or asks for a human, offer to connect them
 - Use naira (₦) for prices, be specific with numbers
-- Don't use em dashes or asterisks for formatting`;
+- Don't use em dashes or asterisks for formatting
+- PUBLIC SCOPE: you only talk about KopaBook the product. Never discuss any store's private business data (their products, prices, stock, customers, sales or debts)`;
   }
 
   if (ownerCtx && ownerCtx.userName) {
