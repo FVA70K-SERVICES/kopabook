@@ -1,5 +1,5 @@
 // /api/products/[id] — PATCH update, DELETE archive
-import { json, getAuthContext, requireAuth, requirePerm, audit } from "../_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit, normalizeUnit } from "../_utils";
 
 async function getProduct(context, auth, id) {
   return context.env.KOPABOOK_DB.prepare(
@@ -38,6 +38,10 @@ export async function onRequestPatch(context) {
         params.push(typeof body[key] === "string" ? body[key].trim() || null : Number(body[key]));
       }
     }
+    // Unit of measure (migration 0042). Falls back gracefully if the
+    // column does not exist yet on the database.
+    let unitUpdate = null;
+    if (body.unit !== undefined) unitUpdate = normalizeUnit(body.unit);
     if (body.isActive !== undefined) {
       fields.push(`is_active = ?`);
       params.push(body.isActive ? 1 : 0);
@@ -47,11 +51,25 @@ export async function onRequestPatch(context) {
     }
 
     params.push(id, auth.business.id);
-    await context.env.KOPABOOK_DB.prepare(
-      `UPDATE products SET ${fields.join(", ")} WHERE id = ? AND business_id = ?`
-    )
-      .bind(...params)
-      .run();
+    try {
+      const unitFields = unitUpdate !== null ? [...fields, "unit = ?"] : fields;
+      const unitParams = unitUpdate !== null
+        ? [...params.slice(0, -2), unitUpdate, ...params.slice(-2)]
+        : params;
+      await context.env.KOPABOOK_DB.prepare(
+        `UPDATE products SET ${unitFields.join(", ")} WHERE id = ? AND business_id = ?`
+      )
+        .bind(...unitParams)
+        .run();
+    } catch (e) {
+      // Migration 0042 not applied yet: retry without the unit column.
+      if (unitUpdate === null || !/no such column: unit/i.test(String(e && e.message))) throw e;
+      await context.env.KOPABOOK_DB.prepare(
+        `UPDATE products SET ${fields.join(", ")} WHERE id = ? AND business_id = ?`
+      )
+        .bind(...params)
+        .run();
+    }
 
     if (body.lowStockThreshold !== undefined) {
       await context.env.KOPABOOK_DB.prepare(

@@ -27,7 +27,7 @@ export function receiptText({ saleNumber, total, items, businessName, balanceDue
   lines.push(saleNumber ? `Receipt ${saleNumber}` : "Receipt");
   if (Array.isArray(items) && items.length) {
     lines.push("");
-    for (const it of items) lines.push(`${it.qty} x ${it.name} - ${it.unitPrice}`);
+    for (const it of items) lines.push(`${it.qty}${it.unit ? " " + it.unit : ""} x ${it.name} - ${it.unitPrice}`);
   }
   lines.push("");
   lines.push(`Total: ${total}`);

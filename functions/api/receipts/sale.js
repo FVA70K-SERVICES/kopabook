@@ -18,11 +18,22 @@ export async function onRequestGet(context) {
     ).bind(id, auth.business.id).first();
     if (!sale) return json({ ok: false, message: "Sale not found." }, 404);
 
-    const items = await db.prepare(
-      `SELECT si.quantity, si.unit_price, si.line_total, p.name AS product_name
-       FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
-       WHERE si.sale_id = ? ORDER BY si.id ASC`
-    ).bind(id).all();
+    let items;
+    try {
+      items = await db.prepare(
+        `SELECT si.quantity, si.unit_price, si.line_total, p.name AS product_name, p.unit AS product_unit
+         FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
+         WHERE si.sale_id = ? ORDER BY si.id ASC`
+      ).bind(id).all();
+    } catch (e) {
+      // Migration 0042 not applied yet.
+      if (!/no such column: p\.unit/i.test(String(e && e.message))) throw e;
+      items = await db.prepare(
+        `SELECT si.quantity, si.unit_price, si.line_total, p.name AS product_name
+         FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
+         WHERE si.sale_id = ? ORDER BY si.id ASC`
+      ).bind(id).all();
+    }
 
     const payments = await db.prepare(
       `SELECT amount, payment_method AS mode, created_at FROM payment_records

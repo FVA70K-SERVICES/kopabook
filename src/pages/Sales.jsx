@@ -107,8 +107,9 @@ export default function SalesPage({ session }) {
         productId: p.id,
         name: p.name,
         unitPrice: Number(it.unitPrice),
-        qty: Math.max(1, Math.min(Number(it.quantity) || 1, Number(p.stock) || 0)),
+        qty: Math.max(0.01, Math.min(Number(it.quantity) || 1, Number(p.stock) || 0)),
         stock: Number(p.stock),
+        unit: p.unit || "piece",
       });
     }
     setCart(lines);
@@ -132,7 +133,7 @@ export default function SalesPage({ session }) {
         return c.map((l) => l.productId === p.id ? { ...l, qty: l.qty + 1 } : l);
       }
       if (Number(p.stock) < 1) { setError(`${p.name} is out of stock.`); return c; }
-      return [...c, { productId: p.id, name: p.name, unitPrice: Number(p.unit_price), qty: 1, stock: Number(p.stock) }];
+      return [...c, { productId: p.id, name: p.name, unitPrice: Number(p.unit_price), qty: 1, stock: Number(p.stock), unit: p.unit || "piece" }];
     });
     setError("");
   }
@@ -179,7 +180,7 @@ export default function SalesPage({ session }) {
           .map((p) => ({ mode: p.mode, amount: Number(p.amount) })),
       });
       setDone(d);
-      setDoneItems(cart.map((l) => ({ qty: l.qty, name: l.name, unitPrice: fmt(l.unitPrice) })));
+      setDoneItems(cart.map((l) => ({ qty: l.qty, name: l.name, unitPrice: fmt(l.unitPrice), unit: l.unit || (l.serviceId ? "service" : "piece") })));
       setDoneCustomer(pickedCustomer ? pickedCustomer.name : newName);
       setCart([]); setCustomerPick(""); setCustomerName("");
       setPayments([{ mode: payModes[0]?.name || "Cash", amount: "" }]);
@@ -211,7 +212,7 @@ export default function SalesPage({ session }) {
             href={waLink(receiptPhone, receiptText({
               saleNumber: done.saleNumber,
               total: fmt(done.total),
-              items: [],
+              items: doneItems,
               businessName: bizName,
               balanceDue: done.balanceDue > 0 ? fmt(done.balanceDue) : null,
             }))}>
@@ -352,12 +353,17 @@ export default function SalesPage({ session }) {
               <div className="cart-line" key={l.serviceId ? `s${l.serviceId}` : l.productId}>
                 <div style={{ flex: 1 }}>
                   <strong>{l.name}</strong>
-                  <div className="money" style={{ fontWeight: 400, fontSize: 14 }}>{fmt(l.unitPrice)} each</div>
+                  <div className="money" style={{ fontWeight: 400, fontSize: 14 }}>{fmt(l.unitPrice)} / {l.unit || (l.serviceId ? "service" : "piece")}</div>
                 </div>
                 <div className="qty-ctl">
-                  <button onClick={() => l.serviceId ? setServiceQty(l.serviceId, l.qty - 1) : setQty(l.productId, l.qty - 1)}>−</button>
-                  <strong>{l.qty}</strong>
-                  <button onClick={() => l.serviceId ? setServiceQty(l.serviceId, l.qty + 1) : setQty(l.productId, l.qty + 1)}>+</button>
+                  <button aria-label={`Reduce quantity of ${l.name}`} onClick={() => l.serviceId ? setServiceQty(l.serviceId, l.qty - 1) : setQty(l.productId, l.qty - 1)}>−</button>
+                  <input type="number" min="0" step="0.01" defaultValue={l.qty}
+                    key={`qty-${l.serviceId ? "s" + l.serviceId : "p" + l.productId}-${l.qty}`}
+                    aria-label={`Quantity of ${l.name} in ${l.unit || "piece"}`}
+                    onBlur={(e) => { const v = Number(e.target.value); if (!Number.isNaN(v)) { l.serviceId ? setServiceQty(l.serviceId, v) : setQty(l.productId, v); } }}
+                    onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                    style={{ width: 64, textAlign: "center" }} />
+                  <button aria-label={`Increase quantity of ${l.name}`} onClick={() => l.serviceId ? setServiceQty(l.serviceId, l.qty + 1) : setQty(l.productId, l.qty + 1)}>+</button>
                 </div>
                 <div className="money">{fmt(l.unitPrice * l.qty)}</div>
               </div>

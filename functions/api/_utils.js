@@ -1,5 +1,14 @@
 // Shared helpers for KopaBook Pages Functions.
 
+// Units of measure a product can be sold in. Kept in sync with the
+// frontend dropdown in src/pages/Products.jsx.
+export const PRODUCT_UNITS = ["piece", "pack", "cup", "kg", "g", "litre", "bottle", "bag", "carton", "other"];
+
+export function normalizeUnit(u) {
+  const v = String(u || "piece").trim().toLowerCase();
+  return PRODUCT_UNITS.includes(v) ? v : "piece";
+}
+
 export function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,

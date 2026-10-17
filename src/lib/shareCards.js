@@ -103,7 +103,7 @@ export function receiptCardUrl({ saleNumber, date, items, total, paid, balanceDu
   for (const it of list) {
     ctx.fillStyle = "#111827";
     ctx.font = "600 32px Arial, sans-serif";
-    const label = `${it.qty} x ${it.name}`;
+    const label = `${it.qty}${it.unit ? " " + it.unit : ""} x ${it.name}`;
     wrapText(ctx, label, 560).slice(0, 1).forEach((ln) => ctx.fillText(ln, 120, iy));
     ctx.textAlign = "right";
     ctx.font = "700 32px Arial, sans-serif";

@@ -63,7 +63,7 @@ async function handleProducts(db, auth, url) {
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
   const rows = await db.prepare(
-    `SELECT p.id, p.name, p.price, p.cost_price, p.is_active,
+    `SELECT p.id, p.name, p.unit_price AS price, p.unit, p.cost_price, p.is_active,
             COALESCE(i.quantity_on_hand, 0) AS stock
      FROM products p LEFT JOIN inventory_items i ON i.product_id = p.id
      WHERE p.business_id = ? ORDER BY p.name ASC LIMIT ? OFFSET ?`

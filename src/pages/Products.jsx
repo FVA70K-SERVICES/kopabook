@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, fmt } from "../lib/api";
 
-const emptyForm = { name: "", sku: "", unitPrice: "", costPrice: "", openingQuantity: "", lowStockThreshold: "5", category: "" };
+const emptyForm = { name: "", sku: "", unitPrice: "", costPrice: "", openingQuantity: "", lowStockThreshold: "5", category: "", unit: "piece" };
+
+const UNIT_OPTIONS = ["piece", "pack", "cup", "kg", "g", "litre", "bottle", "bag", "carton", "other"];
 
 export default function ProductsPage({ session }) {
   const [products, setProducts] = useState([]);
@@ -54,6 +56,7 @@ export default function ProductsPage({ session }) {
       name: p.name, sku: p.sku || "", unitPrice: String(p.unit_price),
       costPrice: String(p.cost_price || ""), openingQuantity: "",
       lowStockThreshold: String(p.low_stock_threshold ?? 5), category: p.category || "",
+      unit: p.unit || "piece",
     });
     setShowForm(true);
   }
@@ -67,7 +70,7 @@ export default function ProductsPage({ session }) {
           name: form.name, sku: form.sku || null,
           unitPrice: Number(form.unitPrice), costPrice: Number(form.costPrice || 0),
           lowStockThreshold: Number(form.lowStockThreshold || 5),
-          category: form.category || null,
+          category: form.category || null, unit: form.unit || "piece",
         });
       } else {
         await api.post("/api/products", {
@@ -75,7 +78,7 @@ export default function ProductsPage({ session }) {
           unitPrice: Number(form.unitPrice), costPrice: Number(form.costPrice || 0),
           openingQuantity: Number(form.openingQuantity || 0),
           lowStockThreshold: Number(form.lowStockThreshold || 5),
-          category: form.category || null,
+          category: form.category || null, unit: form.unit || "piece",
         });
       }
       setShowForm(false);
@@ -158,7 +161,7 @@ export default function ProductsPage({ session }) {
                       )}
                       <strong>{p.name}</strong><br /><small style={{ color: "var(--muted)" }}>{p.sku ? <span className="pill pill-gray" style={{ fontSize: 11 }}>ID: {p.sku}</span> : ""}{p.category ? ` · ${p.category}` : ""}</small>
                     </td>
-                    <td className="money">{fmt(p.unit_price)}</td>
+                    <td className="money">{fmt(p.unit_price)}<span style={{ fontWeight: 400, color: "var(--muted)" }}> / {p.unit || "piece"}</span></td>
                     <td>
                       <span className={"pill " + (low ? "pill-gold" : "pill-green")}>{p.stock}</span>
                     </td>
@@ -194,12 +197,17 @@ export default function ProductsPage({ session }) {
               </div></div>
               <div className="field"><div className="row2">
                 <div><label>Selling price *</label><input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set("unitPrice", e.target.value)} required /></div>
-                <div><label>Cost price</label><input type="number" min="0" step="0.01" value={form.costPrice} onChange={(e) => set("costPrice", e.target.value)} /></div>
+                <div><label>Unit</label><select value={form.unit || "piece"} onChange={(e) => set("unit", e.target.value)}>
+                  {UNIT_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select></div>
               </div></div>
               <div className="field"><div className="row2">
-                {!editing && <div><label>Opening stock</label><input type="number" step="0.01" value={form.openingQuantity} onChange={(e) => set("openingQuantity", e.target.value)} /></div>}
+                <div><label>Cost price</label><input type="number" min="0" step="0.01" value={form.costPrice} onChange={(e) => set("costPrice", e.target.value)} /></div>
                 <div><label>Low-stock alert at</label><input type="number" min="0" step="0.01" value={form.lowStockThreshold} onChange={(e) => set("lowStockThreshold", e.target.value)} /></div>
               </div></div>
+              {!editing && (
+                <div className="field"><label>Opening stock (in {form.unit || "piece"})</label><input type="number" step="0.01" value={form.openingQuantity} onChange={(e) => set("openingQuantity", e.target.value)} /></div>
+              )}
               {editing && (
                 <div className="field"><label>Photo</label>
                   {editing.photo_key && (
@@ -231,7 +239,7 @@ export default function ProductsPage({ session }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>Adjust stock</h2>
             <p style={{ color: "var(--muted)" }}>Use a positive number to add stock, negative to remove.</p>
-            <div className="field"><label>Quantity change</label><input type="number" step="0.01" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder="e.g. 10 or -3" /></div>
+            <div className="field"><label>Quantity change (in {(products.find((p) => p.id === adjusting) || {}).unit || "piece"})</label><input type="number" step="0.01" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder="e.g. 10 or -3" /></div>
             <div className="field"><label>Note</label><input value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="Reason for adjustment" /></div>
             <button className="btn btn-primary btn-block" onClick={() => adjust(products.find((p) => p.id === adjusting))}>Apply adjustment</button>
           </div>

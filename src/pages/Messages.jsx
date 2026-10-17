@@ -68,7 +68,7 @@ export default function MessagesPage({ session }) {
     }, brand);
     setCardUrl(url);
     if (!message) {
-      setMessage(`Hello! New arrival at ${biz.name || "our store"}: ${p.name} for ${fmt(p.unit_price)}. Come and get yours today!`);
+      setMessage(`Hello! New arrival at ${biz.name || "our store"}: ${p.name} for ${fmt(p.unit_price)} per ${p.unit || "piece"}. Come and get yours today!`);
     }
   }
 

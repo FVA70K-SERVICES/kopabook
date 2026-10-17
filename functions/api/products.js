@@ -1,5 +1,5 @@
 // /api/products — GET list, POST create
-import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "./_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate, normalizeUnit } from "./_utils";
 import { LIMITS, TIER_NAMES, getBusinessOwnerTier } from "./billing";
 
 export async function onRequestGet(context) {
@@ -41,6 +41,7 @@ export async function onRequestPost(context) {
 
     const body = await context.request.json().catch(() => ({}));
     const { name, sku, unitPrice, costPrice, openingQuantity, lowStockThreshold, category } = body;
+    const unit = normalizeUnit(body.unit);
 
     if (!name || unitPrice === undefined || unitPrice === null) {
       return json({ ok: false, message: "Product name and unit price are required." }, 400);
@@ -90,20 +91,41 @@ export async function onRequestPost(context) {
       }
     }
 
-    const result = await context.env.KOPABOOK_DB.prepare(
-      `INSERT INTO products (business_id, name, sku, unit_price, cost_price, low_stock_threshold, category, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1)`
-    )
-      .bind(
-        auth.business.id,
-        String(name).trim(),
-        finalSku,
-        price,
-        Number(costPrice || 0),
-        reorder,
-        category ? String(category).trim() : null
+    let result;
+    try {
+      result = await context.env.KOPABOOK_DB.prepare(
+        `INSERT INTO products (business_id, name, sku, unit_price, cost_price, low_stock_threshold, category, unit, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`
       )
-      .run();
+        .bind(
+          auth.business.id,
+          String(name).trim(),
+          finalSku,
+          price,
+          Number(costPrice || 0),
+          reorder,
+          category ? String(category).trim() : null,
+          unit
+        )
+        .run();
+    } catch (e) {
+      // Migration 0042 not applied yet: fall back to the old column list.
+      if (!/no such column: unit/i.test(String(e && e.message))) throw e;
+      result = await context.env.KOPABOOK_DB.prepare(
+        `INSERT INTO products (business_id, name, sku, unit_price, cost_price, low_stock_threshold, category, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`
+      )
+        .bind(
+          auth.business.id,
+          String(name).trim(),
+          finalSku,
+          price,
+          Number(costPrice || 0),
+          reorder,
+          category ? String(category).trim() : null
+        )
+        .run();
+    }
     const productId = result.meta.last_row_id;
 
     await context.env.KOPABOOK_DB.prepare(

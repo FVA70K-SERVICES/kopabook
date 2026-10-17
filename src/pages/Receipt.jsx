@@ -99,7 +99,7 @@ export function SaleReceiptPage({ saleId }) {
         <div key={i} style={{ marginBottom: 4 }}>
           <div>{it.product_name || "Item"}</div>
           <div className="r-row">
-            <span>{it.quantity} x {money(it.unit_price)}</span>
+            <span>{it.quantity}{it.product_unit ? ` ${it.product_unit}` : ""} x {money(it.unit_price)}</span>
             <span>{money(it.line_total)}</span>
           </div>
         </div>
