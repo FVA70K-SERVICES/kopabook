@@ -204,8 +204,8 @@ export default function SalesPage({ session }) {
             <p style={{ color: "var(--muted)", marginTop: 4 }}>Change to give: <strong>{fmt(done.change)}</strong></p>
           )}
           <div className="field" style={{ marginTop: 12, textAlign: "left" }}>
-            <label>Customer WhatsApp number (optional)</label>
-            <input value={receiptPhone} onChange={(e) => setReceiptPhone(e.target.value)} placeholder="080..." />
+            <label htmlFor="sale-receipt-phone">Customer WhatsApp number (optional)</label>
+            <input id="sale-receipt-phone" value={receiptPhone} onChange={(e) => setReceiptPhone(e.target.value)} placeholder="080..." />
           </div>
           <a className="btn btn-secondary btn-block" style={{ marginTop: 8 }}
             target="_blank" rel="noreferrer"
@@ -372,8 +372,8 @@ export default function SalesPage({ session }) {
               <>
                 <div className="total-row"><span>Total</span><span>{fmt(total)}</span></div>
                 <div className="field" style={{ marginTop: 14 }}>
-                  <label>Customer</label>
-                  <select value={customerPick} onChange={(e) => setCustomerPick(e.target.value)}>
+                  <label htmlFor="sale-customer">Customer</label>
+                  <select id="sale-customer" value={customerPick} onChange={(e) => setCustomerPick(e.target.value)}>
                     <option value="">Walk-in (no customer)</option>
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}{c.phone ? ` — ${c.phone}` : ""}</option>
@@ -383,8 +383,8 @@ export default function SalesPage({ session }) {
                 </div>
                 {customerPick === "new" && (
                   <div className="field">
-                    <label>New buyer name (required if not fully paid)</label>
-                    <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Buyer's name" />
+                    <label htmlFor="sale-new-buyer">New buyer name (required if not fully paid)</label>
+                    <input id="sale-new-buyer" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Buyer's name" />
                   </div>
                 )}
                 <div className="field" style={{ marginTop: 14 }}>
