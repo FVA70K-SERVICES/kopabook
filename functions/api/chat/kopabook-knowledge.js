@@ -83,6 +83,11 @@ export const KOPABOOK_KNOWLEDGE = [
     quickReplies: ['Yes, guide me', 'Pricing', 'Talk to human']
   },
   {
+    patterns: ['how it works', 'how does it work', 'how do i use', 'tutorial', 'demo', 'show me how', 'guide me'],
+    answer: 'KopaBook is simple. First, add your products once. Then record sales as they happen. Then see your whole day clearly on one dashboard. Watch the full 3-minute tour here: https://youtu.be/nJeMpDLDKUo and part 2 here: https://youtu.be/ZlytQSNBwnk',
+    quickReplies: ['How to start', 'Pricing', 'Talk to human']
+  },
+  {
     patterns: ['notebook', 'notes', 'note '],
     answer: 'The Notebook (under Tools in the app) keeps your business thinking in one place. Give notes colors, pin important ones to the top, and search everything instantly. Private notes are only for your eyes, not even the business owner can see them. Shared notes everyone in the business can read, and owners or partners can edit them.',
     quickReplies: ['Features', 'How to start']
