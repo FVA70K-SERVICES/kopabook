@@ -1,4 +1,4 @@
-// POST /api/ai/chat — Kopa, the KopaBook business assistant (Workers AI).
+// POST /api/ai/chat: Kopa, the KopaBook business assistant (Workers AI).
 // Real read access to the business's OWN data only. The LLM never writes SQL:
 // every data question maps to one whitelisted, parameterized D1 query with
 // business_id bound from the authenticated session. Tier-gated to Solo/Pro.
