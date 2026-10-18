@@ -121,7 +121,7 @@ async function handleSubmit(context) {
   if (denied) return denied;
 
   const db = context.env.KOPABOOK_DB;
-  const bucket = context.env.MANUAL_PROOFS;
+  const bucket = context.env.KOPABOOK_R2;
   if (!bucket) {
     return json(
       { ok: false, message: "Proof uploads are not configured yet. Please try again later." },
