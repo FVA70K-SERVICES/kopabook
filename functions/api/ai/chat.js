@@ -2,9 +2,9 @@
 // Real read access to the business's OWN data only. The LLM never writes SQL:
 // every data question maps to one whitelisted, parameterized D1 query with
 // business_id bound from the authenticated session. Tier-gated to Solo/Pro.
-import { json, getAuthContext, requireAuth } from "../../_utils";
-import { getBusinessOwnerTier, LIMITS } from "../../billing";
-import { checkRateLimit } from "../../_webhook_security";
+import { json, getAuthContext, requireAuth } from "../_utils";
+import { getBusinessOwnerTier, LIMITS } from "../billing";
+import { checkRateLimit } from "../_webhook_security";
 
 const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 const DAILY_CAP = 20;
