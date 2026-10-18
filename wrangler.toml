@@ -12,8 +12,8 @@ database_id = "REPLACE_WITH_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
-binding = "MANUAL_PROOFS"
-bucket_name = "kopabook-proofs"
+binding = "KOPABOOK_R2"
+bucket_name = "kopabook-file"
 
 [vars]
 APP_NAME = "KopaBook"
