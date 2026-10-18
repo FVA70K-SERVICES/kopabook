@@ -5,20 +5,27 @@
 // Routing note: Cloudflare Pages file routing cannot serve /manual/review from a
 // file named manual.js, so this optional catch-all ([[action]].js) exposes both
 // sub-routes from one file. The public endpoint URLs are exactly as specified.
+//
+// Table: manual_payments (migrations/0043_recurring_billing.sql, owned by the
+// billing-overhaul worker). The row id IS the reference number (TEXT).
 import { json, getAuthContext, requireAuth, toSqliteDate } from "../../_utils";
 import { requirePlatformAdmin } from "../overview";
-import * as billingModule from "../../billing";
+// The billing worker placed activateSubscription in paystack/verify.js (not
+// billing.js) so verify + webhook share one activation path. Namespace import
+// keeps this route safe if the export ever moves again; the local fallback
+// performs the same activation in that case.
+import * as paystackVerify from "../../paystack/verify";
 
-// activateSubscription lives in functions/api/billing.js (owned by another worker).
-// Namespace import keeps this route working even if that export has not landed
-// yet; the local fallback performs the same activation in that case.
 async function activateSubscriptionSafe(db, userId, tier, billingCycle, periodStart, periodEnd) {
-  const fn = billingModule && billingModule.activateSubscription;
+  const fn = paystackVerify && paystackVerify.activateSubscription;
   if (typeof fn === "function") {
-    // Task signature is (user_id, tier, billing_cycle, start, end);
-    // tolerate a (db, ...) first-arg variant if that is what landed.
-    if (fn.length >= 6) return await fn(db, userId, tier, billingCycle, periodStart, periodEnd);
-    return await fn(userId, tier, billingCycle, periodStart, periodEnd);
+    // (db, userId, tier, cycle, psData, reference, extra). Manual payments have
+    // no Paystack data: psData null, reference null (skips the
+    // subscription_payments touch), period dates passed via extra.
+    return await fn(db, userId, tier, billingCycle, null, null, {
+      current_period_start: periodStart,
+      current_period_end: periodEnd,
+    });
   }
   await db
     .prepare(
@@ -59,9 +66,10 @@ async function handleList(context) {
 async function handleReview(context, auth) {
   const db = context.env.KOPABOOK_DB;
   const body = await context.request.json().catch(() => ({}));
-  const id = Number(body.id);
+  // The row id is the KB-XXXXXX reference number (TEXT).
+  const id = String(body.id || "").trim();
   const decision = String(body.decision || "").toLowerCase();
-  if (!Number.isFinite(id) || (decision !== "approved" && decision !== "rejected")) {
+  if (!id || (decision !== "approved" && decision !== "rejected")) {
     return json(
       { ok: false, message: "Send a valid payment id and decision (approved or rejected)." },
       400
@@ -89,10 +97,10 @@ async function handleReview(context, auth) {
   await db
     .prepare(
       `UPDATE manual_payments
-       SET status = ?, reviewed_at = ?, reviewed_by = ?, updated_at = ?
+       SET status = ?, reviewed_at = ?, reviewed_by = ?
        WHERE id = ?`
     )
-    .bind(decision === "approved" ? "approved" : "rejected", reviewedAt, auth.user.id, reviewedAt, id)
+    .bind(decision === "approved" ? "approved" : "rejected", reviewedAt, String(auth.user.id), id)
     .run();
 
   return json({

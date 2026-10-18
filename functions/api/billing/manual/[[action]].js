@@ -5,6 +5,12 @@
 // Routing note: Cloudflare Pages file routing cannot serve /manual/initiate from a
 // file named manual.js, so this optional catch-all ([[action]].js) exposes both
 // sub-routes from one file. The public endpoint URLs are exactly as specified.
+//
+// Table: manual_payments (migrations/0043_recurring_billing.sql, owned by the
+// billing-overhaul worker). Schema: id TEXT PRIMARY KEY, user_id TEXT,
+// tier/billing_cycle with CHECKs, amount_kobo, reference_number UNIQUE,
+// proof_url, status CHECK(pending/approved/rejected), created_at, reviewed_at,
+// reviewed_by TEXT. The row id IS the reference number (unique by construction).
 import { json, getAuthContext, requireAuth, toSqliteDate } from "../../_utils";
 import { checkRateLimit } from "../../_webhook_security";
 
@@ -38,6 +44,10 @@ async function uniqueReference(db) {
     if (!existing) return ref;
   }
   throw new Error("Could not generate a unique reference number.");
+}
+
+function amountLabel(amount_kobo) {
+  return "NGN " + (Number(amount_kobo) / 100).toLocaleString("en-NG");
 }
 
 async function handleInitiate(context) {
@@ -79,20 +89,20 @@ async function handleInitiate(context) {
   const amount_kobo = Number(plan.amount_kobo);
 
   const reference_number = await uniqueReference(db);
-  const now = toSqliteDate();
   await db
     .prepare(
       `INSERT INTO manual_payments
-         (user_id, tier, billing_cycle, amount_kobo, reference_number, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
+         (id, user_id, tier, billing_cycle, amount_kobo, reference_number, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
     )
-    .bind(auth.user.id, tier, cycle, amount_kobo, reference_number, now, now)
+    .bind(reference_number, String(auth.user.id), tier, cycle, amount_kobo, reference_number, toSqliteDate())
     .run();
 
   return json({
     ok: true,
     reference_number,
     amount_kobo,
+    amount_label: amountLabel(amount_kobo),
     bank: BANK,
     instruction: "Put the reference number in your transfer narration",
   });
@@ -138,7 +148,7 @@ async function handleSubmit(context) {
     .prepare(`SELECT id, user_id, status FROM manual_payments WHERE reference_number = ?`)
     .bind(reference_number)
     .first();
-  if (!row || row.user_id !== auth.user.id) {
+  if (!row || String(row.user_id) !== String(auth.user.id)) {
     return json({ ok: false, message: "Payment reference not found." }, 404);
   }
   if (row.status !== "pending") {
@@ -164,8 +174,8 @@ async function handleSubmit(context) {
   // Status stays 'pending' so the payment remains in the admin review queue;
   // a non-null proof_url tells the admin a receipt is attached.
   await db
-    .prepare(`UPDATE manual_payments SET proof_url = ?, updated_at = ? WHERE id = ?`)
-    .bind(key, toSqliteDate(), row.id)
+    .prepare(`UPDATE manual_payments SET proof_url = ? WHERE id = ?`)
+    .bind(key, row.id)
     .run();
 
   return json({
