@@ -179,6 +179,11 @@ export default function SettingsPage({ session }) {
         </form>
       </div>
 
+      <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>Add KopaBook to your home screen</h3>
+        <InstallCard />
+      </div>
+
       <div style={{ marginTop: 18 }}>
         <PlanCard />
       </div>
@@ -303,6 +308,48 @@ export default function SettingsPage({ session }) {
         </div>
       )}
     </>
+  );
+}
+
+function InstallCard() {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+  useEffect(() => {
+    function onBip(e) { e.preventDefault(); setDeferredPrompt(e); }
+    window.addEventListener("beforeinstallprompt", onBip);
+    return () => window.removeEventListener("beforeinstallprompt", onBip);
+  }, []);
+
+  async function install() {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try { await deferredPrompt.userChoice; } catch (e) {}
+    setDeferredPrompt(null);
+  }
+
+  const steps = { margin: "8px 0", paddingLeft: 20, color: "var(--muted)", fontSize: 14 };
+
+  return (
+    <div>
+      <p className="hint">Put KopaBook on your phone like a normal app, so it opens in one tap.</p>
+      {deferredPrompt && (
+        <button className="btn btn-primary btn-sm" onClick={install} style={{ marginBottom: 12 }}>
+          Install KopaBook
+        </button>
+      )}
+      <strong>iPhone (in Safari)</strong>
+      <ol style={steps}>
+        <li>Open kopabook.com in Safari.</li>
+        <li>Tap the Share button (the square with the arrow pointing up).</li>
+        <li>Tap Add to Home Screen, then tap Add.</li>
+      </ol>
+      <strong style={{ display: "block", marginTop: 12 }}>Android (in Chrome)</strong>
+      <ol style={steps}>
+        <li>Open kopabook.com in Chrome.</li>
+        <li>Tap the three dots at the top right.</li>
+        <li>Tap Add to Home screen, then tap Add.</li>
+      </ol>
+    </div>
   );
 }
 
