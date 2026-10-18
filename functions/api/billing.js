@@ -5,7 +5,7 @@ import { json, getAuthContext, requireAuth, toSqliteDate } from "./_utils";
 
 // null = unlimited
 export const LIMITS = {
-  free: { businesses: 2, salesPerWeek: 100, products: 100, staff: 2 },
+  free: { businesses: 1, salesPerWeek: 100, products: 100, staff: 1 },
   starter: { businesses: 5, salesPerWeek: 1000, products: 1000, staff: 5 },
   solo: { businesses: 1, salesPerWeek: null, products: 500, staff: 3, aiWorker: true },
   pro: { businesses: null, salesPerWeek: null, products: null, staff: null, aiWorker: true },
@@ -23,12 +23,30 @@ export async function getAccountTier(db, userId) {
   if (row && row.status === "pending") {
     return { tier: "free", pendingTier: row.tier, status: "pending", billingCycle: null, periodEnd: null };
   }
+  const periodEnd = row ? row.current_period_end : null;
+  // Expiry enforcement: a paid tier whose billing period has ended, or whose
+  // subscription is past due or cancelled, is treated as free. This function
+  // never writes to the database; it only changes the tier that is returned.
+  if (tier !== "free") {
+    const nowIso = toSqliteDate(); // "YYYY-MM-DD HH:MM:SS" UTC, comparable as a string
+    const expired = !!periodEnd && String(periodEnd) < nowIso;
+    const badStatus = !!row && (row.status === "past_due" || row.status === "cancelled");
+    if (expired || badStatus) {
+      return {
+        tier: "free",
+        pendingTier: null,
+        status: row ? row.status : "active",
+        billingCycle: row ? row.billing_cycle : null,
+        periodEnd,
+      };
+    }
+  }
   return {
     tier,
     pendingTier: null,
     status: row ? row.status : "active",
     billingCycle: row ? row.billing_cycle : null,
-    periodEnd: row ? row.current_period_end : null,
+    periodEnd,
   };
 }
 
