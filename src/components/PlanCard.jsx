@@ -1,6 +1,48 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
+// Manual bank transfer destination. Shown to the user during bank-transfer checkout.
+const BANK_DETAILS = {
+  accountNumber: "6112431993",
+  bank: "Opay",
+  accountName: "FVA70K SERVICES",
+};
+
+// Fallback price labels, used only if the live price book (/api/plans) has not loaded.
+// The real prices always come from the subscription_plans table in the database.
+const FALLBACK_PRICES = {
+  free: { monthly: { label: "Free" }, yearly: { label: "Free" } },
+  starter: { monthly: { label: "NGN 1,000/month" }, yearly: { label: "NGN 10,000/year" } },
+  solo: { monthly: { label: "NGN 5,000/month" }, yearly: { label: "NGN 50,000/year" } },
+  pro: { monthly: { label: "NGN 10,000/month" }, yearly: { label: "NGN 100,000/year" } },
+};
+
+const TIER_RANK = { free: 0, starter: 1, solo: 2, pro: 3 };
+
+const PLAN_FEATURES = {
+  free: [
+    "1 business",
+    "1 staff account",
+    "Record sales and expenses",
+    "Products and stock tracking",
+    "Kopa Bot assistant",
+  ],
+  starter: [
+    "Everything in Free",
+    "5 businesses",
+    "5 staff accounts",
+    "1,000 products and services",
+    "Reports and shareable receipts",
+  ],
+  pro: [
+    "Everything in Starter",
+    "Unlimited businesses, products and staff",
+    "Shipments and hotel tools",
+    "Debt reminders",
+    "Priority support",
+  ],
+};
+
 function bar(used, limit) {
   if (limit === null || limit === undefined) return null;
   const pct = Math.min(100, Math.round((Number(used) / Math.max(1, limit)) * 100));
@@ -18,13 +60,22 @@ export default function PlanCard() {
   const [paying, setPaying] = useState("");
   const [msg, setMsg] = useState("");
   const [verifying, setVerifying] = useState(false);
-  const [method, setMethod] = useState("card"); // card | crypto
+  const [method, setMethod] = useState("card"); // card | transfer | crypto
+  // Crypto state (existing crypto flow, unchanged).
   const [cryptoCurrency, setCryptoCurrency] = useState("USDT");
   const [cryptoQuote, setCryptoQuote] = useState(null);
   const [txHash, setTxHash] = useState("");
   const [cryptoBusy, setCryptoBusy] = useState(false);
   const [cryptoMsg, setCryptoMsg] = useState("");
   const [copied, setCopied] = useState(false);
+  // Bank transfer state.
+  const [transferInfo, setTransferInfo] = useState(null);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transferMsg, setTransferMsg] = useState("");
+  const [proofFile, setProofFile] = useState(null);
+  const [proofBusy, setProofBusy] = useState(false);
+  const [proofSubmitted, setProofSubmitted] = useState(false);
+  const [copiedField, setCopiedField] = useState("");
 
   async function load() {
     try { setPlan(await api.get("/api/billing")); } catch (e) {}
@@ -51,6 +102,16 @@ export default function PlanCard() {
     }
   }, []);
 
+  const priceLabel = (tier) =>
+    prices?.[tier]?.[cycle]?.label || FALLBACK_PRICES[tier]?.[cycle]?.label || "";
+
+  function copyText(text, field) {
+    const done = () => { setCopiedField(field); setTimeout(() => setCopiedField(""), 2000); };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(done);
+    } else done();
+  }
+
   async function checkout(tier) {
     setPaying(tier);
     setMsg("");
@@ -63,6 +124,64 @@ export default function PlanCard() {
     }
   }
 
+  async function manualInitiate(tier) {
+    setTransferBusy(true);
+    setTransferMsg("");
+    setTransferInfo(null);
+    setProofSubmitted(false);
+    setProofFile(null);
+    try {
+      const d = await api.post("/api/billing/manual/initiate", { tier, billing_cycle: cycle });
+      const reference = d.reference_number || d.reference;
+      if (!reference) throw new Error("We could not start your transfer. Please try again.");
+      setTransferInfo({
+        tier,
+        reference_number: reference,
+        amount_label: d.amount_label || priceLabel(tier),
+      });
+    } catch (e) {
+      setTransferMsg(e.message);
+    }
+    setTransferBusy(false);
+  }
+
+  async function manualSubmit() {
+    if (!transferInfo) return;
+    if (!proofFile) {
+      setTransferMsg("Choose a photo or screenshot of your receipt first.");
+      return;
+    }
+    setProofBusy(true);
+    setTransferMsg("");
+    try {
+      const form = new FormData();
+      form.append("reference_number", transferInfo.reference_number);
+      form.append("proof", proofFile, proofFile.name);
+      const res = await fetch("/api/billing/manual/submit", {
+        method: "POST",
+        body: form,
+        credentials: "same-origin",
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.ok === false) {
+        throw new Error(d.message || "Upload failed. Please try again.");
+      }
+      setProofSubmitted(true);
+      setMsg(d.message || "Payment submitted, pending verification.");
+    } catch (e) {
+      setTransferMsg(e.message);
+    }
+    setProofBusy(false);
+  }
+
+  function resetTransfer() {
+    setTransferInfo(null);
+    setTransferMsg("");
+    setProofFile(null);
+    setProofSubmitted(false);
+  }
+
+  // --- Crypto flow (unchanged) ---
   async function cryptoCheckout(tier) {
     setCryptoBusy(true);
     setCryptoMsg("");
@@ -103,11 +222,69 @@ export default function PlanCard() {
       navigator.clipboard.writeText(cryptoQuote.wallet_address).then(done).catch(done);
     } else done();
   }
+  // --- end crypto flow ---
 
   if (!plan || !plan.ok) return null;
   const u = plan.usage || {};
   const l = plan.limits || {};
   const fmtLimit = (v) => (v === null || v === undefined ? "Unlimited" : v);
+  const canUpgrade = plan.tier !== "pro";
+  const tierRank = TIER_RANK[plan.tier] ?? 0;
+  const isUpgradeable = (tier) => (TIER_RANK[tier] ?? 0) > tierRank;
+
+  function planButton(tier) {
+    if (!isUpgradeable(tier)) return null;
+    if (method === "card") {
+      return (
+        <button className="btn btn-primary btn-sm" style={{ width: "100%" }} disabled={!!paying} onClick={() => checkout(tier)}>
+          {paying === tier ? "Opening Paystack..." : `Pay ${priceLabel(tier)} with card`}
+        </button>
+      );
+    }
+    if (method === "transfer") {
+      return (
+        <button className="btn btn-primary btn-sm" style={{ width: "100%" }} disabled={transferBusy} onClick={() => manualInitiate(tier)}>
+          {transferBusy ? "Preparing..." : `Pay ${priceLabel(tier)} by transfer`}
+        </button>
+      );
+    }
+    return (
+      <button className="btn btn-primary btn-sm" style={{ width: "100%" }} disabled={cryptoBusy} onClick={() => cryptoCheckout(tier)}>
+        {cryptoBusy ? "Preparing..." : "Pay with crypto"}
+      </button>
+    );
+  }
+
+  function planCard(tier, name) {
+    const isCurrent = plan.tier === tier;
+    return (
+      <div
+        key={tier}
+        className="card"
+        style={{
+          margin: 0,
+          border: isCurrent ? "2px solid var(--brand)" : "1px solid var(--border)",
+          background: isCurrent ? "var(--bg-soft, #f8fafc)" : undefined,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <h4 style={{ margin: 0 }}>{name}</h4>
+          {isCurrent && (
+            <span className="pill" style={{ background: "var(--brand)", color: "#fff", fontSize: 12, padding: "2px 10px", borderRadius: 999 }}>
+              Current plan
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>{priceLabel(tier)}</div>
+        <ul style={{ listStyle: "none", padding: 0, margin: "0 0 12px", fontSize: 13 }}>
+          {PLAN_FEATURES[tier].map((f) => (
+            <li key={f} style={{ marginBottom: 4, color: "var(--muted, #555)" }}>{f}</li>
+          ))}
+        </ul>
+        {planButton(tier)}
+      </div>
+    );
+  }
 
   return (
     <div className="card narrow" style={{ margin: "0 0 18px", border: "2px solid var(--brand)" }}>
@@ -146,84 +323,67 @@ export default function PlanCard() {
         </li>
       </ul>
 
-      {plan.tier !== "pro" && (
+      {canUpgrade && (
         <>
+          <h4 style={{ margin: "14px 0 8px" }}>Upgrade your plan</h4>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             {(["monthly", "yearly"]).map((c) => (
               <button
                 key={c}
                 type="button"
                 className={"btn btn-sm " + (cycle === c ? "btn-primary" : "btn-secondary")}
-                onClick={() => setCycle(c)}
+                onClick={() => { setCycle(c); resetTransfer(); }}
               >
                 {c === "monthly" ? "Monthly" : "Yearly (2 months free)"}
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            {(["card", "crypto"]).map((m) => (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            {([["card", "Pay with card"], ["transfer", "Bank transfer"], ["crypto", "Pay with crypto"]]).map(([m, label]) => (
               <button
                 key={m}
                 type="button"
                 className={"btn btn-sm " + (method === m ? "btn-primary" : "btn-secondary")}
-                onClick={() => { setMethod(m); setCryptoQuote(null); setCryptoMsg(""); }}
+                onClick={() => { setMethod(m); setCryptoQuote(null); setCryptoMsg(""); resetTransfer(); }}
               >
-                {m === "card" ? "Pay with card" : "Pay with crypto"}
+                {label}
               </button>
             ))}
           </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 12 }}>
+            {planCard("free", "Free")}
+            {planCard("starter", "Starter")}
+            {planCard("pro", "Pro")}
+          </div>
+
+          {prices?.solo?.[cycle] && isUpgradeable("solo") && (
+            <div className="card" style={{ margin: "0 0 12px", padding: "10px 12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14 }}><strong>Solo</strong> · {priceLabel("solo")} · for one-person businesses</span>
+                <span style={{ minWidth: 200, flex: "0 1 240px" }}>{planButton("solo")}</span>
+              </div>
+            </div>
+          )}
+
           {method === "crypto" && (
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              {(["USDT", "BTC"]).map((c) => (
+              {([["USDT", "USDT (Tron)"], ["BTC", "BTC (Bitcoin)"]]).map(([c, label]) => (
                 <button
                   key={c}
                   type="button"
                   className={"btn btn-sm " + (cryptoCurrency === c ? "btn-primary" : "btn-secondary")}
                   onClick={() => { setCryptoCurrency(c); setCryptoQuote(null); setCryptoMsg(""); }}
                 >
-                  {c === "USDT" ? "USDT (Tron)" : "BTC (Bitcoin)"}
+                  {label}
                 </button>
               ))}
             </div>
           )}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {plan.tier === "free" && prices?.starter?.[cycle] && method === "card" && (
-              <button className="btn btn-primary btn-sm" disabled={!!paying} onClick={() => checkout("starter")}>
-                {paying === "starter" ? "Opening Paystack..." : `Pay ${prices.starter[cycle].label} for Starter`}
-              </button>
-            )}
-            {prices?.pro?.[cycle] && method === "card" && (
-              <button className="btn btn-secondary btn-sm" disabled={!!paying} onClick={() => checkout("pro")}>
-                {paying === "pro" ? "Opening Paystack..." : `Pay ${prices.pro[cycle].label} for Pro`}
-              </button>
-            )}
-            {(plan.tier === "free" || plan.tier === "starter") && prices?.solo?.[cycle] && method === "card" && (
-              <button className="btn btn-secondary btn-sm" disabled={!!paying} onClick={() => checkout("solo")}>
-                {paying === "solo" ? "Opening Paystack..." : `Pay ${prices.solo[cycle].label} for Solo`}
-              </button>
-            )}
-            {method === "crypto" && !cryptoQuote && (
-              <>
-                {plan.tier === "free" && prices?.starter?.[cycle] && (
-                  <button className="btn btn-primary btn-sm" disabled={cryptoBusy} onClick={() => cryptoCheckout("starter")}>
-                    {cryptoBusy ? "Preparing..." : `Crypto: Starter (${cryptoCurrency})`}
-                  </button>
-                )}
-                {prices?.pro?.[cycle] && (
-                  <button className="btn btn-secondary btn-sm" disabled={cryptoBusy} onClick={() => cryptoCheckout("pro")}>
-                    {cryptoBusy ? "Preparing..." : `Crypto: Pro (${cryptoCurrency})`}
-                  </button>
-                )}
-                {(plan.tier === "free" || plan.tier === "starter") && prices?.solo?.[cycle] && (
-                  <button className="btn btn-secondary btn-sm" disabled={cryptoBusy} onClick={() => cryptoCheckout("solo")}>
-                    {cryptoBusy ? "Preparing..." : `Crypto: Solo (${cryptoCurrency})`}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+
           {cryptoMsg && <div className="alert alert-ok" style={{ marginTop: 8 }}>{cryptoMsg}</div>}
-          {cryptoQuote && (
+
+          {method === "crypto" && cryptoQuote && (
             <div className="card" style={{ marginTop: 12, background: "var(--bg-soft, #f8fafc)" }}>
               <h4 style={{ marginTop: 0 }}>Pay {cryptoQuote.amount_label} for {cryptoQuote.tier}</h4>
               <p className="hint" style={{ marginBottom: 6 }}>Network: <strong>{cryptoQuote.network}</strong>. Complete within 24 hours.</p>
@@ -271,12 +431,88 @@ export default function PlanCard() {
               </p>
             </div>
           )}
+
+          {method === "transfer" && transferBusy && !transferInfo && (
+            <p className="hint">Preparing your transfer details...</p>
+          )}
+
+          {transferMsg && <div className="alert" style={{ marginTop: 8 }}>{transferMsg}</div>}
+
+          {method === "transfer" && transferInfo && !proofSubmitted && (
+            <div className="card" style={{ marginTop: 12, background: "var(--bg-soft, #f8fafc)" }}>
+              <h4 style={{ marginTop: 0 }}>Pay {transferInfo.amount_label} by bank transfer</h4>
+              <p className="hint">Send the exact amount to the account below, then upload your receipt.</p>
+              <div style={{ display: "grid", gap: 8, marginBottom: 10, fontSize: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span className="hint">Bank</span><strong>{BANK_DETAILS.bank}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span className="hint">Account number</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <strong style={{ fontSize: 16, letterSpacing: 1 }}>{BANK_DETAILS.accountNumber}</strong>
+                    <button type="button" className="btn btn-sm btn-secondary"
+                      onClick={() => copyText(BANK_DETAILS.accountNumber, "acct")}>
+                      {copiedField === "acct" ? "Copied" : "Copy"}
+                    </button>
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span className="hint">Account name</span><strong>{BANK_DETAILS.accountName}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span className="hint">Your reference</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <strong style={{ fontSize: 16, letterSpacing: 1 }}>{transferInfo.reference_number}</strong>
+                    <button type="button" className="btn btn-sm btn-secondary"
+                      onClick={() => copyText(transferInfo.reference_number, "ref")}>
+                      {copiedField === "ref" ? "Copied" : "Copy"}
+                    </button>
+                  </span>
+                </div>
+              </div>
+              <p className="hint" style={{ color: "#b45309" }}>
+                Write this reference in your transfer narration (the description field) so we can match your payment to your account.
+              </p>
+              <label className="hint" htmlFor="proof">Proof of payment (photo or screenshot of your receipt)</label>
+              <input
+                id="proof"
+                type="file"
+                accept="image/*"
+                className="input"
+                style={{ width: "100%", marginBottom: 8 }}
+                onChange={(e) => setProofFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+              />
+              {proofFile && <p className="hint" style={{ marginTop: 0 }}>Selected: {proofFile.name}</p>}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={proofBusy || !proofFile} onClick={manualSubmit}>
+                  {proofBusy ? "Submitting..." : "Submit proof of payment"}
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={proofBusy} onClick={resetTransfer}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {method === "transfer" && proofSubmitted && (
+            <div className="alert alert-ok" style={{ marginTop: 12 }}>
+              <strong>Payment submitted, pending verification.</strong>
+              <p style={{ margin: "6px 0 8px" }}>
+                We have your receipt. Your plan will turn on after we verify the payment, usually within 24 hours.
+                Your reference is {transferInfo && transferInfo.reference_number}.
+              </p>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={resetTransfer}>
+                Back to plans
+              </button>
+            </div>
+          )}
         </>
       )}
+
       <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
-        {method === "card"
-          ? "Secure card payment by Paystack. Your plan activates immediately after payment."
-          : "Crypto payments (USDT on Tron, BTC on Bitcoin) are verified on the blockchain before activation. $2 minimum per crypto payment (covers network charges)."}
+        {method === "card" && "Secure card payment by Paystack. Your plan activates immediately after payment."}
+        {method === "transfer" && "Transfer to our bank account, then upload your receipt. Your plan activates after we verify your payment."}
+        {method === "crypto" && "Crypto payments (USDT on Tron, BTC on Bitcoin) are verified on the blockchain before activation. $2 minimum per crypto payment (covers network charges)."}
       </p>
     </div>
   );
