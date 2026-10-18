@@ -1,5 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import Layout from "./components/Layout";
+import AiAssistant from "./components/AiAssistant";
 import { api, nav, setCurrency } from "./lib/api";
 import {
   LandingPage, FeaturesPage, PricingPage, WaitlistPage, NotFoundPage,
@@ -148,6 +149,7 @@ function AppRoute({ session }) {
         <Suspense fallback={<div className="loading">Loading section...</div>}>
           <div id="main">{page}</div>
         </Suspense>
+        <AiAssistant />
       </Layout>
     );
   }
@@ -160,3 +162,4 @@ export default function App() {
   if (loading) return <div className="loading">Loading KopaBook...</div>;
   return <AppRoute session={session} />;
 }
+
