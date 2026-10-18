@@ -1,4 +1,6 @@
 // GET /api/chat/poll?sessionId=xxx&since=0 - get new messages for a session
+import { maybeAutoClearChat } from './_auto_clear.js';
+
 export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
@@ -11,8 +13,13 @@ export async function onRequestGet({ request, env }) {
     ).bind(sessionId, since).all();
 
     const session = await env.KOPABOOK_DB.prepare(
-      'SELECT agent_typing, status FROM chat_sessions WHERE id = ?'
+      'SELECT agent_typing, status, site_id FROM chat_sessions WHERE id = ?'
     ).bind(sessionId).first();
+
+    // Lazy auto-clear of old chat history (per-business setting, best effort).
+    if (session && session.site_id) {
+      maybeAutoClearChat(env.KOPABOOK_DB, session.site_id).catch(() => {});
+    }
 
     // Mark visitor messages as read by visitor (they just polled)
     if (msgs.results.length) {

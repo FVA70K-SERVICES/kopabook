@@ -5,6 +5,7 @@ import { WORLD_CURRENCIES, WORLD_TIMEZONES, COUNTRIES, ORG_TYPES } from "../lib/
 import PaymentModesEditor from "../components/PaymentModesEditor";
 import DeveloperApi from "../components/DeveloperApi";
 import PlanCard from "../components/PlanCard";
+import ChatbotControl from "../components/ChatbotControl";
 
 export default function SettingsPage({ session }) {
   const [confirmClose, setConfirmClose] = useState(false);
@@ -183,6 +184,14 @@ export default function SettingsPage({ session }) {
         <h3 style={{ marginTop: 0 }}>Add KopaBook to your home screen</h3>
         <InstallCard />
       </div>
+
+      {isOwner && (
+        <div className="card narrow" style={{ marginTop: 18 }}>
+          <h3 style={{ marginTop: 0 }}>Chatbot controls</h3>
+          <p className="hint">Switch the website chatbot on or off, watch live chats, clear old messages, and set automatic cleanup.</p>
+          <ChatbotControl />
+        </div>
+      )}
 
       <div style={{ marginTop: 18 }}>
         <PlanCard />

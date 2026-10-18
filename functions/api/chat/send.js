@@ -7,6 +7,7 @@ import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName,
 import { handleOwnerCommand } from './bot-owner.js';
 import { handleFollowUp } from './bot-memory.js';
 import { getAIResponse, shouldUseAI } from './bot-ai.js';
+import { maybeAutoClearChat } from './_auto_clear.js';
 
 // D1-backed bot knowledge: the bot's BRAIN. Rows in `bot_knowledge` win over
 // the hardcoded fallback, so new features can be taught without a deploy.
@@ -106,6 +107,9 @@ export async function onRequestPost({ request, env }) {
     await env.KOPABOOK_DB.prepare(
       'UPDATE chat_sessions SET last_activity = ?, status = ? WHERE id = ?'
     ).bind(now, 'active', sessionId).run();
+
+    // Lazy auto-clear of old chat history (per-business setting, best effort).
+    maybeAutoClearChat(env.KOPABOOK_DB, sid).catch(() => {});
 
     // Track conversation count for plan limits
     if (sender === 'visitor') {
