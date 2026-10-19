@@ -25,28 +25,45 @@ function fmtDate(d) {
 
 export default function ProjectsPage({ session }) {
   const role = session?.business?.role || "";
+  const isOwnerPartner = ["owner", "partner"].includes(role);
   const canManage = ["owner", "partner", "manager"].includes(role);
   const [projects, setProjects] = useState([]);
+  const [shared, setShared] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [needsUpgrade, setNeedsUpgrade] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selected, setSelected] = useState(null); // { id, sharedRole, businessName }
   const [showCreate, setShowCreate] = useState(false);
+  const [inviteFor, setInviteFor] = useState(null);
   const [createForm, setCreateForm] = useState({ name: "", type: "construction", description: "", budget: "", startDate: todayISO(), endDate: "" });
   const [saving, setSaving] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const d = await api.get("/api/projects");
-      setProjects(d.projects || []);
-      setError("");
-      setNeedsUpgrade(false);
-    } catch (e) {
-      setError(e.message);
-      if (e.upgradeRequired) setNeedsUpgrade(true);
+      const results = await Promise.allSettled([api.get("/api/projects"), api.get("/api/projects/shared")]);
+      const sh = results[1].status === "fulfilled" ? (results[1].value.projects || []) : [];
+      setShared(sh);
+      if (results[0].status === "fulfilled") {
+        setProjects(results[0].value.projects || []);
+        setNeedsUpgrade(false);
+        setError("");
+      } else {
+        const e = results[0].reason || new Error("Could not load projects.");
+        if (e.upgradeRequired) setNeedsUpgrade(true);
+        else if (sh.length === 0) setError(e.message);
+        else setError("");
+      }
+      // Deep link from a fresh invite join: open the shared project at once.
+      const q = new URLSearchParams(window.location.search).get("shared");
+      if (q) {
+        const hit = sh.find((x) => String(x.id) === String(q));
+        if (hit) setSelected({ id: hit.id, sharedRole: hit.member_role, businessName: hit.business_name });
+        window.history.replaceState({}, "", "/app/projects");
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
   useEffect(() => { load(); }, []);
 
@@ -69,8 +86,16 @@ export default function ProjectsPage({ session }) {
     setSaving(false);
   }
 
-  if (selectedId) {
-    return <ProjectDetail projectId={selectedId} canManage={canManage} onBack={() => { setSelectedId(null); load(); }} />;
+  if (selected) {
+    return (
+      <ProjectDetail
+        projectId={selected.id}
+        canManage={canManage}
+        sharedRole={selected.sharedRole || null}
+        sharedFrom={selected.businessName || ""}
+        onBack={() => { setSelected(null); load(); }}
+      />
+    );
   }
 
   return (
@@ -124,10 +149,47 @@ export default function ProjectsPage({ session }) {
                   <span>Balance: <strong className="money">{fmt(t.balance || 0)}</strong></span>
                   <span>{t.milestonesDone || 0}/{t.milestonesTotal || 0} milestones</span>
                 </div>
+                {isOwnerPartner && (
+                  <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setInviteFor(p)}>Invite to project</button>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
+      )}
+
+      {!loading && !needsUpgrade && shared.length > 0 && (
+        <>
+          <h2 style={{ marginTop: 22 }}>Shared with me</h2>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Projects other businesses invited you to. One tap to switch in. You see only the project, never their business.
+          </p>
+          <div className="grid2">
+            {shared.map((p) => {
+              const t = p.totals || {};
+              const spent = t.totalExpense || 0;
+              return (
+                <div className="card" key={"shared-" + p.id} style={{ cursor: "pointer" }} onClick={() => setSelected({ id: p.id, sharedRole: p.member_role, businessName: p.business_name })}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <h3 style={{ margin: 0 }}>{TYPE_ICONS[p.type] || "📁"} {p.name}</h3>
+                    <span className="pill pill-gold">{p.member_role === "viewer" ? "Viewer" : "Contributor"}</span>
+                  </div>
+                  <p className="hint">by {p.business_name}</p>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)" }}>
+                    <span>Spent <strong className="money">{fmt(spent)}</strong></span>
+                    <span>{t.milestonesDone || 0}/{t.milestonesTotal || 0} milestones</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {inviteFor && (
+        <InviteModal project={inviteFor} onClose={() => setInviteFor(null)} />
       )}
 
       {showCreate && (
@@ -156,7 +218,10 @@ export default function ProjectsPage({ session }) {
   );
 }
 
-function ProjectDetail({ projectId, canManage, onBack }) {
+function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack }) {
+  const isShared = !!sharedRole;
+  const canAdd = isShared ? sharedRole === "contributor" : canManage;
+  const canDelete = !isShared && canManage;
   const [tab, setTab] = useState("overview");
   const [data, setData] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -289,11 +354,12 @@ function ProjectDetail({ projectId, canManage, onBack }) {
         <div className="page-head" style={{ marginTop: 10 }}>
           <h1>{TYPE_ICONS[p.type] || "📁"} {p.name}</h1>
           <div style={{ display: "flex", gap: 8 }}>
-            {canManage && <button className="btn btn-secondary btn-sm" onClick={toggleStatus}>{p.status === "active" ? "Mark completed" : "Reopen"}</button>}
+            {canDelete && <button className="btn btn-secondary btn-sm" onClick={toggleStatus}>{p.status === "active" ? "Mark completed" : "Reopen"}</button>}
             <button className="btn btn-primary btn-sm" onClick={generateReport} disabled={printing}>{printing ? "Building..." : "Generate report"}</button>
           </div>
         </div>
         <p className="hint">{TYPE_LABELS[p.type] || p.type} · {p.status === "completed" ? "Completed" : "Active"}{p.start_date ? ` · ${fmtDate(p.start_date)}` : ""}{p.end_date ? ` to ${fmtDate(p.end_date)}` : ""}</p>
+        {isShared && <p><span className="pill pill-gold">Shared with me{sharedFrom ? ` by ${sharedFrom}` : ""} · {sharedRole === "viewer" ? "Viewer (read only)" : "Contributor"}</span></p>}
         {p.description && <p>{p.description}</p>}
 
         <div className="grid2" style={{ marginTop: 12 }}>
@@ -325,14 +391,14 @@ function ProjectDetail({ projectId, canManage, onBack }) {
               onClick={() => setTab(k)}>{k === "overview" ? "Records" : k[0].toUpperCase() + k.slice(1)}</button>
           ))}
           <span style={{ flex: 1 }} />
-          {canManage && tab !== "milestones" && <button className="btn btn-primary btn-sm" onClick={() => setShowTx(true)}>+ Add record</button>}
-          {canManage && tab === "milestones" && <button className="btn btn-primary btn-sm" onClick={() => setShowMs(true)}>+ Add milestone</button>}
+          {canAdd && tab !== "milestones" && <button className="btn btn-primary btn-sm" onClick={() => setShowTx(true)}>+ Add record</button>}
+          {canAdd && tab === "milestones" && <button className="btn btn-primary btn-sm" onClick={() => setShowMs(true)}>+ Add milestone</button>}
         </div>
 
         {tab !== "milestones" ? (
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Recorded by</th><th>Amount</th>{canManage && <th></th>}</tr></thead>
+              <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Recorded by</th><th>Amount</th>{canDelete && <th></th>}</tr></thead>
               <tbody>
                 {transactions.map((x) => (
                   <tr key={x.id}>
@@ -342,7 +408,7 @@ function ProjectDetail({ projectId, canManage, onBack }) {
                     <td>{x.description}</td>
                     <td>{x.recorded_by_name || "—"}</td>
                     <td className="money">{x.kind === "income" ? "+" : "−"}{fmt(x.amount)}</td>
-                    {canManage && <td><button className="btn btn-secondary btn-sm" style={{ color: "var(--danger, #b91c1c)" }} onClick={() => deleteTx(x.id)}>Delete</button></td>}
+                    {canDelete && <td><button className="btn btn-secondary btn-sm" style={{ color: "var(--danger, #b91c1c)" }} onClick={() => deleteTx(x.id)}>Delete</button></td>}
                   </tr>
                 ))}
               </tbody>
@@ -355,7 +421,7 @@ function ProjectDetail({ projectId, canManage, onBack }) {
               <div className="card" key={m.id} style={{ marginBottom: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <h3 style={{ margin: 0 }}>{m.status === "done" ? "✅" : "⬜"} {m.title}</h3>
-                  {canManage && (
+                  {canAdd && (
                     <button className="btn btn-secondary btn-sm" onClick={() => toggleMilestone(m)}>
                       {m.status === "done" ? "Reopen" : "Mark done"}
                     </button>
@@ -459,5 +525,108 @@ function ProjectDetail({ projectId, canManage, onBack }) {
         </div>
       )}
     </>
+  );
+}
+
+function InviteModal({ project, onClose }) {
+  const [identifier, setIdentifier] = useState("");
+  const [inviteRole, setInviteRole] = useState("contributor");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [created, setCreated] = useState(null);
+  const [invites, setInvites] = useState([]);
+  const [copied, setCopied] = useState("");
+
+  async function loadInvites() {
+    try {
+      const d = await api.get(`/api/projects/invites?projectId=${project.id}`);
+      setInvites(d.invites || []);
+      setError("");
+    } catch (e) { setError(e.message); }
+  }
+  useEffect(() => { loadInvites(); }, [project.id]);
+
+  async function createInvite(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const d = await api.post("/api/projects/invites", { projectId: project.id, identifier, role: inviteRole });
+      setCreated(d);
+      setIdentifier("");
+      setError("");
+      loadInvites();
+    } catch (err) { setError(err.message); }
+    setSaving(false);
+  }
+
+  async function revoke(id) {
+    if (!window.confirm("Revoke this invite? The link will stop working.")) return;
+    try {
+      await api.del(`/api/projects/invites?id=${id}`);
+      if (created && invites.find((i) => i.id === id)) setCreated(null);
+      loadInvites();
+    } catch (err) { setError(err.message); }
+  }
+
+  function copyLink(link) {
+    try {
+      navigator.clipboard.writeText(link);
+      setCopied(link);
+      setTimeout(() => setCopied(""), 2000);
+    } catch { window.prompt("Copy this link:", link); }
+  }
+
+  const waShare = (link) => "https://wa.me/?text=" + encodeURIComponent("You are invited to track this project on KopaBook. Tap to join: " + link);
+
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Invite to {project.name}</h2>
+        <p className="hint">Invite by email or username. No new account per project: they join with their own KopaBook login and see only this project.</p>
+        {error && <div className="alert alert-error">{error}</div>}
+        <form onSubmit={createInvite}>
+          <div className="field"><label>Email or username *</label><input value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="e.g. chidi@example.com or chidi_trades" required /></div>
+          <div className="field"><label>Role</label>
+            <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+              <option value="contributor">Contributor: can add records and update milestones</option>
+              <option value="viewer">Viewer: read only</option>
+            </select>
+          </div>
+          <button className="btn btn-primary btn-block" disabled={saving}>{saving ? "Creating..." : "Create invite link"}</button>
+        </form>
+
+        {created && created.joinLink && (
+          <div className="card" style={{ marginTop: 12, background: "var(--bg)" }}>
+            <p className="hint" style={{ marginTop: 0 }}>Share this link:</p>
+            <p style={{ wordBreak: "break-all", fontSize: 13 }}>{created.joinLink}</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => copyLink(created.joinLink)}>{copied === created.joinLink ? "Copied" : "Copy link"}</button>
+              <a className="btn btn-secondary btn-sm" href={waShare(created.joinLink)} target="_blank" rel="noreferrer">Share on WhatsApp</a>
+            </div>
+          </div>
+        )}
+
+        {invites.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <h3>Pending invites</h3>
+            {invites.filter((i) => i.status === "pending").map((i) => (
+              <div key={i.id} className="card" style={{ marginBottom: 8, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 14 }}><strong>{i.invited_email || i.invited_username}</strong> · {i.role === "viewer" ? "Viewer" : "Contributor"}</div>
+                    <div className="hint" style={{ fontSize: 12 }}>{i.member_count || 0} joined · {fmtDate(i.created_at)}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {i.joinLink && <button className="btn btn-secondary btn-sm" onClick={() => copyLink(i.joinLink)}>{copied === i.joinLink ? "Copied" : "Copy"}</button>}
+                    <button className="btn btn-secondary btn-sm" style={{ color: "var(--danger, #b91c1c)" }} onClick={() => revoke(i.id)}>Revoke</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {invites.filter((i) => i.status === "pending").length === 0 && <p className="empty">No pending invites.</p>}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
