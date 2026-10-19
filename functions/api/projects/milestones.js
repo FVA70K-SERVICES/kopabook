@@ -1,21 +1,18 @@
 // /api/projects/milestones — GET list milestones for a project,
 // POST add milestone, PATCH update status/details.
-import { json, audit } from "../_utils";
-import { projectContext, getProject } from "./_lib";
+// Project members (invitees) see ONLY the invited project. Contributors can
+// add and update milestones; viewers are read-only.
+import { json, safeAudit, projectAccessContext } from "./_lib";
 
 export async function onRequestGet(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
     const projectId = Number(new URL(context.request.url).searchParams.get("projectId")) || null;
-    if (!projectId) return json({ ok: false, message: "projectId is required." }, 400);
-
-    const project = await getProject(db, auth.business.id, projectId);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
+    const { db, project, error } = await projectAccessContext(context, projectId);
+    if (error) return error;
 
     const rows = await db
       .prepare(`SELECT * FROM project_milestones WHERE project_id = ? ORDER BY id ASC`)
-      .bind(projectId)
+      .bind(project.id)
       .all();
     return json({ ok: true, milestones: rows.results || [] });
   } catch (e) {
@@ -25,15 +22,13 @@ export async function onRequestGet(context) {
 
 export async function onRequestPost(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
-
     const body = await context.request.json().catch(() => ({}));
     const projectId = Number(body.projectId) || null;
-    if (!projectId) return json({ ok: false, message: "projectId is required." }, 400);
-
-    const project = await getProject(db, auth.business.id, projectId);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
+    const { auth, db, project, access, error } = await projectAccessContext(context, projectId);
+    if (error) return error;
+    if (!access.canWrite) {
+      return json({ ok: false, message: "Viewers cannot add milestones to this project." }, 403);
+    }
 
     const title = String(body.title || "").trim().slice(0, 200);
     if (!title) return json({ ok: false, message: "Milestone title is required." }, 400);
@@ -45,10 +40,10 @@ export async function onRequestPost(context) {
         `INSERT INTO project_milestones (project_id, business_id, title, description, due_date)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .bind(projectId, auth.business.id, title, description, dueDate)
+      .bind(project.id, project.business_id, title, description, dueDate)
       .run();
 
-    await audit(context, auth, "project.milestone", "project_milestone", res.meta.last_row_id, { projectId, title });
+    await safeAudit(context, auth, "project.milestone", "project_milestone", res.meta.last_row_id, { projectId: project.id, title });
     return json({ ok: true, id: res.meta.last_row_id }, 201);
   } catch (e) {
     return json({ ok: false, message: "Could not add milestone.", error: String(e) }, 500);
@@ -57,18 +52,22 @@ export async function onRequestPost(context) {
 
 export async function onRequestPatch(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
-
     const body = await context.request.json().catch(() => ({}));
     const id = Number(body.id) || null;
     if (!id) return json({ ok: false, message: "Milestone id is required." }, 400);
 
+    const db = context.env.KOPABOOK_DB;
     const ms = await db
-      .prepare(`SELECT * FROM project_milestones WHERE id = ? AND business_id = ?`)
-      .bind(id, auth.business.id)
+      .prepare(`SELECT id, project_id, business_id FROM project_milestones WHERE id = ?`)
+      .bind(id)
       .first();
     if (!ms) return json({ ok: false, message: "Milestone not found." }, 404);
+
+    const { access, error } = await projectAccessContext(context, ms.project_id);
+    if (error) return error;
+    if (!access.canWrite) {
+      return json({ ok: false, message: "Viewers cannot update milestones on this project." }, 403);
+    }
 
     const fields = [];
     const vals = [];
