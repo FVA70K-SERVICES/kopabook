@@ -128,17 +128,11 @@ export function LandingPage() {
         <div className="wrap">
           <h2>How it works</h2>
           <p className="sub" style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 30px" }}>Watch the tour, then take full control of your sales, stock, staff, money and customers, all in one place.</p>
-          <div style={{ maxWidth: 760, margin: "0 auto 30px" }}>
-            <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
-              <iframe src="https://www.youtube.com/embed/nJeMpDLDKUo" title="KopaBook: How It Works - The Free Record Book for Your Business" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
-            </div>
-            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Part 1: the full 3-minute tour of KopaBook.</p>
-          </div>
           <div style={{ maxWidth: 760, margin: "0 auto 40px" }}>
             <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
-              <iframe src="https://www.youtube.com/embed/ZlytQSNBwnk" title="KopaBook: How It Works Part 2 - Kopa Bot, Shipments, API and More" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
+              <iframe src="https://www.youtube.com/embed/tII6wBaWhqE" title="KopaBook Full Walkthrough: Track Sales, Stock and Debtors Free on Your Phone" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
             </div>
-            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>Part 2: Kopa Bot, customers, shipments, the API and everything else, in 2 minutes.</p>
+            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 10 }}>The full 5-minute tour: sales, stock, debtors, expenses, reports, receipts and Kopa AI.</p>
           </div>
           <h3 style={{ textAlign: "center", marginBottom: 8 }}>You are in control of everything</h3>
           <p style={{ textAlign: "center", color: "var(--muted)", maxWidth: 620, margin: "0 auto 28px" }}>Every part of your business, tracked and managed from your phone. Nothing slips through.</p>
