@@ -57,55 +57,188 @@ function MFooter() {
   );
 }
 
+const HERO_CSS = `
+.hero-premium { position: relative; overflow: hidden; }
+.hero-bg { position: absolute; inset: 0; pointer-events: none; }
+.hero-grid {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(ellipse 72% 62% at 50% 28%, #000 25%, transparent 78%);
+  mask-image: radial-gradient(ellipse 72% 62% at 50% 28%, #000 25%, transparent 78%);
+  opacity: .45;
+}
+.blob { position: absolute; border-radius: 9999px; filter: blur(90px); }
+.blob.b1 { width: 540px; height: 540px; top: -170px; left: -130px; background: radial-gradient(circle, var(--brand) 0%, transparent 66%); opacity: .30; animation: kb-drift1 15s ease-in-out infinite; }
+.blob.b2 { width: 470px; height: 470px; top: -90px; right: -150px; background: radial-gradient(circle, var(--gold) 0%, transparent 66%); opacity: .24; animation: kb-drift2 19s ease-in-out infinite; }
+.blob.b3 { width: 640px; height: 420px; bottom: -200px; left: 50%; margin-left: -320px; background: radial-gradient(ellipse, var(--brand) 0%, transparent 66%); opacity: .16; }
+.hero-inner { position: relative; z-index: 1; }
+.reveal { opacity: 0; animation: kb-rise .85s cubic-bezier(.16,.7,.3,1) forwards; }
+.grad-text { background: linear-gradient(95deg, var(--brand) 5%, var(--gold) 55%, var(--brand) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; }
+.pulse-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #22c55e; margin-right: 9px; vertical-align: 1px; animation: kb-pulse-dot 2.2s ease-out infinite; }
+.btn-shine { position: relative; overflow: hidden; transition: transform .18s ease, box-shadow .18s ease; }
+.btn-shine:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(21,128,61,.35); }
+.btn-shine::after { content: ""; position: absolute; top: -10%; bottom: -10%; width: 55%; background: linear-gradient(100deg, transparent, rgba(255,255,255,.5), transparent); transform: translateX(-160%) skewX(-18deg); animation: kb-shine 3.4s ease-in-out infinite; }
+.phone-stage { display: flex; justify-content: center; margin-top: 48px; perspective: 1400px; }
+.phone-float { animation: kb-float 7s ease-in-out infinite; }
+.phone-tilt { position: relative; transform: rotateY(var(--px, 0deg)) rotateX(var(--py, 0deg)); transition: transform .25s ease-out; transform-style: preserve-3d; }
+.float-chip { position: absolute; display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; font-size: 13px; font-weight: 700; color: var(--ink); box-shadow: 0 16px 40px rgba(20,35,26,.16); white-space: nowrap; z-index: 2; animation: kb-float-chip 5.5s ease-in-out infinite; }
+.chip-a { top: 14%; left: -200px; }
+.chip-b { bottom: 20%; right: -210px; animation-delay: 1.1s; }
+.chip-tick { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 12px; flex: 0 0 auto; }
+.stats-strip { display: flex; justify-content: center; gap: 42px; flex-wrap: wrap; margin-top: 30px; padding: 24px 0 4px; border-top: 1px solid var(--line); }
+.stat { text-align: center; min-width: 130px; }
+.stat-val { font-weight: 800; font-size: 27px; letter-spacing: -0.5px; }
+.stat-label { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.marquee { overflow: hidden; margin-top: 34px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); }
+.marquee-track { display: inline-flex; white-space: nowrap; will-change: transform; animation: kb-scroll-x 32s linear infinite; }
+.marquee:hover .marquee-track { animation-play-state: paused; }
+.mq-item { display: inline-flex; align-items: center; gap: 9px; margin-right: 10px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; }
+.mq-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); flex: 0 0 auto; }
+@keyframes kb-rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes kb-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+@keyframes kb-float-chip { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+@keyframes kb-drift1 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(70px, 45px) scale(1.12); } }
+@keyframes kb-drift2 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-80px, -35px) scale(1.1); } }
+@keyframes kb-shine { 0% { transform: translateX(-160%) skewX(-18deg); } 55%, 100% { transform: translateX(260%) skewX(-18deg); } }
+@keyframes kb-scroll-x { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes kb-pulse-dot { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+[data-theme="dark"] .blob.b1 { opacity: .38; }
+[data-theme="dark"] .blob.b2 { opacity: .30; }
+[data-theme="dark"] .blob.b3 { opacity: .22; }
+[data-theme="dark"] .hero-grid { opacity: .30; }
+@media (max-width: 980px) { .float-chip { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .hero-premium .reveal { animation: none; opacity: 1; }
+  .hero-premium .phone-float, .hero-premium .blob, .hero-premium .btn-shine::after, .hero-premium .marquee-track, .hero-premium .float-chip, .hero-premium .pulse-dot { animation: none !important; }
+}
+`;
+
+const MARQUEE_ITEMS = ["Fast sales", "Stock control", "Debt tracking", "WhatsApp receipts", "Staff roles", "Daily reports", "Project accountability", "Free forever plan"];
+
 export function LandingPage() {
+  useEffect(() => {
+    var hero = document.getElementById("kb-hero");
+    var phone = document.getElementById("kb-phone");
+    var fine = window.matchMedia("(pointer: fine) and (min-width: 768px)").matches;
+    if (!hero || !phone || !fine) return;
+    var raf = 0;
+    var onMove = function (e) {
+      var r = phone.getBoundingClientRect();
+      var cx = (e.clientX - (r.left + r.width / 2)) / Math.max(r.width, 1);
+      var cy = (e.clientY - (r.top + r.height / 2)) / Math.max(r.height, 1);
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(function () {
+        phone.style.setProperty("--px", (cx * 12).toFixed(2) + "deg");
+        phone.style.setProperty("--py", (cy * -9).toFixed(2) + "deg");
+      });
+    };
+    var onLeave = function () {
+      phone.style.setProperty("--px", "0deg");
+      phone.style.setProperty("--py", "0deg");
+    };
+    hero.addEventListener("mousemove", onMove);
+    hero.addEventListener("mouseleave", onLeave);
+    return function () {
+      hero.removeEventListener("mousemove", onMove);
+      hero.removeEventListener("mouseleave", onLeave);
+    };
+  }, []);
+  useEffect(() => {
+    var el = document.getElementById("kb-count");
+    if (!el) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    var target = 5;
+    var started = false;
+    var run = function () {
+      started = true;
+      el.textContent = "0";
+      var dur = 900;
+      var t0 = performance.now();
+      var tick = function (t) {
+        var p = Math.min(1, (t - t0) / dur);
+        el.textContent = String(Math.round(target * (1 - Math.pow(1 - p, 3))));
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+    if (typeof IntersectionObserver === "undefined") { run(); return; }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting && !started) { io.disconnect(); run(); }
+      });
+    }, { threshold: 0.5 });
+    io.observe(el);
+    return function () { io.disconnect(); };
+  }, []);
   return (
     <div className="page">
       <MNav />
-      <section className="hero">
-        <div className="wrap">
-          <span className="eyebrow">Free forever plan. No card needed.</span>
-          <h1>Know your sales, stock and debts.<br />Every single day.</h1>
-          <p className="lead">
+            <section className="hero hero-premium" id="kb-hero">
+        <div className="hero-bg" aria-hidden="true">
+          <span className="hero-grid" />
+          <span className="blob b1" />
+          <span className="blob b2" />
+          <span className="blob b3" />
+        </div>
+        <div className="wrap hero-inner">
+          <span className="eyebrow reveal" style={{ animationDelay: "0ms" }}><span className="pulse-dot" />Free forever plan. No card needed.</span>
+          <h1 className="reveal" style={{ animationDelay: "90ms" }}>Know your sales, stock and debts.<br /><span className="grad-text">Every single day.</span></h1>
+          <p className="lead reveal" style={{ animationDelay: "180ms" }}>
             KopaBook replaces the paper notebook with one simple app on your phone.
             Record sales in seconds, watch your stock move, and always know who owes you.
             Free to start, works on any phone.
           </p>
-          <div className="hero-cta">
-            <a href="/register" className="btn btn-primary">Start free</a>
+          <div className="hero-cta reveal" style={{ animationDelay: "270ms" }}>
+            <a href="/register" className="btn btn-primary btn-shine">Start free</a>
             <a href="#how-it-works" className="btn btn-secondary" onClick={(e) => { e.preventDefault(); var el = document.getElementById("how-it-works"); if (el) { el.scrollIntoView({ behavior: "smooth" }); } }}>See how it works</a>
           </div>
-          <div style={{ display: "flex", justifyContent: "center", marginTop: 44 }}>
-            <div style={{ width: 300, maxWidth: "86vw", borderRadius: 36, border: "10px solid #111", background: "#fff", overflow: "hidden", boxShadow: "0 24px 60px rgba(0,0,0,0.18)", textAlign: "left" }}>
-              <div style={{ background: "#15803d", color: "#fff", padding: "14px 16px" }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>Demo Provisions Store</div>
-                <div style={{ fontSize: 12, opacity: 0.9 }}>Today at a glance</div>
-              </div>
-              <div style={{ padding: 14 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-                  <div style={{ background: "#f0fdf4", borderRadius: 12, padding: 10 }}>
-                    <div style={{ fontSize: 11, color: "#666" }}>Sales today</div>
-                    <div style={{ fontWeight: 800, fontSize: 18 }}>&#8358;4,000</div>
+          <div className="phone-stage reveal" style={{ animationDelay: "360ms" }}>
+            <div className="phone-float">
+              <div className="phone-tilt" id="kb-phone">
+                <div className="float-chip chip-a"><span className="chip-tick">✓</span>Sale recorded · Rice x2</div>
+                <div className="float-chip chip-b"><span className="chip-tick">✓</span>Debt reminder sent</div>
+                <div style={{ width: 300, maxWidth: "86vw", borderRadius: 36, border: "10px solid #111", background: "#fff", overflow: "hidden", boxShadow: "0 24px 60px rgba(0,0,0,0.18), 0 0 90px rgba(21,128,61,0.22)", textAlign: "left" }}>
+                  <div style={{ background: "#15803d", color: "#fff", padding: "14px 16px" }}>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>Demo Provisions Store</div>
+                    <div style={{ fontSize: 12, opacity: 0.9 }}>Today at a glance</div>
                   </div>
-                  <div style={{ background: "#fefce8", borderRadius: 12, padding: 10 }}>
-                    <div style={{ fontSize: 11, color: "#666" }}>Owed to you</div>
-                    <div style={{ fontWeight: 800, fontSize: 18 }}>&#8358;1,700</div>
+                  <div style={{ padding: 14 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                      <div style={{ background: "#f0fdf4", borderRadius: 12, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: "#666" }}>Sales today</div>
+                        <div style={{ fontWeight: 800, fontSize: 18 }}>&#8358;4,000</div>
+                      </div>
+                      <div style={{ background: "#fefce8", borderRadius: 12, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: "#666" }}>Owed to you</div>
+                        <div style={{ fontWeight: 800, fontSize: 18 }}>&#8358;1,700</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Recent sales</div>
+                    <div style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>Rice x2 &#183; &#8358;1,000</div>
+                    <div style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>Palm Oil x1 &#183; &#8358;1,200</div>
+                    <div style={{ fontSize: 13, padding: "8px 0" }}>Beans x1 &#183; &#8358;800</div>
+                    <div style={{ marginTop: 12, background: "#15803d", color: "#fff", textAlign: "center", padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 14 }}>+ Record sale</div>
                   </div>
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Recent sales</div>
-                <div style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>Rice x2 &#183; &#8358;1,000</div>
-                <div style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>Palm Oil x1 &#183; &#8358;1,200</div>
-                <div style={{ fontSize: 13, padding: "8px 0" }}>Beans x1 &#183; &#8358;800</div>
-                <div style={{ marginTop: 12, background: "#15803d", color: "#fff", textAlign: "center", padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 14 }}>+ Record sale</div>
               </div>
             </div>
           </div>
-          <p className="hero-proof">Made for provision stores, phone sellers, fashion vendors and market traders.</p>
-          <div style={{ display: "flex", justifyContent: "center", gap: 36, flexWrap: "wrap", marginTop: 28, padding: "20px 0", borderTop: "1px solid var(--line)" }}>
-            <div style={{ textAlign: "center" }}><div style={{ fontWeight: 800, fontSize: 22 }}>Free</div><div style={{ fontSize: 13, color: "var(--muted)" }}>to start, no card needed</div></div>
-            <div style={{ textAlign: "center" }}><div style={{ fontWeight: 800, fontSize: 22 }}>5 taps</div><div style={{ fontSize: 13, color: "var(--muted)" }}>to record a sale</div></div>
-            <div style={{ textAlign: "center" }}><div style={{ fontWeight: 800, fontSize: 22 }}>Any phone</div><div style={{ fontSize: 13, color: "var(--muted)" }}>works in your browser</div></div>
+          <p className="hero-proof reveal" style={{ animationDelay: "450ms" }}>Made for provision stores, phone sellers, fashion vendors and market traders.</p>
+          <div className="stats-strip reveal" style={{ animationDelay: "540ms" }}>
+            <div className="stat"><div className="stat-val">Free</div><div className="stat-label">to start, no card needed</div></div>
+            <div className="stat"><div className="stat-val"><span id="kb-count">5</span> taps</div><div className="stat-label">to record a sale</div></div>
+            <div className="stat"><div className="stat-val">Any phone</div><div className="stat-label">works in your browser</div></div>
+          </div>
+          <div className="marquee reveal" style={{ animationDelay: "620ms" }} aria-hidden="true">
+            <div className="marquee-track">
+              {MARQUEE_ITEMS.concat(MARQUEE_ITEMS).map((t, i) => (
+                <span className="mq-item" key={i}><span className="mq-dot" />{t}</span>
+              ))}
+            </div>
           </div>
         </div>
+        <style>{HERO_CSS}</style>
       </section>
 
       <section className="section">
