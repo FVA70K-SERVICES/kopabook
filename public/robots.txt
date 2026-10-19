@@ -7,7 +7,8 @@ Disallow: /owner-setup
 Disallow: /forgot-password
 Disallow: /reset-password
 Disallow: /chat-center
+Disallow: /waitlist
 
-# Marketing pages stay crawlable: /, /features, /pricing, /hotels, /register, /waitlist
+# Marketing pages stay crawlable: /, /features, /pricing, /hotels, /register
 
 Sitemap: https://kopabook.com/sitemap.xml
