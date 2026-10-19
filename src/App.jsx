@@ -3,7 +3,7 @@ import Layout from "./components/Layout";
 import AiAssistant from "./components/AiAssistant";
 import { api, nav, setCurrency } from "./lib/api";
 import {
-  LandingPage, FeaturesPage, PricingPage, WaitlistPage, NotFoundPage,
+  LandingPage, FeaturesPage, PricingPage, NotFoundPage,
   HotelsLandingPage, AboutPage, FaqPage,
 } from "./pages/Marketing";
 import { TermsPage, PrivacyPage, RefundPage } from "./pages/Legal";
@@ -70,7 +70,7 @@ function AppRoute({ session }) {
   if (path === "/terms") return <TermsPage />;
   if (path === "/privacy") return <PrivacyPage />;
   if (path === "/refund") return <RefundPage />;
-  if (path === "/waitlist") return <WaitlistPage />;
+  if (path === "/waitlist") { nav("/register"); return null; }
   if (path === "/hotels") return <HotelsLandingPage />;
   if (path === "/hotels/register") {
     if (session) { nav("/app/hotels"); return null; }
