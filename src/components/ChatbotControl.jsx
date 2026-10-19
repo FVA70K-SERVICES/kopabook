@@ -42,6 +42,7 @@ export default function ChatbotControl() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [botOn, setBotOn] = useState(true);
+  const [staffChat, setStaffChat] = useState(false);
   const [autoOn, setAutoOn] = useState(false);
   const [hours, setHours] = useState(24);
   const [siteId, setSiteId] = useState("");
@@ -55,6 +56,7 @@ export default function ChatbotControl() {
     try {
       const d = await api.get("/api/chat/control");
       setBotOn(!!d.settings?.bot_enabled);
+      setStaffChat(!!d.settings?.staff_chat_enabled);
       setAutoOn(!!d.settings?.auto_clear_enabled);
       setHours(Number(d.settings?.auto_clear_hours) || 24);
       setSiteId(d.settings?.site_id || "");
@@ -78,6 +80,23 @@ export default function ChatbotControl() {
       setOk(next
         ? "Chatbot is on. It will answer new visitor chats."
         : "Chatbot is off. New visitor chats will wait for you in the Chat Center instead.");
+    } catch (e) {
+      setError(e.message);
+    }
+    setBusy(false);
+  }
+
+  async function toggleStaffChat() {
+    const next = !staffChat;
+    setBusy(true);
+    setError("");
+    setOk("");
+    try {
+      const d = await api.post("/api/chat/control", { action: "set_staff_chat", enabled: next });
+      setStaffChat(!!d.staff_chat_enabled);
+      setOk(next
+        ? "Staff can now open the Chat Center and handle live chats."
+        : "Only you and partners can handle live chats now.");
     } catch (e) {
       setError(e.message);
     }
@@ -143,6 +162,18 @@ export default function ChatbotControl() {
           Your website widget uses site ID: <code>{siteId}</code>
         </p>
       )}
+
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 6, marginTop: 12 }}>
+        <Switch on={staffChat} onChange={toggleStaffChat} disabled={busy} label="Let staff handle live chats" />
+        <div>
+          <div style={{ fontWeight: 600 }}>Let staff handle live chats</div>
+          <p className="hint" style={{ margin: "4px 0 0" }}>
+            {staffChat
+              ? "Your staff can open the Chat Center and reply to visitors as themselves."
+              : "Only you and partners can use the Chat Center. Staff will not see it."}
+          </p>
+        </div>
+      </div>
 
       <hr style={{ border: "none", borderTop: "1px solid var(--line, #e5e7eb)", margin: "16px 0" }} />
 
