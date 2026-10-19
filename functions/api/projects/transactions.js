@@ -73,7 +73,8 @@ export async function onRequestDelete(context) {
 
     const { auth, access, error } = await projectAccessContext(context, tx.project_id);
     if (error) return error;
-    if (!access.isOwnerPartner) {
+    // Business members keep the previous behaviour; invited members never delete.
+    if (!access.isOwnerPartner && access.kind !== "business") {
       return json({ ok: false, message: "Only the project owner can delete records." }, 403);
     }
 
