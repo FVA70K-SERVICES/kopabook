@@ -792,9 +792,16 @@ export async function onRequestPost(context) {
 
     // Daily question cap for this tier (per business per UTC day).
     const day = new Date().toISOString().slice(0, 10);
-    const usage = await db.prepare(`SELECT count, actions FROM ai_usage WHERE business_id = ? AND day = ?`).bind(String(businessId), day).first();
+    // Resilient usage read: if migration 0046 (the `actions` column) was never
+    // applied, fall back to the legacy shape so the assistant never 500s.
+    let usage = null;
+    try {
+      usage = await db.prepare(`SELECT count, actions FROM ai_usage WHERE business_id = ? AND day = ?`).bind(String(businessId), day).first();
+    } catch (e) {
+      usage = await db.prepare(`SELECT count FROM ai_usage WHERE business_id = ? AND day = ?`).bind(String(businessId), day).first().catch(() => null);
+    }
     const usedToday = usage ? Number(usage.count) || 0 : 0;
-    const actionsToday = usage ? Number(usage.actions) || 0 : 0;
+    const actionsToday = usage && typeof usage.actions !== "undefined" ? Number(usage.actions) || 0 : 0;
     const bumpActions = async () => {
       await db.prepare(
         `INSERT INTO ai_usage (business_id, day, count, actions) VALUES (?, ?, 0, 1)
