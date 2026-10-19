@@ -63,6 +63,15 @@ export async function onRequestGet(context) {
       )
       .bind(businessId)
       .first();
+    // staff_chat_enabled lives in migration 0047; read defensively pre-migration.
+    let staffChat = false;
+    try {
+      const sc = await db
+        .prepare("SELECT staff_chat_enabled FROM business_chat_settings WHERE business_id = ?")
+        .bind(businessId)
+        .first();
+      staffChat = Number(sc && sc.staff_chat_enabled) === 1;
+    } catch (e) {}
 
     const siteId = SITE_PREFIX + businessId;
     const site = await db
@@ -89,6 +98,7 @@ export async function onRequestGet(context) {
         bot_enabled: Number(settings && settings.bot_enabled) !== 0,
         auto_clear_enabled: Number(settings && settings.auto_clear_enabled) === 1,
         auto_clear_hours: Number(settings && settings.auto_clear_hours) || 24,
+        staff_chat_enabled: staffChat,
         site_id: siteId,
         site_linked: !!site,
       },
@@ -140,6 +150,20 @@ export async function onRequestPost(context) {
         .bind(enabled ? 1 : 0, hours, businessId)
         .run();
       return json({ ok: true, auto_clear_enabled: enabled, auto_clear_hours: hours });
+    }
+
+    if (action === "set_staff_chat") {
+      const enabled = !!body.enabled;
+      await ensureSettings(db, businessId);
+      try {
+        await db
+          .prepare("UPDATE business_chat_settings SET staff_chat_enabled = ?, updated_at = datetime('now') WHERE business_id = ?")
+          .bind(enabled ? 1 : 0, businessId)
+          .run();
+      } catch (e) {
+        return json({ ok: false, message: "Apply migration 0047 in D1 first (staff_chat_enabled column)." }, 400);
+      }
+      return json({ ok: true, staff_chat_enabled: enabled });
     }
 
     if (action === "clear_session") {
