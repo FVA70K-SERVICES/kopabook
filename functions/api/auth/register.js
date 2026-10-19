@@ -53,10 +53,35 @@ export async function onRequestPost(context) {
     const passwordHash = await hashPassword(String(password));
     const now = toSqliteDate();
 
-    const userResult = await db.prepare(
-      `INSERT INTO users (full_name, email, phone, password_hash, role, status, last_login_at)
-       VALUES (?, ?, ?, ?, 'owner', 'active', ?)`
-    ).bind(fullName.trim(), cleanEmail, String(phone || "").slice(0, 20) || null, passwordHash, now).run();
+    // Optional username: 3-20 chars, letters/numbers/underscore. One account,
+    // one login: the username also works on the sign-in page.
+    let username = String(body.username || "").trim().toLowerCase();
+    if (username) {
+      if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+        return json({ ok: false, message: "Username must be 3 to 20 characters: letters, numbers and underscore only." }, 400);
+      }
+      try {
+        const takenU = await db.prepare(`SELECT id FROM users WHERE username = ? LIMIT 1`).bind(username).first();
+        if (takenU) {
+          return json({ ok: false, message: "That username is taken. Try another." }, 409);
+        }
+      } catch (e) {
+        username = ""; // username column not migrated yet: register without it
+      }
+    }
+
+    let userResult;
+    if (username) {
+      userResult = await db.prepare(
+        `INSERT INTO users (full_name, email, username, phone, password_hash, role, status, last_login_at)
+         VALUES (?, ?, ?, ?, ?, 'owner', 'active', ?)`
+      ).bind(fullName.trim(), cleanEmail, username, String(phone || "").slice(0, 20) || null, passwordHash, now).run();
+    } else {
+      userResult = await db.prepare(
+        `INSERT INTO users (full_name, email, phone, password_hash, role, status, last_login_at)
+         VALUES (?, ?, ?, ?, 'owner', 'active', ?)`
+      ).bind(fullName.trim(), cleanEmail, String(phone || "").slice(0, 20) || null, passwordHash, now).run();
+    }
     const userId = userResult.meta.last_row_id;
 
     const bizResult = await db.prepare(
@@ -96,7 +121,7 @@ export async function onRequestPost(context) {
     return json(
       {
         ok: true,
-        user: { id: Number(userId), fullName: fullName.trim(), email: cleanEmail, role: "owner" },
+        user: { id: Number(userId), fullName: fullName.trim(), email: cleanEmail, username: username || null, role: "owner" },
         business: { id: Number(businessId), name: businessName.trim() },
       },
       201,
