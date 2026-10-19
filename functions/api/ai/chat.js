@@ -24,7 +24,7 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 // recommended free replacement is openai/gpt-oss-120b.
 const GROQ_MODEL = "openai/gpt-oss-120b";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
+const OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free";
 const PROVIDER_TIMEOUT_MS = 20000;
 
 // Every provider below has the same shape: (env, messages, opts) => text,
