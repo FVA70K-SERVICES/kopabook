@@ -4,7 +4,7 @@ import Logo from "../components/Logo";
 import HumanCheck, { FVA_VERIFY_SITEKEY } from "../components/HumanCheck";
 
 export function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState({ loading: false, error: "" });
 
@@ -12,8 +12,15 @@ export function LoginPage() {
     e.preventDefault();
     setStatus({ loading: true, error: "" });
     try {
-      await api.login(email, password);
-      nav("/app/dashboard");
+      await api.login(identifier, password);
+      // A pending project invite survives sign-in: finish the join after auth.
+      const pending = localStorage.getItem("kb_pending_invite");
+      if (pending) {
+        localStorage.removeItem("kb_pending_invite");
+        nav("/app/projects/join/" + encodeURIComponent(pending));
+      } else {
+        nav("/app/dashboard");
+      }
     } catch (err) {
       setStatus({ loading: false, error: err.message });
     }
@@ -30,7 +37,7 @@ export function LoginPage() {
           <p className="hint">Sign in to your KopaBook business.</p>
           {status.error && <div className="alert alert-error">{status.error}</div>}
           <form onSubmit={submit}>
-            <div className="field"><label htmlFor="auth-email">Email</label><input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" /></div>
+            <div className="field"><label htmlFor="auth-email">Email or username</label><input id="auth-email" type="text" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required placeholder="you@example.com or your username" autoComplete="username" /></div>
             <div className="field"><label htmlFor="auth-password">Password</label><input id="auth-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Your password" /></div>
             <button className="btn btn-primary btn-block" disabled={status.loading}>
               {status.loading ? "Signing in..." : "Sign in"}
