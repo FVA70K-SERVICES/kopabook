@@ -6,9 +6,9 @@ import { json, getAuthContext, requireAuth } from "./_utils.js";
 const NOTE_COLORS = ["default", "butter", "mint", "sky", "blush", "lavender"];
 
 function canSee(auth, note) {
-  if (note.business_id !== auth.business.id) return false;
+  if (Number(note.business_id) !== Number(auth.business.id)) return false;
   if (note.visibility === "shared") return true;
-  return note.user_id === auth.user.id;
+  return Number(note.user_id) === Number(auth.user.id);
 }
 
 function isManager(auth) {
@@ -23,10 +23,14 @@ export async function onRequestGet(context) {
 
     const url = new URL(context.request.url);
     const filter = url.searchParams.get("visibility"); // private | shared | all
-    const conds = ["business_id = ?", "(visibility = 'shared' OR (visibility = 'private' AND user_id = ?))"];
-    const params = [auth.business.id, auth.user.id];
+    const businessId = Number(auth.business.id);
+    const userId = Number(auth.user.id);
+    // Shared notes are visible to every member of the same business.
+    // Private notes are visible only to their creator.
+    const conds = ["n.business_id = ?", "(n.visibility = 'shared' OR (n.visibility = 'private' AND n.user_id = ?))"];
+    const params = [businessId, userId];
     if (filter === "private" || filter === "shared") {
-      conds.push("visibility = ?");
+      conds.push("n.visibility = ?");
       params.push(filter);
     }
 
@@ -76,16 +80,19 @@ export async function onRequestPost(context) {
     }
 
     const db = context.env.KOPABOOK_DB;
+    // Any signed-in member of the business can create shared notes, not just the owner.
+    const businessId = Number(auth.business.id);
+    const userId = Number(auth.user.id);
     // Upgraded columns first; fall back if migration 0039 is not applied yet.
     let r;
     try {
       r = await db.prepare(
         `INSERT INTO notes (business_id, user_id, title, content, visibility, color, pinned) VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(auth.business.id, auth.user.id, title, content, visibility, color, pinned).run();
+      ).bind(businessId, userId, title, content, visibility, color, pinned).run();
     } catch (e) {
       r = await db.prepare(
         `INSERT INTO notes (business_id, user_id, title, content, visibility) VALUES (?, ?, ?, ?, ?)`
-      ).bind(auth.business.id, auth.user.id, title, content, visibility).run();
+      ).bind(businessId, userId, title, content, visibility).run();
     }
 
     return json({ ok: true, id: Number(r.meta.last_row_id) });
@@ -108,7 +115,7 @@ export async function onRequestPut(context) {
       return json({ ok: false, message: "Note not found." }, 404);
     }
     // Only the creator edits, except owners/partners may edit shared notes.
-    const mine = note.user_id === auth.user.id;
+    const mine = Number(note.user_id) === Number(auth.user.id);
     if (!mine && !(note.visibility === "shared" && isManager(auth))) {
       return json({ ok: false, message: "Only the person who wrote it can edit this note." }, 403);
     }
@@ -150,7 +157,7 @@ export async function onRequestDelete(context) {
     if (!note || !canSee(auth, note)) {
       return json({ ok: false, message: "Note not found." }, 404);
     }
-    const mine = note.user_id === auth.user.id;
+    const mine = Number(note.user_id) === Number(auth.user.id);
     if (!mine && !(note.visibility === "shared" && isManager(auth))) {
       return json({ ok: false, message: "Only the person who wrote it can delete this note." }, 403);
     }
