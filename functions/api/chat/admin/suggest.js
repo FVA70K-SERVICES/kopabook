@@ -6,13 +6,15 @@
 // { suggestions, intent, visitorName, context }.
 
 import { getAuthContext } from '../../_utils.js';
+import { canUseChatCenter, businessSiteId } from '../_access.js';
 
 const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
 export async function onRequestGet({ request, env }) {
   try {
     const auth = await getAuthContext(request, env);
-    if (!auth || !auth.user) {
+    const db = env.KOPABOOK_DB;
+    if (!auth || !(await canUseChatCenter(db, auth))) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -20,7 +22,11 @@ export async function onRequestGet({ request, env }) {
     const sessionId = url.searchParams.get('session_id');
     if (!sessionId) return Response.json({ error: 'session_id required' }, { status: 400 });
 
-    const db = env.KOPABOOK_DB;
+    // Never suggest replies for another business's chats.
+    const sess = await db.prepare('SELECT site_id FROM chat_sessions WHERE id = ?').bind(sessionId).first();
+    if (!sess || sess.site_id !== businessSiteId(auth.business.id)) {
+      return Response.json({ error: 'That conversation does not belong to this business.' }, { status: 403 });
+    }
 
     // Get recent messages (last 10) for context
     const msgs = await db.prepare(`
