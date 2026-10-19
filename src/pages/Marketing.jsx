@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { api, nav } from "../lib/api";
-import { COUNTRIES } from "../lib/businessTypes";
 import ThemeToggle from "../components/ThemeToggle";
 import Logo from "../components/Logo";
 
@@ -232,7 +231,7 @@ export function FeaturesPage() {
             ))}
           </div>
           <div style={{ textAlign: "center", marginTop: 36 }}>
-            <a href="/waitlist" className="btn btn-primary">Join the waitlist</a>
+            <a href="/register" className="btn btn-primary">Start free</a>
           </div>
         </div>
       </section>
@@ -346,72 +345,6 @@ export function PricingPage() {
           </div>
         </div>
       </section>
-      <MFooter />
-    </div>
-  );
-}
-
-export function WaitlistPage() {
-  const [form, setForm] = useState({ name: "", phone: "", email: "", businessType: "", state: "", city: "", monthlyTransactions: "", currentTool: "", consent: true });
-  const [status, setStatus] = useState({ loading: false, error: "", ok: false });
-
-  function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
-
-  async function submit(e) {
-    e.preventDefault();
-    setStatus({ loading: true, error: "", ok: false });
-    try {
-      await api.post("/api/waitlist", form);
-      setStatus({ loading: false, error: "", ok: true });
-    } catch (err) {
-      setStatus({ loading: false, error: err.message, ok: false });
-    }
-  }
-
-  return (
-    <div className="page">
-      <MNav />
-      <div className="wrap">
-        <div className="form-card">
-          {status.ok ? (
-            <>
-              <h1>You are on the list 🎉</h1>
-              <p className="hint">We will reach out as soon as KopaBook opens for early merchants. Tell a fellow trader.</p>
-              <a href="/" className="btn btn-secondary btn-block">Back home</a>
-            </>
-          ) : (
-            <>
-              <h1>Join the waitlist</h1>
-              <p className="hint">Be first in line when KopaBook launches in your country.</p>
-              {status.error && <div className="alert alert-error">{status.error}</div>}
-              <form onSubmit={submit}>
-                <div className="field"><label>Full name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required placeholder="Your name" /></div>
-                <div className="field"><div className="row2">
-                  <div><label>Phone</label><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="080..." /></div>
-                  <div><label>Email</label><input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="you@example.com" /></div>
-                </div></div>
-                <div className="field"><div className="row2">
-                  <div><label>Business type</label><input value={form.businessType} onChange={(e) => set("businessType", e.target.value)} placeholder="Provision store" /></div>
-                  <div><label>Country</label><select value={form.state} onChange={(e) => set("state", e.target.value)}>
-                    <option value="">Select country</option>
-                    {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select></div>
-                </div></div>
-                <div className="field"><label>City</label><input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="Your city" /></div>
-                <div className="field"><label>How do you track sales today?</label>
-                  <select value={form.currentTool} onChange={(e) => set("currentTool", e.target.value)}>
-                    <option value="">Select...</option>
-                    <option>Notebook</option><option>Memory</option><option>WhatsApp chats</option><option>Excel</option><option>Another app</option>
-                  </select>
-                </div>
-                <button className="btn btn-primary btn-block" disabled={status.loading}>
-                  {status.loading ? "Joining..." : "Join the waitlist"}
-                </button>
-              </form>
-            </>
-          )}
-        </div>
-      </div>
       <MFooter />
     </div>
   );
@@ -570,7 +503,7 @@ const FAQS = [
   },
   {
     q: "How do I get started?",
-    a: "Join the waitlist, then register your business in minutes: name, business type, country, currency, and timezone. Add your products, invite your staff, and record your first sale.",
+    a: "Register your business in minutes: name, business type, country, currency, and timezone. Add your products, invite your staff, and record your first sale.",
   },
 ];
 
@@ -593,7 +526,7 @@ export function FaqPage() {
             ))}
           </div>
           <div style={{ marginTop: 32, textAlign: "center" }}>
-            <a href="/waitlist" className="btn btn-primary">Join the waitlist</a>
+            <a href="/register" className="btn btn-primary">Start free</a>
           </div>
         </div>
       </section>
