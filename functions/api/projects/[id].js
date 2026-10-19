@@ -1,17 +1,15 @@
 // /api/projects/[id] — GET project detail with totals, PATCH update, DELETE.
-import { json, audit } from "../_utils";
-import { projectContext, getProject, projectTotals } from "./_lib";
+// Project members (invitees) can view the detail of ONLY the invited project.
+// PATCH and DELETE stay owner/partner only.
+import { json, safeAudit, projectAccessContext } from "./_lib";
+import { projectTotals } from "./_lib";
 
 export async function onRequestGet(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
     const id = Number(context.params.id) || null;
-    if (!id) return json({ ok: false, message: "Project id is required." }, 400);
-
-    const project = await getProject(db, auth.business.id, id);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
-    const totals = await projectTotals(db, id);
+    const { db, project, error } = await projectAccessContext(context, id);
+    if (error) return error;
+    const totals = await projectTotals(db, project.id);
     return json({ ok: true, project, totals });
   } catch (e) {
     return json({ ok: false, message: "Could not load project.", error: String(e) }, 500);
@@ -20,13 +18,12 @@ export async function onRequestGet(context) {
 
 export async function onRequestPatch(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
     const id = Number(context.params.id) || null;
-    if (!id) return json({ ok: false, message: "Project id is required." }, 400);
-
-    const project = await getProject(db, auth.business.id, id);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
+    const { auth, db, project, access, error } = await projectAccessContext(context, id);
+    if (error) return error;
+    if (!access.isOwnerPartner) {
+      return json({ ok: false, message: "Only the project owner can change project details." }, 403);
+    }
 
     const body = await context.request.json().catch(() => ({}));
     const fields = [];
@@ -53,10 +50,10 @@ export async function onRequestPatch(context) {
     }
     if (!fields.length) return json({ ok: false, message: "Nothing to update." }, 400);
     fields.push("updated_at = datetime('now')");
-    vals.push(id, auth.business.id);
+    vals.push(id, project.business_id);
 
     await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ? AND business_id = ?`).bind(...vals).run();
-    await audit(context, auth, "project.update", "project", id, { fields: fields.length });
+    await safeAudit(context, auth, "project.update", "project", id, { fields: fields.length });
     return json({ ok: true });
   } catch (e) {
     return json({ ok: false, message: "Could not update project.", error: String(e) }, 500);
@@ -65,23 +62,21 @@ export async function onRequestPatch(context) {
 
 export async function onRequestDelete(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
-    if (auth.business.role !== "owner" && auth.business.role !== "partner") {
-      return json({ ok: false, message: "Only the owner or a partner can delete a project." }, 403);
-    }
     const id = Number(context.params.id) || null;
-    if (!id) return json({ ok: false, message: "Project id is required." }, 400);
-
-    const project = await getProject(db, auth.business.id, id);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
+    const { auth, db, project, access, error } = await projectAccessContext(context, id);
+    if (error) return error;
+    if (!access.isOwnerPartner) {
+      return json({ ok: false, message: "Only the project owner can delete a project." }, 403);
+    }
 
     await db.batch([
       db.prepare(`DELETE FROM project_transactions WHERE project_id = ?`).bind(id),
       db.prepare(`DELETE FROM project_milestones WHERE project_id = ?`).bind(id),
-      db.prepare(`DELETE FROM projects WHERE id = ? AND business_id = ?`).bind(id, auth.business.id),
+      db.prepare(`DELETE FROM project_members WHERE project_id = ?`).bind(id),
+      db.prepare(`DELETE FROM project_invites WHERE project_id = ?`).bind(id),
+      db.prepare(`DELETE FROM projects WHERE id = ? AND business_id = ?`).bind(id, project.business_id),
     ]);
-    await audit(context, auth, "project.delete", "project", id, { name: project.name });
+    await safeAudit(context, auth, "project.delete", "project", id, { name: project.name });
     return json({ ok: true });
   } catch (e) {
     return json({ ok: false, message: "Could not delete project.", error: String(e) }, 500);
