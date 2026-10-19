@@ -6,70 +6,70 @@ export const ORG_TYPES = [
     label: "Hotel / Guest House",
     icon: "🏨",
     tagline: "Rooms, bookings, guest folios and billing.",
-    modules: ["dashboard", "hotels", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "hotels", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "restaurant",
     label: "Restaurant / Eatery",
     icon: "🍽️",
     tagline: "Fast sales, menu items and customer debts.",
-    modules: ["dashboard", "sales", "products", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "products", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "retail",
     label: "Provision Store / Retail Shop",
     icon: "🏪",
     tagline: "Sales, stock, suppliers and debts.",
-    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "pharmacy",
     label: "Pharmacy / Chemist",
     icon: "💊",
     tagline: "Stock control, sales and customer records.",
-    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "supermarket",
     label: "Supermarket / Mini-mart",
     icon: "🛒",
     tagline: "High-volume sales with full stock tracking.",
-    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "electronics",
     label: "Phones / Electronics",
     icon: "📱",
     tagline: "Unit sales, stock and supplier tracking.",
-    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "products", "suppliers", "import", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "fashion",
     label: "Fashion / Tailoring",
     icon: "👗",
     tagline: "Products, custom jobs and client debts.",
-    modules: ["dashboard", "sales", "products", "services", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "products", "services", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "salon",
     label: "Salon / Barbershop / Spa",
     icon: "💈",
     tagline: "Services, walk-in sales and client records.",
-    modules: ["dashboard", "sales", "services", "products", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "services", "products", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "artisan",
     label: "Artisan / Repairs / Services",
     icon: "🛠️",
     tagline: "Jobs, service charges and client debts.",
-    modules: ["dashboard", "sales", "services", "customers", "suppliers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "services", "customers", "suppliers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
   {
     key: "other",
     label: "Other Business",
     icon: "🏢",
     tagline: "The full KopaBook toolkit for general businesses.",
-    modules: ["dashboard", "sales", "services", "products", "suppliers", "import", "customers", "debts", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
+    modules: ["dashboard", "sales", "services", "products", "suppliers", "import", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "activity", "notebook", "calculator", "settings"],
   },
 ];
 
@@ -85,7 +85,7 @@ export const NAV_GROUPS = [
   { label: "Stock", modules: ["suppliers", "import", "expenses"] },
   { label: "Hotels", modules: ["hotels"] },
   { label: "Insights", modules: ["messages", "reports", "activity"] },
-  { label: "Tools", modules: ["notebook", "calculator"] },
+  { label: "Tools", modules: ["notebook", "calculator", "projects"] },
   { label: "Setup", modules: ["staff", "settings"] },
 ];
 
@@ -204,7 +204,7 @@ export const COUNTRIES = [
 // Mobile bottom-bar priority: most-used modules first per business.
 export const MOBILE_PRIORITY = [
   "dashboard", "sales", "hotels", "products", "services", "customers",
-  "debts", "expenses", "messages", "reports", "notebook", "calculator", "suppliers", "import",
+  "debts", "projects", "expenses", "messages", "reports", "notebook", "calculator", "suppliers", "import",
   "staff", "settings",
 ];
 
@@ -220,6 +220,7 @@ export const NAV_MODULES = {
   "/app/customers": "customers",
   "/app/hotels": "hotels",
   "/app/debts": "debts",
+  "/app/projects": "projects",
   "/app/messages": "messages",
   "/app/reports": "reports",
   "/app/staff": "staff",
@@ -236,12 +237,12 @@ export const ROLE_MODULES = {
   partner: null,
   // Everyone keeps the staff page for their own shift clock; management
   // sections inside it are owner/partner only.
-  manager: ["dashboard", "sales", "services", "products", "suppliers", "import", "expenses", "customers", "hotels", "debts", "messages", "reports", "staff", "notebook", "calculator"],
-  accountant: ["dashboard", "expenses", "reports", "customers", "messages", "staff", "notebook", "calculator"],
+  manager: ["dashboard", "sales", "services", "products", "suppliers", "import", "expenses", "customers", "hotels", "debts", "projects", "messages", "reports", "staff", "notebook", "calculator"],
+  accountant: ["dashboard", "expenses", "projects", "reports", "customers", "messages", "staff", "notebook", "calculator"],
   cashier: ["dashboard", "sales", "services", "products", "customers", "debts", "messages", "staff", "notebook", "calculator"],
   storekeeper: ["dashboard", "products", "suppliers", "import", "messages", "staff", "notebook", "calculator"],
   attendant: ["dashboard", "sales", "services", "products", "customers", "debts", "messages", "staff", "notebook", "calculator"],
-  hotel_manager: ["dashboard", "hotels", "customers", "debts", "expenses", "messages", "reports", "staff", "notebook", "calculator"],
+  hotel_manager: ["dashboard", "hotels", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "notebook", "calculator"],
   receptionist: ["dashboard", "hotels", "customers", "messages", "staff", "notebook", "calculator"],
   housekeeper: ["dashboard", "hotels", "staff", "notebook", "calculator"],
 };
