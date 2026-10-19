@@ -13,7 +13,7 @@ export default function RegisterPage({ preset }) {
     catch { return "Africa/Lagos"; }
   })();
   const [form, setForm] = useState({
-    fullName: "", email: "", phone: "", password: "",
+    fullName: "", email: "", username: "", phone: "", password: "",
     businessName: "", state: "", city: "", country: "Nigeria", currency: "NGN",
     timezone: detectedTz,
   });
@@ -42,7 +42,13 @@ export default function RegisterPage({ preset }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) throw new Error(data.message || "Registration failed.");
-      nav(orgKey === "hotel" ? "/app/hotels" : "/app/dashboard");
+      const pending = localStorage.getItem("kb_pending_invite");
+      if (pending) {
+        localStorage.removeItem("kb_pending_invite");
+        nav("/app/projects/join/" + encodeURIComponent(pending));
+      } else {
+        nav(orgKey === "hotel" ? "/app/hotels" : "/app/dashboard");
+      }
     } catch (err) {
       setStatus({ loading: false, error: err.message });
     }
@@ -93,6 +99,8 @@ export default function RegisterPage({ preset }) {
                 <div><label htmlFor="reg-email">Email *</label><input id="reg-email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)} required /></div>
                 <div><label htmlFor="reg-password">Password *</label><input id="reg-password" type="password" value={form.password} onChange={(e) => set("password", e.target.value)} required minLength={8} placeholder="8+ characters" /></div>
               </div></div>
+              <div className="field"><label htmlFor="reg-username">Username (optional)</label><input id="reg-username" value={form.username} onChange={(e) => set("username", e.target.value)} placeholder="e.g. chidi_trades" />
+              <p className="hint" style={{ marginTop: 4 }}>Pick one if you want. You can sign in with your email or this username. Letters, numbers and underscore, 3 to 20 characters.</p></div>
               <div className="field"><div className="row2">
                 <div><label htmlFor="reg-country">Country</label><select id="reg-country" value={form.country} onChange={(e) => set("country", e.target.value)}>
                   {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
