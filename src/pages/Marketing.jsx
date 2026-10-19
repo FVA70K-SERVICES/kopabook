@@ -119,6 +119,7 @@ export function LandingPage() {
             <div className="card"><div className="icon">💸</div><h3>Expenses in seconds</h3><p>Capture daily expenses by category and see exactly where the money goes.</p></div>
             <div className="card"><div className="icon">📊</div><h3>Daily position at a glance</h3><p>Open your dashboard and understand today's sales, expenses and debts in 30 seconds.</p></div>
             <div className="card"><div className="icon">🧑‍💼</div><h3>Staff without chaos</h3><p>Give attendants controlled access to record sales while you keep full control.</p></div>
+            <div className="card"><div className="icon">📋</div><h3>Projects with full accountability</h3><p>Track any project from start to finish. Record every income and expense, hit milestones, then generate a complete PDF report showing where every naira went.</p></div>
           </div>
         </div>
       </section>
@@ -216,6 +217,7 @@ export function FeaturesPage() {
     ["🧾", "Thermal receipts", "Printable receipts for 58mm and 80mm printers, with your business name, phone, address, and custom footer."],
     ["💬", "WhatsApp friendly", "Share receipts, send debt reminders, and broadcast promos straight to WhatsApp."],
     ["🏨", "Hotel module", "Rooms, bookings, guest folios, charges, and payments for hotels, guest houses, and lodges."],
+    ["📋", "Project accountability", "Create any project: construction, events, charity, business ventures. Record every income and expense against it, track milestones, and generate a complete PDF report showing exactly where every naira went. Perfect for anyone handling other people's money."],
     ["🔒", "Secure by design", "Password hashing, secure httpOnly sessions, role-based access, and audit logs for sensitive actions."],
   ];
   return (
