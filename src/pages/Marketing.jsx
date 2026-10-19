@@ -116,6 +116,168 @@ const HERO_CSS = `
 
 const MARQUEE_ITEMS = ["Fast sales", "Stock control", "Debt tracking", "WhatsApp receipts", "Staff roles", "Daily reports", "Project accountability", "Free forever plan"];
 
+// ---- Everything inside KopaBook: showcase data (matches production code) ----
+const MODULES = [
+  { icon: "\uD83D\uDCCA", name: "Dashboard", access: "free", desc: "Your whole day at a glance. Today's sales, today's expenses, what customers owe you, products running low, and your latest sales, computed from your real records in your timezone.", bestFor: "Every merchant, every morning." },
+  { icon: "\uD83E\uDDFE", name: "Sales recording", access: "free", desc: "A sale in under 5 taps. Search the product, set the quantity, record how the customer paid. Stock deducts the moment you save, and partial payments automatically become debts.", bestFor: "Shop attendants and owners at the counter." },
+  { icon: "\uD83D\uDCE6", name: "Products and stock", access: "free", desc: "Products and services with units of measure like piece, kg or litre. Every sale, adjustment and opening balance writes to your stock ledger, with low-stock alerts before your shelf runs empty.", bestFor: "Anyone who buys and resells goods." },
+  { icon: "\uD83D\uDC65", name: "Customers and debts", access: "free", desc: "Customer records with a running debt ledger each. Customers can pay bit by bit, and overpayments come back as change, never negative debt.", bestFor: "Merchants who sell on trust and credit." },
+  { icon: "\uD83D\uDCB8", name: "Expenses", access: "free", desc: "Log daily expenses by category in seconds and see exactly what leaves the business.", bestFor: "Owners watching their margins." },
+  { icon: "\uD83E\uDDFB", name: "Receipts", access: "free", desc: "Share a receipt with any customer on WhatsApp, or download, save and copy it as a clean PNG image. Printable formats for 58mm and 80mm thermal printers too.", bestFor: "Every sale that needs proof." },
+  { icon: "\uD83D\uDCD3", name: "Notebook", access: "free", desc: "Your paper book, inside the app. Shared notes the whole team sees, plus private notes only you see, written like real book pages.", bestFor: "Teams that run on shared notes." },
+  { icon: "\uD83D\uDCE3", name: "Messages", access: "free", desc: "Broadcast promos and new products to your customers on WhatsApp, and send quick notes to staff. On the free plan every send opens WhatsApp with your message ready, and you press send.", bestFor: "Promos, announcements and staff updates." },
+  { icon: "\uD83E\uDDD1\u200D\uD83D\uDCBC", name: "Staff and roles", access: "free", desc: "Partner, manager, accountant, cashier, storekeeper, attendant and hotel roles. Each role sees only its own workspace, with discount limits and full control for you.", bestFor: "Shops with attendants and teams." },
+  { icon: "\uD83C\uDFE2", name: "Many businesses, one account", access: "free", desc: "Own several businesses and switch between them instantly with one login. Each keeps its own staff, sales, stock and records, completely separate.", bestFor: "Owners running more than one shop." },
+  { icon: "\uD83C\uDFED", name: "Suppliers", access: "free", desc: "Keep supplier records linked to your stock, so you know exactly who to call when it is time to restock.", bestFor: "Shops that buy from wholesalers." },
+  { icon: "\uD83E\uDDEE", name: "Calculator", access: "free", desc: "Quick business math with history and memory, right inside the app. No need to leave for another tool.", bestFor: "Fast totals at the counter." },
+  { icon: "\uD83D\uDCDC", name: "Activity log", access: "free", desc: "An audit trail of important actions across your business, so you always know who did what.", bestFor: "Owners who want full visibility." },
+  { icon: "\uD83D\uDCAC", name: "Website chatbot and Chat Center", access: "free", desc: "Your business gets its own chatbot that answers customers on your connected website. Turn it on or off per business, take over any chat from the Chat Center, and let smart replies draft answers for you.", bestFor: "Businesses with a website or online customers." },
+  { icon: "\uD83E\uDD16", name: "Ask Kopa AI", access: "tiered", desc: "Your business assistant in chat. Ask about your sales, stock and debts in plain words. Free answers 5 questions a day. Paid plans let Kopa record sales, add expenses and draft debtor messages for you, within daily limits.", bestFor: "Owners who want answers without digging." },
+  { icon: "\uD83D\uDE9A", name: "Shipments", access: "paid", tiers: "Solo and Pro", desc: "Generate a tracking number when a sold product ships. Move it from pending to shipped to delivered, and share the number with your customer.", bestFor: "Vendors who waybill goods." },
+  { icon: "\uD83C\uDFE8", name: "Hotel module", access: "paid", tiers: "Solo and Pro", desc: "Rooms, bookings, guest folios, extra charges and payments, built for hotels, guest houses and lodges.", bestFor: "Hotels and guest houses." },
+  { icon: "\uD83D\uDD14", name: "WhatsApp debt reminders", access: "paid", tiers: "Starter, Solo and Pro", desc: "Send polite debt reminders straight to WhatsApp, drafted from each customer's real balance.", bestFor: "Anyone tired of chasing payments." },
+  { icon: "\uD83D\uDCC8", name: "Full reports", access: "paid", tiers: "Starter, Solo and Pro", desc: "Profit trend over time, best sellers, slow movers, payment breakdown and date-range summaries, with one-tap CSV export.", bestFor: "Owners making restock and pricing decisions." },
+  { icon: "\uD83D\uDCE5", name: "CSV import", access: "paid", tiers: "Starter, Solo and Pro", desc: "Import marketplace sales reports from CSV files, so your Jumia and Konga sales land in your books automatically.", bestFor: "Sellers on online marketplaces." },
+  { icon: "\uD83D\uDCCB", name: "Projects", access: "paid", tiers: "Starter, Solo and Pro", desc: "Full accountability for any project. Record every income and expense, track milestones, then generate a complete report showing exactly where every naira went.", bestFor: "Anyone handling project money." },
+];
+
+function TierBadge(props) {
+  var access = props.access; var tiers = props.tiers;
+  var label = "Free forever"; var fg = "#15803d"; var bg = "#f0fdf4";
+  if (access === "paid") { label = "Paid plans" + (tiers ? ": " + tiers : ""); fg = "#b45309"; bg = "#fefce8"; }
+  else if (access === "tiered") { label = "Free plus paid plans"; fg = "#1d4ed8"; bg = "#eff6ff"; }
+  return <span className="tier-badge" style={{ color: fg, background: bg, border: "1px solid " + fg + "55" }}>{label}</span>;
+}
+
+const SHOWCASE_CSS = `
+.tier-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px; margin: 8px 0 10px; }
+.showcase-tabs { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 28px 0 6px; }
+.showcase-tab { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.showcase-tab.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.tour-panel { display: grid; grid-template-columns: 300px 1fr; gap: 36px; align-items: center; margin: 26px auto 8px; max-width: 920px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 30px; }
+.tour-visual { display: flex; justify-content: center; }
+.tour-bullets { margin: 14px 0 0; padding-left: 20px; color: var(--muted); }
+.tour-bullets li { margin-bottom: 8px; }
+.tour-bar-row { display: flex; align-items: flex-end; gap: 8px; height: 110px; margin-top: 10px; }
+.tour-bar { flex: 1; background: linear-gradient(180deg, #16a34a, #15803d); border-radius: 6px 6px 0 0; }
+.chat-u { background: #15803d; color: #fff; border-radius: 14px 14px 4px 14px; padding: 10px 12px; font-size: 13px; margin: 8px 0 8px 34px; }
+.chat-a { background: #f0fdf4; color: #14532d; border-radius: 14px 14px 14px 4px; padding: 10px 12px; font-size: 13px; margin: 8px 34px 8px 0; }
+.role-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 9px 0; border-bottom: 1px solid #f0f0f0; }
+.role-tag { font-size: 11px; font-weight: 700; background: #f0fdf4; color: #15803d; border-radius: 999px; padding: 3px 10px; }
+.stock-tag { display: inline-block; font-size: 11px; font-weight: 700; background: #fef3c7; color: #92400e; border-radius: 999px; padding: 3px 10px; margin-left: 8px; }
+.stock-ok { display: inline-block; font-size: 11px; font-weight: 700; background: #f0fdf4; color: #15803d; border-radius: 999px; padding: 3px 10px; margin-left: 8px; }
+.compare-wrap { overflow-x: auto; margin-top: 26px; border: 1px solid var(--line); border-radius: 14px; }
+.compare-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 660px; }
+.compare-table th, .compare-table td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+.compare-table thead th { background: var(--surface); font-weight: 800; }
+.compare-table tbody tr:last-child th, .compare-table tbody tr:last-child td { border-bottom: none; }
+.tick-y { color: #15803d; font-weight: 800; font-size: 16px; }
+.tick-n { color: var(--muted); font-weight: 700; }
+@media (max-width: 760px) { .tour-panel { grid-template-columns: 1fr; padding: 22px; } }
+`;
+
+function MiniPhone(props) {
+  return (
+    <div style={{ width: 280, maxWidth: "78vw", borderRadius: 32, border: "9px solid #111", background: "#fff", overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.16)", textAlign: "left" }}>
+      <div style={{ background: "#15803d", color: "#fff", padding: "12px 14px" }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>KopaBook</div>
+        <div style={{ fontSize: 11, opacity: 0.9 }}>Demo Provisions Store</div>
+      </div>
+      <div style={{ padding: 12, minHeight: 290, color: "#111" }}>{props.children}</div>
+    </div>
+  );
+}
+
+const TOUR_TABS = [
+  { id: "sell", label: "Sell", icon: "\uD83E\uDDFE", title: "Record a sale in under 5 taps", access: "free",
+    desc: "The cart builder finds your product as you type. Set the quantity, record how the customer paid, and save. That is the whole job.",
+    bullets: ["Product search with quantity steppers", "Cash, transfer and your own payment methods", "Partial payments become debts on their own"],
+    phone: (<div>
+      <div style={{ fontSize: 13, padding: "9px 0", borderBottom: "1px solid #f0f0f0" }}>Rice x2 <span style={{ float: "right", fontWeight: 700 }}>&#8358;1,000</span></div>
+      <div style={{ fontSize: 13, padding: "9px 0", borderBottom: "1px solid #f0f0f0" }}>Palm Oil x1 <span style={{ float: "right", fontWeight: 700 }}>&#8358;1,200</span></div>
+      <div style={{ fontSize: 13, padding: "9px 0" }}>Beans x1 <span style={{ float: "right", fontWeight: 700 }}>&#8358;800</span></div>
+      <div style={{ marginTop: 12, background: "#15803d", color: "#fff", textAlign: "center", padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 14 }}>+ Record sale</div>
+      <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Cash &#183; change &#8358;0</div>
+    </div>) },
+  { id: "stock", label: "Stock", icon: "\uD83D\uDCE6", title: "Stock that tracks itself", access: "free",
+    desc: "Add a product once with its price and quantity. From then on KopaBook deducts stock with every sale and warns you before anything runs out.",
+    bullets: ["Units of measure: piece, kg, litre and more", "Every movement written to your stock ledger", "Low-stock alerts before the shelf runs empty"],
+    phone: (<div>
+      <div style={{ fontSize: 13, padding: "9px 0", borderBottom: "1px solid #f0f0f0" }}>Rice <span className="stock-ok">48 pcs</span></div>
+      <div style={{ fontSize: 13, padding: "9px 0", borderBottom: "1px solid #f0f0f0" }}>Palm Oil <span className="stock-ok">12 litres</span></div>
+      <div style={{ fontSize: 13, padding: "9px 0" }}>Beans <span className="stock-tag">Low: 3 pcs</span></div>
+      <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Every sale deducts stock by itself.</div>
+    </div>) },
+  { id: "owed", label: "Debts", icon: "\uD83D\uDC65", title: "Never lose track of who owes you", access: "free",
+    desc: "When a customer does not pay in full, the balance becomes a debt on their name. You always know exactly who owes what.",
+    bullets: ["A running debt ledger per customer", "Customers pay back bit by bit", "Overpayments return as change, never negative debt"],
+    phone: (<div>
+      <div style={{ fontSize: 13, padding: "9px 0", borderBottom: "1px solid #f0f0f0" }}>Mama Nkechi <span style={{ float: "right", fontWeight: 700 }}>&#8358;4,500</span></div>
+      <div style={{ fontSize: 13, padding: "9px 0", borderBottom: "1px solid #f0f0f0" }}>Emeka <span style={{ float: "right", fontWeight: 700 }}>&#8358;1,700</span></div>
+      <div style={{ fontSize: 13, padding: "9px 0" }}>Aisha <span style={{ float: "right", fontWeight: 700, color: "#15803d" }}>Paid up</span></div>
+      <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Partial payments tracked bit by bit.</div>
+    </div>) },
+  { id: "reports", label: "Reports", icon: "\uD83D\uDCC8", title: "See your business clearly", access: "paid", tiers: "Starter, Solo and Pro",
+    desc: "Your numbers turned into plain answers: what made money, what moved fastest, what is sitting still, and how customers paid.",
+    bullets: ["Profit trend, best sellers and slow movers", "Payment breakdown and date-range summaries", "One-tap CSV export of any report"],
+    phone: (<div>
+      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Profit this week</div>
+      <div className="tour-bar-row">
+        <div className="tour-bar" style={{ height: "40%" }} />
+        <div className="tour-bar" style={{ height: "65%" }} />
+        <div className="tour-bar" style={{ height: "52%" }} />
+        <div className="tour-bar" style={{ height: "85%" }} />
+        <div className="tour-bar" style={{ height: "100%" }} />
+      </div>
+      <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Best sellers, slow movers, CSV export.</div>
+    </div>) },
+  { id: "team", label: "Team", icon: "\uD83E\uDDD1\u200D\uD83D\uDCBC", title: "Staff without chaos", access: "free",
+    desc: "Give attendants exactly what they need to work and nothing more. You keep products, settings and money matters to yourself.",
+    bullets: ["Partner, manager, accountant, cashier, storekeeper, attendant and hotel roles", "Discount limits and shift control", "Suspend or remove anyone instantly"],
+    phone: (<div>
+      <div className="role-row"><span>Amara (you)</span><span className="role-tag">Owner</span></div>
+      <div className="role-row"><span>Chidi</span><span className="role-tag">Cashier</span></div>
+      <div className="role-row"><span>Fatima</span><span className="role-tag">Storekeeper</span></div>
+      <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Each role sees only its own workspace.</div>
+    </div>) },
+  { id: "ai", label: "Kopa AI", icon: "\uD83E\uDD16", title: "Ask about your business in plain words", access: "tiered",
+    desc: "Ask Kopa how today went, what is low on stock, or who owes you. On paid plans Kopa does the recording too, just by chatting.",
+    bullets: ["Free: 5 questions a day, read-only", "Starter: 20 a day, Kopa can record sales and expenses", "Solo and Pro: 50 to 100 a day with every tool"],
+    phone: (<div>
+      <div className="chat-u">How did we do today?</div>
+      <div className="chat-a">You made &#8358;24,500 from 18 sales. Mama Nkechi still owes &#8358;4,500.</div>
+      <div className="chat-u">Record sale: Rice x2, cash</div>
+      <div className="chat-a">Done. Sale saved and stock updated.</div>
+    </div>) },
+];
+
+function ShowcaseTour() {
+  const [active, setActive] = useState("sell");
+  const tab = TOUR_TABS.find((t) => t.id === active) || TOUR_TABS[0];
+  return (
+    <div id="kb-showcase-tour">
+      <div className="showcase-tabs" role="tablist" aria-label="KopaBook tour">
+        {TOUR_TABS.map((t) => (
+          <button key={t.id} role="tab" aria-selected={active === t.id} className={"showcase-tab" + (active === t.id ? " active" : "")} onClick={() => setActive(t.id)}>
+            <span style={{ marginRight: 6 }}>{t.icon}</span>{t.label}
+          </button>
+        ))}
+      </div>
+      <div className="tour-panel">
+        <div className="tour-visual"><MiniPhone>{tab.phone}</MiniPhone></div>
+        <div>
+          <h3 style={{ marginTop: 0 }}>{tab.title}</h3>
+          <TierBadge access={tab.access} tiers={tab.tiers} />
+          <p style={{ color: "var(--muted)" }}>{tab.desc}</p>
+          <ul className="tour-bullets">{tab.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>
+        </div>
+      </div>
+      <style>{SHOWCASE_CSS}</style>
+    </div>
+  );
+}
+
+
 export function LandingPage() {
   useEffect(() => {
     var hero = document.getElementById("kb-hero");
@@ -241,23 +403,29 @@ export function LandingPage() {
         <style>{HERO_CSS}</style>
       </section>
 
-      <section className="section">
+            <section className="section" id="kb-showcase">
         <div className="wrap">
-          <h2>One book for the whole shop</h2>
-          <p className="sub">Everything a busy merchant needs, nothing they do not.</p>
-          <div className="grid">
-            <div className="card"><div className="icon">🧾</div><h3>Fast sales recording</h3><p>Record a sale in under 5 taps. Stock deducts automatically the moment you save.</p></div>
-            <div className="card"><div className="icon">📦</div><h3>Stock that tracks itself</h3><p>Every sale, adjustment and opening balance writes to your stock ledger. Low-stock alerts included.</p></div>
-            <div className="card"><div className="icon">📒</div><h3>Debts you never forget</h3><p>Unpaid balances become customer debts automatically, with a running ledger per customer.</p></div>
-            <div className="card"><div className="icon">💸</div><h3>Expenses in seconds</h3><p>Capture daily expenses by category and see exactly where the money goes.</p></div>
-            <div className="card"><div className="icon">📊</div><h3>Daily position at a glance</h3><p>Open your dashboard and understand today's sales, expenses and debts in 30 seconds.</p></div>
-            <div className="card"><div className="icon">🧑‍💼</div><h3>Staff without chaos</h3><p>Give attendants controlled access to record sales while you keep full control.</p></div>
-            <div className="card"><div className="icon">📋</div><h3>Projects with full accountability</h3><p>Track any project from start to finish. Record every income and expense, hit milestones, then generate a complete PDF report showing where every naira went.</p></div>
+          <h2>Everything inside KopaBook</h2>
+          <p className="sub">Every tool in the real app, explained plainly. Take the tour, then browse the full list. Green means free forever, gold means paid plans.</p>
+          <ShowcaseTour />
+          <div className="grid" style={{ marginTop: 44 }}>
+            {MODULES.map((m) => (
+              <div className="card" key={m.name}>
+                <div className="icon">{m.icon}</div>
+                <h3>{m.name}</h3>
+                <TierBadge access={m.access} tiers={m.tiers} />
+                <p>{m.desc}</p>
+                <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 0 }}><strong>Best for:</strong> {m.bestFor}</p>
+              </div>
+            ))}
+          </div>
+          <div style={{ textAlign: "center", marginTop: 28 }}>
+            <a href="/pricing" className="btn btn-secondary">Compare plans and pricing</a>
           </div>
         </div>
       </section>
 
-      <section id="how-it-works" className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
+<section id="how-it-works" className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
         <div className="wrap">
           <h2>See how KopaBook works for your shop</h2>
           <p className="sub" style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 30px" }}>Watch the 5-minute tour below. If you can use WhatsApp, you can use KopaBook.</p>
@@ -336,33 +504,22 @@ export function LandingPage() {
 }
 
 export function FeaturesPage() {
-  const feats = [
-    ["🧾", "Sales in seconds", "A fast cart builder with product search, quantity steppers and payment methods. Under 5 taps from open to saved."],
-    ["🛠️", "Products and services", "Sell physical products with automatic stock control, and services priced per job or per hour, in the same sale."],
-    ["📦", "Automatic stock control", "Every sale deducts stock instantly. Manual adjustments and opening balances are all written to an immutable movement ledger."],
-    ["📒", "Customer debts and ledgers", "Partial payments auto-create debts. Customers can pay bit by bit, and overpayments come back as change, never negative debt."],
-    ["🚚", "Shipment tracking", "Generate a tracking number when a sold product ships. Move it from pending to shipped to delivered, and share the number with your customer."],
-    ["💸", "Expense capture", "Log daily expenses by category in seconds and review where money leaves the business."],
-    ["📊", "Live dashboard", "Today's sales, today's expenses, change given, outstanding debts, low-stock alerts and recent sales, computed from real data in your timezone."],
-    ["📈", "Daily summaries and reports", "Date-range sales totals, top products, expense breakdowns and debtor lists, ready to review or export."],
-    ["🧑‍💼", "Full staff control", "Partner, manager, accountant, cashier, storekeeper, attendant, and hotel roles. Discount limits, commissions, suspend or remove, each role sees only its own workspace."],
-    ["🏢", "Many businesses, one account", "Own and manage multiple businesses. Switch between them instantly; each keeps its own staff, sales, stock, and records."],
-    ["🧾", "Thermal receipts", "Printable receipts for 58mm and 80mm printers, with your business name, phone, address, and custom footer."],
-    ["💬", "WhatsApp friendly", "Share receipts, send debt reminders, and broadcast promos straight to WhatsApp."],
-    ["🏨", "Hotel module", "Rooms, bookings, guest folios, charges, and payments for hotels, guest houses, and lodges."],
-    ["📋", "Project accountability", "Create any project: construction, events, charity, business ventures. Record every income and expense against it, track milestones, and generate a complete PDF report showing exactly where every naira went. Perfect for anyone handling other people's money."],
-    ["🔒", "Secure by design", "Password hashing, secure httpOnly sessions, role-based access, and audit logs for sensitive actions."],
-  ];
   return (
     <div className="page">
       <MNav />
       <section className="section">
         <div className="wrap">
           <h2>Everything in KopaBook</h2>
-          <p className="sub">Designed around how local merchants actually work: transfers, WhatsApp orders, walk-ins and trust-based credit.</p>
+          <p className="sub">Every tool in the real app, explained plainly. Designed around how local merchants actually work: transfers, WhatsApp orders, walk-ins and trust-based credit. Green means free forever, gold means paid plans.</p>
           <div className="grid">
-            {feats.map(([icon, title, desc]) => (
-              <div className="card" key={title}><div className="icon">{icon}</div><h3>{title}</h3><p>{desc}</p></div>
+            {MODULES.map((m) => (
+              <div className="card" key={m.name}>
+                <div className="icon">{m.icon}</div>
+                <h3>{m.name}</h3>
+                <TierBadge access={m.access} tiers={m.tiers} />
+                <p>{m.desc}</p>
+                <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 0 }}><strong>Best for:</strong> {m.bestFor}</p>
+              </div>
             ))}
           </div>
           <div style={{ textAlign: "center", marginTop: 36 }}>
@@ -370,99 +527,117 @@ export function FeaturesPage() {
           </div>
         </div>
       </section>
+      <style>{SHOWCASE_CSS}</style>
       <MFooter />
     </div>
   );
 }
 
 export function PricingPage() {
-  const [prices, setPrices] = useState(null);
-  const [country, setCountry] = useState("");
-  useEffect(() => {
-    // Detect country from browser locale, default to Nigeria
-    const locale = navigator.language || "en-NG";
-    const region = locale.split("-")[1]?.toUpperCase() || "NG";
-    const regionToCountry = {
-      NG: "Nigeria", GH: "Ghana", KE: "Kenya", ZA: "South Africa", GB: "United Kingdom",
-      US: "United States", CA: "Canada", IN: "India", AE: "UAE",
-    };
-    const detected = regionToCountry[region] || "United States";
-    setCountry(detected);
-    fetch(`/api/plans?country=${encodeURIComponent(detected)}`)
-      .then((r) => r.json()).then((d) => setPrices(d.plans || {})).catch(() => {});
-  }, []);
-  const price = (tier, cycle, fallback) =>
-    prices?.[tier]?.[cycle]?.label || fallback;
+  function cell(v) {
+    if (v === 1) return <span className="tick-y">{"\u2713"}</span>;
+    if (v === 0) return <span className="tick-n">{"\u2715"}</span>;
+    return v;
+  }
+  const head = ["", "Free", "Starter", "Solo", "Pro"];
+  const rows = [
+    ["Price per month", "NGN 0", "NGN 1,000", "NGN 5,000", "NGN 10,000"],
+    ["Price per year", "NGN 0", "NGN 10,000", "NGN 50,000", "NGN 100,000"],
+    ["Businesses", "1", "5", "1", "Unlimited"],
+    ["Sales per week, per business", "100", "1,000", "Unlimited", "Unlimited"],
+    ["Products and services, per business", "100", "1,000", "500", "Unlimited"],
+    ["Staff accounts, per business", "1", "5", "3", "Unlimited"],
+    ["Sales, stock, customers, debts, expenses", 1, 1, 1, 1],
+    ["Receipts, notebook and WhatsApp messages", 1, 1, 1, 1],
+    ["Staff roles, activity log and chatbot", 1, 1, 1, 1],
+    ["Shipments", 0, 0, 1, 1],
+    ["Hotel module", 0, 0, 1, 1],
+    ["WhatsApp debt reminders", 0, 1, 1, 1],
+    ["Full reports with CSV export", 0, 1, 1, 1],
+    ["CSV import", 0, 1, 1, 1],
+    ["Projects", 0, 1, 1, 1],
+    ["Ask Kopa AI", "5 questions a day, read-only", "20 a day, plus sale, expense and reminder actions (10 actions a day)", "50 a day, all tools", "100 a day, all tools"],
+  ];
   return (
     <div className="page">
       <MNav />
       <section className="section">
         <div className="wrap">
           <h2>Simple pricing</h2>
-          <p className="sub">Start free. Upgrade when your business grows. Recording a sale is always free and never blocked, on any plan.</p>
+          <p className="sub">Start free. Upgrade when your business grows. Prices in Nigerian naira. Recording a sale is always free and never blocked, on any plan.</p>
           <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
             <div className="card price-card" style={{ border: "2px solid var(--brand)" }}>
               <div className="tier">Free</div>
-              <div className="amount">Free</div>
-              <p style={{ color: "var(--muted)" }}>Always free. For solo merchants getting organised.</p>
+              <div className="amount">NGN 0</div>
+              <p style={{ color: "var(--muted)" }}>Free forever. For solo merchants getting organised.</p>
               <ul>
-                <li>2 businesses</li>
+                <li>1 business</li>
                 <li>100 sales per week, per business</li>
                 <li>100 products and services, per business</li>
-                <li>2 staff accounts, per business</li>
-                <li>Sales, stock, debts, expenses, receipts</li>
+                <li>1 staff account</li>
+                <li>Full records: sales, stock, customers, debts, expenses</li>
+                <li>Receipts, notebook and WhatsApp messages</li>
+                <li>Ask Kopa AI: 5 questions a day</li>
               </ul>
               <a href="/register" className="btn btn-primary btn-block">Get started</a>
             </div>
             <div className="card price-card">
               <div className="tier">Starter</div>
-              <div className="amount">{price("starter", "monthly", "NGN 1,000")}</div>
-              <p style={{ color: "var(--muted)" }}>Per month, or {price("starter", "yearly", "NGN 10,000")} per year (2 months free). For growing shops with attendants.</p>
+              <div className="amount">NGN 1,000</div>
+              <p style={{ color: "var(--muted)" }}>Per month, or NGN 10,000 per year (2 months free). For growing shops with attendants.</p>
               <ul>
                 <li>5 businesses</li>
                 <li>1,000 sales per week, per business</li>
                 <li>1,000 products and services, per business</li>
-                <li>5 staff accounts, per business</li>
+                <li>5 staff accounts</li>
                 <li>WhatsApp debt reminders</li>
+                <li>Full reports with CSV export</li>
                 <li>CSV import</li>
+                <li>Projects</li>
+                <li>Ask Kopa AI: 20 questions a day plus actions</li>
+              </ul>
+              <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
+            </div>
+            <div className="card price-card">
+              <div className="tier">Solo <span style={{ fontSize: 12, background: "#7c3aed", color: "#fff", padding: "2px 8px", borderRadius: 12 }}>AI</span></div>
+              <div className="amount">NGN 5,000</div>
+              <p style={{ color: "var(--muted)" }}>Per month, or NGN 50,000 per year (2 months free). Your AI business assistant.</p>
+              <ul>
+                <li>1 business</li>
+                <li>500 products and services</li>
+                <li>3 staff accounts</li>
+                <li>Everything in Starter</li>
+                <li>Shipment tracking</li>
+                <li>Hotel operations</li>
+                <li>Ask Kopa AI: 50 questions a day, all tools</li>
               </ul>
               <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
             </div>
             <div className="card price-card">
               <div className="tier">Pro</div>
-              <div className="amount">{price("pro", "monthly", "NGN 2,500")}</div>
-              <p style={{ color: "var(--muted)" }}>Per month, or {price("pro", "yearly", "NGN 25,000")} per year (2 months free). For bigger businesses running multiple shops.</p>
+              <div className="amount">NGN 10,000</div>
+              <p style={{ color: "var(--muted)" }}>Per month, or NGN 100,000 per year (2 months free). For bigger businesses running multiple shops.</p>
               <ul>
                 <li>Unlimited businesses</li>
                 <li>Unlimited sales and products</li>
                 <li>Unlimited staff accounts</li>
-                <li>Shipment tracking</li>
-                <li>Hotel operations</li>
-                <li>Advanced reports</li>
-              </ul>
-              <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
-            </div>
-            <div className="card price-card" style={{ border: "2px solid #7c3aed" }}>
-              <div className="tier">Solo <span style={{ fontSize: 12, background: "#7c3aed", color: "#fff", padding: "2px 8px", borderRadius: 12 }}>AI</span></div>
-              <div className="amount">{price("solo", "monthly", "NGN 5,000")}</div>
-              <p style={{ color: "var(--muted)" }}>Per month, or {price("solo", "yearly", "NGN 50,000")} per year (2 months free). Your AI business assistant.</p>
-              <ul>
-                <li>1 business</li>
-                <li>500 products and services</li>
-                <li>3 staff accounts</li>
-                <li>AI business copilot (Kopa Bot)</li>
-                <li>Smart briefings and reminders</li>
-                <li>Targets and goal tracking</li>
-                <li>Advanced reports, for one business</li>
+                <li>Everything in Solo</li>
+                <li>Ask Kopa AI: 100 questions a day, all tools</li>
               </ul>
               <a href="/register" className="btn btn-secondary btn-block">Start free, upgrade later</a>
             </div>
           </div>
-          {country && (
-            <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 16, fontSize: 14 }}>
-              Prices shown for {country}. Fair pricing adjusted for your economy.
-            </p>
-          )}
+          <h3 style={{ marginTop: 40, textAlign: "center" }}>What each plan gets</h3>
+          <div className="compare-wrap">
+            <table className="compare-table">
+              <thead><tr>{head.map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}><th>{r[0]}</th>{r.slice(1).map((v, j) => <td key={j}>{cell(v)}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div className="card" style={{ marginTop: 24 }}>
             <h3>How upgrading works</h3>
             <p style={{ color: "var(--muted)" }}>
@@ -480,6 +655,7 @@ export function PricingPage() {
           </div>
         </div>
       </section>
+      <style>{SHOWCASE_CSS}</style>
       <MFooter />
     </div>
   );
