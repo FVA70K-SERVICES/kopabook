@@ -130,8 +130,11 @@ export function LandingPage() {
           <p className="sub" style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 30px" }}>Watch the 5-minute tour below. If you can use WhatsApp, you can use KopaBook.</p>
           <div style={{ maxWidth: 760, margin: "0 auto 40px" }}>
             <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)" }}>
-              <iframe src="https://www.youtube.com/embed/tII6wBaWhqE" title="KopaBook Full Walkthrough: Track Sales, Stock and Debtors Free on Your Phone" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
+              <iframe src="https://www.youtube-nocookie.com/embed/tII6wBaWhqE?rel=0" title="KopaBook Full Walkthrough: Track Sales, Stock and Debtors Free on Your Phone" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
             </div>
+            <p style={{ textAlign: "center", marginTop: -24, marginBottom: 40, fontSize: 14 }}>
+              <a href="https://youtu.be/tII6wBaWhqE" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>
+            </p>
           </div>
           <h3 style={{ textAlign: "center", marginBottom: 24 }}>Three steps and you are set</h3>
           <div className="steps narrow" style={{ margin: "0 auto 40px" }}>
