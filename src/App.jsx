@@ -24,6 +24,7 @@ import DebtsPage from "./pages/Debts";
 const MessagesPage = lazy(() => import("./pages/Messages"));
 const ReportsPage = lazy(() => import("./pages/Reports"));
 const StaffPage = lazy(() => import("./pages/Staff"));
+const ProjectsPage = lazy(() => import("./pages/Projects"));
 import SettingsPage from "./pages/Settings";
 import ActivityPage from "./pages/Activity";
 import NotebookPage from "./pages/Notebook";
@@ -118,6 +119,7 @@ function AppRoute({ session }) {
     else if (path === "/app/messages") page = <MessagesPage session={session} />;
     else if (path === "/app/reports") page = <ReportsPage />;
     else if (path === "/app/staff") page = <StaffPage session={session} />;
+    else if (path === "/app/projects") page = <ProjectsPage session={session} />;
     else if (path === "/app/settings") page = <SettingsPage session={session} />;
     else if (path === "/app/admin") page = <AdminPage />;
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
