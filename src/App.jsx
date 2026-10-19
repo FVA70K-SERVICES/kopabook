@@ -9,6 +9,7 @@ import {
 import { TermsPage, PrivacyPage, RefundPage } from "./pages/Legal";
 import { LoginPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/Auth";
 import RegisterPage from "./pages/Register";
+const ProjectJoinPage = lazy(() => import("./pages/ProjectJoin"));
 import { SaleReceiptPage, HotelReceiptPage } from "./pages/Receipt";
 import DashboardPage from "./pages/Dashboard";
 import ProductsPage from "./pages/Products";
@@ -101,6 +102,16 @@ function AppRoute({ session }) {
   if (path.startsWith("/app/receipt/hotel/")) {
     if (!session) { nav("/login"); return null; }
     return <HotelReceiptPage bookingId={path.split("/")[4]} />;
+  }
+
+  // Project invite join link: public page, works signed out too.
+  if (path.startsWith("/app/projects/join/")) {
+    const token = path.split("/")[4] || "";
+    return (
+      <Suspense fallback={<div className="loading">Loading invite...</div>}>
+        <ProjectJoinPage token={token} session={session} />
+      </Suspense>
+    );
   }
 
   if (path.startsWith("/app")) {
