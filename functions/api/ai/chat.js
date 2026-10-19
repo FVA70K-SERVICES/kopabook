@@ -1,4 +1,4 @@
-// POST /api/ai/chat: Kopa, the KopaBook business assistant (Gemini primary, Workers AI fallback).
+// POST /api/ai/chat: Kopa, the KopaBook business assistant (multi-provider chain with memory).
 //
 // One live chatbot that answers EVERYTHING about the business from real,
 // live store data. The LLM never writes SQL and never invents numbers: every
@@ -19,29 +19,78 @@ import { checkRateLimit } from "../_webhook_security";
 const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent";
-const GEMINI_TIMEOUT_MS = 25000;
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// Groq retired llama-3.3-70b-versatile for free tier on 2026-08-16; their
+// recommended free replacement is openai/gpt-oss-120b.
+const GROQ_MODEL = "openai/gpt-oss-120b";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
+const PROVIDER_TIMEOUT_MS = 20000;
 
-// Unified text generation: Gemini first when GEMINI_API_KEY is configured,
-// Workers AI as automatic fallback. Throws only when every provider fails,
-// and the caller then serves the graceful snapshot fallback.
-async function generateText(env, messages, opts) {
-  const o = opts || {};
+// Every provider below has the same shape: (env, messages, opts) => text,
+// and throws when it cannot answer. A missing credential throws a
+// "not configured" error so the chain skips that provider quietly.
+async function providerGemini(env, messages, opts) {
   const key = env && env.GEMINI_API_KEY ? String(env.GEMINI_API_KEY) : "";
-  if (key) {
-    try {
-      const text = await geminiGenerate(key, messages, o);
-      if (text) return text;
-      throw new Error("empty Gemini response");
-    } catch (e) {
-      // Fall through to Workers AI below.
-    }
-  }
+  if (!key) throw new Error("gemini not configured");
+  return geminiGenerate(key, messages, opts);
+}
+
+async function providerWorkersAi(env, messages, opts) {
   const ai = env && env.AI;
-  if (!ai) throw new Error("no AI provider available");
+  if (!ai) throw new Error("workers-ai not configured");
   const resp = await ai.run(AI_MODEL, { messages });
   const text = resp && (resp.response || resp.answer || resp.text);
-  if (!text) throw new Error("empty AI response");
+  if (!text) throw new Error("empty workers-ai response");
   return String(text);
+}
+
+async function providerGroq(env, messages, opts) {
+  const key = env && env.GROQ_API_KEY ? String(env.GROQ_API_KEY) : "";
+  if (!key) throw new Error("groq not configured");
+  return openAiChat(GROQ_URL, key, GROQ_MODEL, messages, opts || {});
+}
+
+async function providerOpenRouter(env, messages, opts) {
+  const key = env && env.OPENROUTER_API_KEY ? String(env.OPENROUTER_API_KEY) : "";
+  if (!key) throw new Error("openrouter not configured");
+  return openAiChat(OPENROUTER_URL, key, OPENROUTER_MODEL, messages, opts || {}, {
+    "HTTP-Referer": "https://kopabook.com",
+    "X-Title": "KopaBook",
+  });
+}
+
+// OpenAI-compatible chat completions POST, used by Groq and OpenRouter.
+async function openAiChat(url, apiKey, model, messages, opts, extraHeaders) {
+  const o = opts || {};
+  const payload = {
+    model,
+    messages: (messages || []).map((m) => ({
+      role: m && m.role === "assistant" ? "assistant" : m && m.role === "system" ? "system" : "user",
+      content: String((m && m.content) || ""),
+    })).filter((m) => m.content),
+    temperature: typeof o.temperature === "number" ? o.temperature : 0.7,
+    max_tokens: o.maxOutputTokens || 2048,
+  };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: Object.assign(
+        { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+        extraHeaders || {}
+      ),
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    return String(text || "").trim();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function geminiGenerate(key, messages, opts) {
@@ -65,7 +114,7 @@ async function geminiGenerate(key, messages, opts) {
     maxOutputTokens: opts.maxOutputTokens || 2048,
   };
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), GEMINI_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
   try {
     const res = await fetch(GEMINI_URL, {
       method: "POST",
@@ -81,17 +130,53 @@ async function geminiGenerate(key, messages, opts) {
     clearTimeout(timer);
   }
 }
-const HISTORY_LIMIT = 6;
+
+const AI_PROVIDERS = {
+  "gemini": providerGemini,
+  "workers-ai": providerWorkersAi,
+  "groq": providerGroq,
+  "openrouter": providerOpenRouter,
+};
+
+function aiProviderAvailable(env) {
+  return !!(env && (env.GEMINI_API_KEY || env.AI || env.GROQ_API_KEY || env.OPENROUTER_API_KEY));
+}
+
+// Provider chain with easy switching: order comes from env.AI_PROVIDER_ORDER
+// (comma-separated, e.g. "gemini,workers-ai,groq,openrouter"), default
+// "gemini,workers-ai". First success wins; every failure is logged; throws
+// only when all fail, and the caller then serves the graceful snapshot
+// fallback.
+async function generateText(env, messages, opts) {
+  const order = String((env && env.AI_PROVIDER_ORDER) || "gemini,workers-ai")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  let lastErr = null;
+  for (const name of order) {
+    const fn = AI_PROVIDERS[name];
+    if (!fn) { console.error("AI provider order: unknown provider '" + name + "'"); continue; }
+    try {
+      const text = await fn(env, messages, opts);
+      if (text) return text;
+      throw new Error("empty response from " + name);
+    } catch (e) {
+      lastErr = e;
+      console.error("AI provider '" + name + "' failed: " + String((e && e.message) || e));
+    }
+  }
+  throw lastErr || new Error("no AI provider available");
+}
+
+const HISTORY_LIMIT = 20;
 
 // Per-tier AI allowances. tools: [] = read-only answers; "all" = every tool.
 // actionsPerDay: null = unlimited actions within the question cap.
 const AI_TIER_LIMITS = {
   free:    { questionsPerDay: 5,   tools: [], actionsPerDay: 0 },
-  starter: { questionsPerDay: 20,  tools: ["record_sale", "add_expense", "draft_debtor_message"], actionsPerDay: 10 },
+  starter: { questionsPerDay: 20,  tools: ["record_sale", "add_expense", "draft_debtor_message", "save_memory"], actionsPerDay: 10 },
   solo:    { questionsPerDay: 50,  tools: "all", actionsPerDay: null },
   pro:     { questionsPerDay: 100, tools: "all", actionsPerDay: null },
 };
-const ALL_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "get_customer_balance", "draft_debtor_message", "send_debtor_message"];
+const ALL_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "get_customer_balance", "draft_debtor_message", "send_debtor_message", "save_memory"];
 const UPGRADE_NUDGE = "Upgrade to Starter for AI actions, or Solo/Pro for the full AI assistant.";
 
 function tierAllowsTool(tier, tool) {
@@ -291,9 +376,10 @@ const TOOL_DOCS = {
   get_customer_balance: `- get_customer_balance: {"customer_name": "name"}`,
   draft_debtor_message: `- draft_debtor_message: {"customer_name": "name", "tone": "polite|firm|final" (optional, default polite)}. Writes a professional payment reminder to a customer who owes money. I will show you the draft for review first.`,
   send_debtor_message: `- send_debtor_message: {"customer_name": "name", "message": "the EXACT draft text"}. Sends a debtor reminder ONLY after you have shown the user the draft and they said yes. The message param must match the draft you showed them word for word.`,
+  save_memory: `- save_memory: {"key": "short label, e.g. supplier or price rule", "value": "the fact to remember"}. Saves something about this business to long-term memory so you remember it in future chats. To forget something, save the same key with an empty value.`,
 };
 
-function systemPrompt(snap, currency, tier) {
+function systemPrompt(snap, currency, tier, memorySection) {
   const allowed = allowedToolsForTier(tier);
   const toolDocs = allowed.map((t) => TOOL_DOCS[t]).join("\n");
   const actionSection = allowed.length
@@ -321,7 +407,7 @@ HARD RULES:
 - Never reveal another business's data. All figures below belong to this business only.
 - Money is in ${currency}.
 
-BUSINESS SNAPSHOT (live data, read just now):
+${memorySection ? memorySection + "\n\n" : ""}BUSINESS SNAPSHOT (live data, read just now):
 ${snapshotText(snap, currency)}
 
 ${actionSection}`;
@@ -762,6 +848,29 @@ async function execSendDebtorMessage(db, auth, params, currency, history) {
   return { ok: true, waLink: link, summary: `Ready to send to ${c.name} on WhatsApp.` };
 }
 
+// Long-term memory: the model can remember facts about this business across
+// chats. Empty value deletes the key. Needs migration 0050 (ai_memory table).
+async function execSaveMemory(context, db, auth, params, currency) {
+  const key = String((params && (params.key || params.label)) || "").trim().slice(0, 80);
+  const value = String((params && (params.value || params.fact)) || "").trim().slice(0, 1000);
+  if (!key) return { ok: false, clarification: "What should I remember? Give me a short label and the fact." };
+  try {
+    if (!value) {
+      await db.prepare(`DELETE FROM ai_memory WHERE business_id = ? AND memory_key = ?`).bind(auth.business.id, key).run();
+      await logAiAction(db, auth, params, "save_memory", { key, deleted: true }, {});
+      return { ok: true, summary: `Forgot "${key}". I will not remember that anymore.` };
+    }
+    await db.prepare(
+      `INSERT INTO ai_memory (business_id, memory_key, memory_value, updated_at) VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(business_id, memory_key) DO UPDATE SET memory_value = excluded.memory_value, updated_at = datetime('now')`
+    ).bind(auth.business.id, key, value).run();
+  } catch (e) {
+    return { ok: false, clarification: "I could not save that memory yet. The memory store needs a quick update first." };
+  }
+  await logAiAction(db, auth, params, "save_memory", { key }, { value });
+  return { ok: true, summary: `Remembered "${key}". I will keep it in mind from now on.` };
+}
+
 async function logAiAction(db, auth, params, tool, p, result) {
   try {
     const day = new Date().toISOString().slice(0, 10);
@@ -780,6 +889,7 @@ const TOOL_EXECUTORS = {
   get_customer_balance: execGetCustomerBalance,
   draft_debtor_message: execDraftDebtorMessage,
   send_debtor_message: execSendDebtorMessage,
+  save_memory: execSaveMemory,
 };
 
 // ---------------------------------------------------------------------------
@@ -898,10 +1008,22 @@ export async function onRequestPost(context) {
     ).bind(String(businessId), day).run();
     const newUsed = usedToday + 1;
 
-    const sys = systemPrompt(snap, currency, tier);
+    // Long-term memory: up to 10 remembered facts for this business.
+    let memorySection = "";
+    try {
+      const mrows = await db.prepare(
+        `SELECT memory_key, memory_value FROM ai_memory WHERE business_id = ? ORDER BY updated_at DESC LIMIT 10`
+      ).bind(businessId).all();
+      const mems = ((mrows && mrows.results) || []).filter((r) => r && r.memory_value);
+      if (mems.length) {
+        memorySection = "What you remember about this business:\n" + mems.map((r) => `- ${r.memory_key}: ${r.memory_value}`).join("\n");
+      }
+    } catch (e) { /* ai_memory table not migrated yet; skip silently */ }
+
+    const sys = systemPrompt(snap, currency, tier, memorySection);
 
     // Graceful degradation: the app must never break because AI is down.
-    if (!context.env.AI && !context.env.GEMINI_API_KEY) {
+    if (!aiProviderAvailable(context.env)) {
       const reply = `Kopa AI is not connected yet, but here is what your books say.\n${snapshotFallbackText}`;
       return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } });
     }
