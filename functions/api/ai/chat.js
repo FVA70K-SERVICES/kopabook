@@ -326,14 +326,23 @@ function parseRemindAt(text, businessTz) {
   const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
   const dayIdx = days.findIndex((d) => t.includes(d));
   let base = new Date(nowWat);
+  let hasDateHint = false;
   if (t.includes("tomorrow")) {
     base = new Date(base.getTime() + 86400000);
+    hasDateHint = true;
+  } else if (t.includes("today")) {
+    hasDateHint = true;
   } else if (dayIdx >= 0) {
     let delta = (dayIdx - base.getUTCDay() + 7) % 7;
     if (delta === 0) delta = 7;
     base = new Date(base.getTime() + delta * 86400000);
+    hasDateHint = true;
   }
   const clock = parseClock(t);
+  if (!hasDateHint && !clock) {
+    // Unparseable: default to tomorrow 9am WAT.
+    base = new Date(base.getTime() + 86400000);
+  }
   const { hh, mm } = clock || { hh: 9, mm: 0 };
   return toUtc(atTime(base, hh, mm));
 }
