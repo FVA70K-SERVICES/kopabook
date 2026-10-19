@@ -391,6 +391,18 @@ function CryptoPayments() {
   );
 }
 
+function ChatCenter() {
+  return (
+    <div>
+      <iframe
+        title="Chat Center"
+        src="/chat-center.html"
+        style={{ width: "100%", minHeight: "70vh", height: "calc(100vh - 220px)", border: "none", borderRadius: 12, background: "#fff" }}
+      />
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [tab, setTab] = useState("overview");
   const [error, setError] = useState("");
@@ -414,6 +426,7 @@ export default function AdminPage() {
         <Tab id="crypto" label="Crypto" active={tab} set={setTab} />
         <Tab id="plans" label="Plans & fees" active={tab} set={setTab} />
         <Tab id="apikeys" label="API keys" active={tab} set={setTab} />
+        <Tab id="chatcenter" label="Chat Center" active={tab} set={setTab} />
       </div>
       {tab === "overview" && <Overview />}
       {tab === "accounts" && <Accounts />}
@@ -422,6 +435,7 @@ export default function AdminPage() {
       {tab === "crypto" && <CryptoPayments />}
       {tab === "plans" && <Plans />}
       {tab === "apikeys" && <ApiKeys />}
+      {tab === "chatcenter" && <ChatCenter />}
     </>
   );
 }
