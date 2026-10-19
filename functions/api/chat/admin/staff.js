@@ -3,16 +3,18 @@
 // POST /api/chat/admin/staff - assign/takeover/release chat
 
 import { getAuthContext } from '../../_utils.js';
+import { canUseChatCenter, businessSiteId } from '../_access.js';
 
 export async function onRequestGet({ request, env }) {
   try {
     const auth = await getAuthContext(request, env);
-    if (!auth || !auth.user) {
+    const db = env.KOPABOOK_DB;
+    if (!auth || !(await canUseChatCenter(db, auth))) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const url = new URL(request.url);
-    const businessId = url.searchParams.get('business_id');
+    // Always scope to the caller's own business; ignore client-passed business_id.
+    const businessId = auth.business.id;
 
     // Get staff members (business members with staff roles)
     let staffQuery = `
@@ -32,11 +34,11 @@ export async function onRequestGet({ request, env }) {
     const staff = await env.KOPABOOK_DB.prepare(staffQuery).bind(...params).all();
 
     // Get unassigned active chats needing attention
-    const unassigned = await env.KOPABOOK_DB.prepare(`
+    const unassigned = await db.prepare(`
       SELECT COUNT(*) as count FROM chat_sessions
       WHERE status = 'active' AND (assigned_to IS NULL OR assigned_to = '')
-      AND needs_human = 1
-    `).first();
+      AND needs_human = 1 AND site_id = ?
+    `).bind(businessSiteId(businessId)).first();
 
     return Response.json({
       staff: staff.results || [],
@@ -50,13 +52,25 @@ export async function onRequestGet({ request, env }) {
 export async function onRequestPost({ request, env }) {
   try {
     const auth = await getAuthContext(request, env);
-    if (!auth || !auth.user) {
+    const db = env.KOPABOOK_DB;
+    if (!auth || !(await canUseChatCenter(db, auth))) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const siteId = businessSiteId(auth.business.id);
 
     const { action, session_id, assign_to } = await request.json();
 
+    // Never touch another business's chats.
+    async function ownSession(sid) {
+      if (!sid) return false;
+      const s = await db.prepare('SELECT site_id FROM chat_sessions WHERE id = ?').bind(sid).first();
+      return !!(s && s.site_id === siteId);
+    }
+
     if (action === 'assign' && session_id && assign_to) {
+      if (!(await ownSession(session_id))) {
+        return Response.json({ error: 'That conversation does not belong to this business.' }, { status: 403 });
+      }
       // Assign chat to a staff member (or owner)
       await env.KOPABOOK_DB.prepare(`
         UPDATE chat_sessions
@@ -74,6 +88,9 @@ export async function onRequestPost({ request, env }) {
     }
 
     if (action === 'takeover' && session_id) {
+      if (!(await ownSession(session_id))) {
+        return Response.json({ error: 'That conversation does not belong to this business.' }, { status: 403 });
+      }
       // Owner/staff takes over from bot
       await env.KOPABOOK_DB.prepare(`
         UPDATE chat_sessions
@@ -90,6 +107,9 @@ export async function onRequestPost({ request, env }) {
     }
 
     if (action === 'release' && session_id) {
+      if (!(await ownSession(session_id))) {
+        return Response.json({ error: 'That conversation does not belong to this business.' }, { status: 403 });
+      }
       // Hand back to bot
       await env.KOPABOOK_DB.prepare(`
         UPDATE chat_sessions
@@ -106,6 +126,9 @@ export async function onRequestPost({ request, env }) {
     }
 
     if (action === 'toggle_bot' && session_id) {
+      if (!(await ownSession(session_id))) {
+        return Response.json({ error: 'That conversation does not belong to this business.' }, { status: 403 });
+      }
       const { bot_enabled } = await request.json();
       await env.KOPABOOK_DB.prepare(`
         UPDATE chat_sessions SET bot_enabled = ? WHERE id = ?
