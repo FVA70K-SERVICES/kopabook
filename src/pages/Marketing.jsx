@@ -21,7 +21,7 @@ function MNav() {
           {links.map(([label, href]) => <a key={href} href={href} className="hide-m">{label}</a>)}
           <a href="/login" className="hide-m">Sign in</a>
           <ThemeToggle />
-          <a href="/waitlist" className="btn btn-primary btn-sm hide-m">Join waitlist</a>
+          <a href="/register" className="btn btn-primary btn-sm hide-m">Start free</a>
           <button className="mnav-menu-btn" onClick={() => setOpen(!open)} aria-label="Open menu" aria-expanded={open}>☰</button>
         </nav>
       </div>
@@ -29,7 +29,7 @@ function MNav() {
         <nav className="mnav-dropdown" aria-label="Mobile menu">
           {links.map(([label, href]) => <a key={href} href={href} onClick={() => setOpen(false)}>{label}</a>)}
           <a href="/login" onClick={() => setOpen(false)}>Sign in</a>
-          <a href="/waitlist" className="btn btn-primary" onClick={() => setOpen(false)}>Join waitlist</a>
+          <a href="/register" className="btn btn-primary" onClick={() => setOpen(false)}>Start free</a>
         </nav>
       )}
     </header>
@@ -42,7 +42,7 @@ function MFooter() {
       <div className="wrap">
         <div>
           <div className="brand"><Logo /></div>
-          <p>Simple sales, stock and debt tracking for businesses everywhere.<br />Owned by Fortune Godson. Built by FVA70K Services.</p>
+          <p>Simple sales, stock and debt tracking for businesses everywhere.<br />Owned by Fortune Godson. Built by FVA70K Services.<br /><a href="mailto:info@kopabook.com">info@kopabook.com</a></p>
         </div>
         <div>
           <a href="/features">Features</a> · <a href="/pricing">Pricing</a> ·{" "}
@@ -64,17 +64,48 @@ export function LandingPage() {
       <MNav />
       <section className="hero">
         <div className="wrap">
-          <span className="eyebrow">Built for local merchants, ready for the world</span>
+          <span className="eyebrow">Free forever plan. No card needed.</span>
           <h1>Know your sales, stock and debts.<br />Every single day.</h1>
           <p className="lead">
-            KopaBook replaces the notebook and scattered WhatsApp chats with one simple
-            dashboard: record sales in seconds, watch stock move, and always know who owes you.
+            KopaBook replaces the paper notebook with one simple app on your phone.
+            Record sales in seconds, watch your stock move, and always know who owes you.
+            Free to start, works on any phone.
           </p>
           <div className="hero-cta">
-            <a href="/waitlist" className="btn btn-primary">Start free</a>
+            <a href="/register" className="btn btn-primary">Start free</a>
             <a href="#how-it-works" className="btn btn-secondary" onClick={(e) => { e.preventDefault(); var el = document.getElementById("how-it-works"); if (el) { el.scrollIntoView({ behavior: "smooth" }); } }}>See how it works</a>
           </div>
+          <div style={{ display: "flex", justifyContent: "center", marginTop: 44 }}>
+            <div style={{ width: 300, maxWidth: "86vw", borderRadius: 36, border: "10px solid #111", background: "#fff", overflow: "hidden", boxShadow: "0 24px 60px rgba(0,0,0,0.18)", textAlign: "left" }}>
+              <div style={{ background: "#15803d", color: "#fff", padding: "14px 16px" }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>Demo Provisions Store</div>
+                <div style={{ fontSize: 12, opacity: 0.9 }}>Today at a glance</div>
+              </div>
+              <div style={{ padding: 14 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                  <div style={{ background: "#f0fdf4", borderRadius: 12, padding: 10 }}>
+                    <div style={{ fontSize: 11, color: "#666" }}>Sales today</div>
+                    <div style={{ fontWeight: 800, fontSize: 18 }}>&#8358;4,000</div>
+                  </div>
+                  <div style={{ background: "#fefce8", borderRadius: 12, padding: 10 }}>
+                    <div style={{ fontSize: 11, color: "#666" }}>Owed to you</div>
+                    <div style={{ fontWeight: 800, fontSize: 18 }}>&#8358;1,700</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Recent sales</div>
+                <div style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>Rice x2 &#183; &#8358;1,000</div>
+                <div style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>Palm Oil x1 &#183; &#8358;1,200</div>
+                <div style={{ fontSize: 13, padding: "8px 0" }}>Beans x1 &#183; &#8358;800</div>
+                <div style={{ marginTop: 12, background: "#15803d", color: "#fff", textAlign: "center", padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 14 }}>+ Record sale</div>
+              </div>
+            </div>
+          </div>
           <p className="hero-proof">Made for provision stores, phone sellers, fashion vendors and market traders.</p>
+          <div style={{ display: "flex", justifyContent: "center", gap: 36, flexWrap: "wrap", marginTop: 28, padding: "20px 0", borderTop: "1px solid var(--line)" }}>
+            <div style={{ textAlign: "center" }}><div style={{ fontWeight: 800, fontSize: 22 }}>Free</div><div style={{ fontSize: 13, color: "var(--muted)" }}>to start, no card needed</div></div>
+            <div style={{ textAlign: "center" }}><div style={{ fontWeight: 800, fontSize: 22 }}>5 taps</div><div style={{ fontSize: 13, color: "var(--muted)" }}>to record a sale</div></div>
+            <div style={{ textAlign: "center" }}><div style={{ fontWeight: 800, fontSize: 22 }}>Any phone</div><div style={{ fontSize: 13, color: "var(--muted)" }}>works in your browser</div></div>
+          </div>
         </div>
       </section>
 
@@ -127,13 +158,29 @@ export function LandingPage() {
             <div className="step"><div className="n">3</div><div><strong>See your day clearly.</strong><p style={{ margin: "4px 0 0", color: "var(--muted)" }}>Sales, expenses, debts and low stock, live on one dashboard.</p></div></div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <a href="/waitlist" className="btn btn-primary">Join the waitlist</a>
+            <a href="/register" className="btn btn-primary">Start free</a>
           </div>
         </div>
       </section>
 
       <section className="section">
         <div className="wrap">
+      <section className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
+        <div className="wrap">
+          <h2>Simple pricing</h2>
+          <p className="sub">Start free. Upgrade only when your shop grows.</p>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+            <div className="card"><h3>Free</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;0</div><p>1 business, 1 staff. Sales, stock and debts, free forever.</p></div>
+            <div className="card"><h3>Starter</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;1,000<span style={{ fontSize: 14, fontWeight: 400 }}>/mo</span></div><p>For growing shops. More products, more staff, a taste of Kopa AI.</p></div>
+            <div className="card" style={{ border: "2px solid #15803d" }}><h3>Solo</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;5,000<span style={{ fontSize: 14, fontWeight: 400 }}>/mo</span></div><p>Kopa AI does the work. Ask anything, record sales by chatting.</p></div>
+            <div className="card"><h3>Pro</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;10,000<span style={{ fontSize: 14, fontWeight: 400 }}>/mo</span></div><p>Everything unlimited. For serious businesses with teams.</p></div>
+          </div>
+          <div style={{ textAlign: "center", marginTop: 24 }}>
+            <a href="/pricing" className="btn btn-secondary">See full pricing</a>
+          </div>
+        </div>
+      </section>
+
           <h2>Questions merchants ask</h2>
           <div className="faq narrow" style={{ margin: "0 auto" }}>
             <details><summary>Do I need accounting knowledge?</summary><p>No. If you can use WhatsApp, you can use KopaBook. It speaks sales, stock and debts, not debits and credits.</p></details>
@@ -145,6 +192,14 @@ export function LandingPage() {
           <div style={{ textAlign: "center", marginTop: 24 }}>
             <a href="/faq" className="btn btn-secondary">See all questions</a>
           </div>
+        </div>
+      </section>
+      <section className="section section-band" style={{ borderTop: "1px solid var(--line)", textAlign: "center" }}>
+        <div className="wrap">
+          <h2>Your shop deserves better than a paper notebook.</h2>
+          <p className="sub">Join KopaBook free today. Set up in minutes, no card needed.</p>
+          <a href="/register" className="btn btn-primary" style={{ fontSize: 18, padding: "14px 40px" }}>Start free</a>
+          <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14 }}>Built for Nigerian market traders, shops and artisans.</p>
         </div>
       </section>
       <MFooter />
