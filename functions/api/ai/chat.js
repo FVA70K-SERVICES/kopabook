@@ -1,4 +1,4 @@
-// POST /api/ai/chat: Kopa, the KopaBook business assistant (Workers AI).
+// POST /api/ai/chat: Kopa, the KopaBook business assistant (Gemini primary, Workers AI fallback).
 //
 // One live chatbot that answers EVERYTHING about the business from real,
 // live store data. The LLM never writes SQL and never invents numbers: every
@@ -17,6 +17,70 @@ import { getBusinessOwnerTier, LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
 
 const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const GEMINI_MODEL = "gemini-3.8-flash";
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent";
+const GEMINI_TIMEOUT_MS = 25000;
+
+// Unified text generation: Gemini first when GEMINI_API_KEY is configured,
+// Workers AI as automatic fallback. Throws only when every provider fails,
+// and the caller then serves the graceful snapshot fallback.
+async function generateText(env, messages, opts) {
+  const o = opts || {};
+  const key = env && env.GEMINI_API_KEY ? String(env.GEMINI_API_KEY) : "";
+  if (key) {
+    try {
+      const text = await geminiGenerate(key, messages, o);
+      if (text) return text;
+      throw new Error("empty Gemini response");
+    } catch (e) {
+      // Fall through to Workers AI below.
+    }
+  }
+  const ai = env && env.AI;
+  if (!ai) throw new Error("no AI provider available");
+  const resp = await ai.run(AI_MODEL, { messages });
+  const text = resp && (resp.response || resp.answer || resp.text);
+  if (!text) throw new Error("empty AI response");
+  return String(text);
+}
+
+async function geminiGenerate(key, messages, opts) {
+  // Convert OpenAI-style {role, content} messages to Gemini format: the first
+  // system message becomes system_instruction, assistant turns become model
+  // turns. gemini-3.8-flash is a reasoning model, so the token budget leaves
+  // room for its thinking plus the visible answer.
+  let systemText = "";
+  const contents = [];
+  for (const m of messages || []) {
+    const text = String((m && m.content) || "");
+    if (!text) continue;
+    const role = String((m && m.role) || "");
+    if (role === "system" && !systemText) { systemText = text; continue; }
+    contents.push({ role: role === "assistant" ? "model" : "user", parts: [{ text }] });
+  }
+  const payload = { contents };
+  if (systemText) payload.system_instruction = { parts: [{ text: systemText }] };
+  payload.generationConfig = {
+    temperature: typeof opts.temperature === "number" ? opts.temperature : 0.7,
+    maxOutputTokens: opts.maxOutputTokens || 2048,
+  };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), GEMINI_TIMEOUT_MS);
+  try {
+    const res = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error("Gemini HTTP " + res.status);
+    const data = await res.json();
+    const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+    return parts.map((p) => (p && p.text) || "").join("").trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const HISTORY_LIMIT = 6;
 
 // Per-tier AI allowances. tools: [] = read-only answers; "all" = every tool.
@@ -631,7 +695,7 @@ async function execGetCustomerBalance(db, auth, params, currency) {
 // Draft a professional debtor reminder. The model writes the draft via a
 // second AI call using the customer's REAL balance; the reply is the draft
 // for the user to review. Nothing is sent.
-async function execDraftDebtorMessage(ai, db, auth, params, currency) {
+async function execDraftDebtorMessage(env, db, auth, params, currency) {
   const name = String(params.customer_name || params.customerName || "").trim();
   if (!name) return { ok: false, clarification: "Which customer should I write the reminder for?" };
   const matches = await matchCustomer(db, auth.business.id, name);
@@ -644,15 +708,12 @@ async function execDraftDebtorMessage(ai, db, auth, params, currency) {
   const businessName = auth.business.name || "us";
   let draft;
   try {
-    const resp = await ai.run(AI_MODEL, {
-      messages: [
+    draft = await generateText(env, [
         { role: "system", content: `You write short, professional payment reminders for Nigerian small businesses. Tone: ${tone} (${tone === "polite" ? "warm and respectful, first reminder" : tone === "firm" ? "direct but respectful, second reminder" : "serious and final, last warning before further action"}). Rules: address the customer by first name only, state the EXACT amount owed, mention the business name once, sign off with the business name, no emojis, no slang, keep it under 60 words. Plain text only, no quotes around it.` },
         { role: "user", content: `Customer: ${c.name}. Owes: ${fmt(c.balance, currency)}. Business: ${businessName}. Write the ${tone} reminder now.` },
-      ],
-    });
-    draft = resp && (resp.response || resp.answer || resp.text);
-    if (!draft) throw new Error("empty");
+      ], { maxOutputTokens: 400 });
     draft = String(draft).trim();
+    if (!draft) throw new Error("empty");
   } catch (e) {
     draft = `Hello ${c.name.split(" ")[0]}, this is ${businessName}. This is a friendly reminder that you have an outstanding balance of ${fmt(c.balance, currency)} with us. Kindly pay at your earliest convenience. Thank you. - ${businessName}`;
   }
@@ -832,11 +893,10 @@ export async function onRequestPost(context) {
     ).bind(String(businessId), day).run();
     const newUsed = usedToday + 1;
 
-    const ai = context.env.AI;
     const sys = systemPrompt(snap, currency, tier);
 
     // Graceful degradation: the app must never break because AI is down.
-    if (!ai) {
+    if (!context.env.AI && !context.env.GEMINI_API_KEY) {
       const reply = `Kopa AI is not connected yet, but here is what your books say.\n${snapshotFallbackText}`;
       return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } });
     }
@@ -846,10 +906,7 @@ export async function onRequestPost(context) {
       const messages = [{ role: "system", content: sys }];
       for (const h of history) messages.push({ role: h.role, content: h.content.slice(0, 1000) });
       messages.push({ role: "user", content: message });
-      const resp = await ai.run(AI_MODEL, { messages });
-      modelText = resp && (resp.response || resp.answer || resp.text);
-      if (!modelText) throw new Error("empty AI response");
-      modelText = String(modelText);
+      modelText = await generateText(context.env, messages);
     } catch (e) {
       const reply = `Kopa AI is resting at the moment, but your books are fine.\n${snapshotFallbackText}`;
       return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } });
@@ -892,7 +949,7 @@ export async function onRequestPost(context) {
         const exec = TOOL_EXECUTORS[action.tool];
         // Debtor tools need the Workers AI handle and conversation history.
         result = action.tool === "draft_debtor_message"
-          ? await exec(ai, db, auth, action.params, currency)
+          ? await exec(context.env, db, auth, action.params, currency)
           : action.tool === "send_debtor_message"
             ? await exec(db, auth, action.params, currency, history)
             : await exec(context, db, auth, action.params, currency);
@@ -929,15 +986,12 @@ export async function onRequestPost(context) {
       // Confirmation in Kopa's voice, with real numbers.
       let reply;
       try {
-        const conf = await ai.run(AI_MODEL, {
-          messages: [
+        reply = await generateText(context.env, [
             { role: "system", content: `You are Kopa, the warm, human KopaBook business assistant for Nigerian shop owners. The user asked you to do something and you just did it. Write a short, natural confirmation (2-3 sentences max) using ONLY the facts given. Never add numbers that are not in the facts.` },
             { role: "user", content: `User request: ${message}\nWhat was done: ${result.summary}\nWrite the confirmation now.` },
-          ],
-        });
-        reply = conf && (conf.response || conf.answer || conf.text);
-        if (!reply) throw new Error("empty");
+          ], { maxOutputTokens: 400 });
         reply = String(reply);
+        if (!reply) throw new Error("empty");
       } catch (e) {
         reply = "Done. " + result.summary;
       }
