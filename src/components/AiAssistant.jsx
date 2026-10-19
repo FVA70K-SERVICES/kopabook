@@ -34,9 +34,11 @@ export default function AiAssistant() {
           text: data.reply || data.answer || "Kopa AI did not return an answer. Try again.",
           actions: data.actions_taken || [],
           fallback: !!data.fallback,
+          waLink: data.waLink || null,
         },
       ]);
       if (data.usage) setUsage(data.usage);
+      if (data.draft) setMessages((prev) => [...prev]);
     } catch (e) {
       if (e.upgradeRequired) {
         setNeedsUpgrade(true);
@@ -68,7 +70,7 @@ export default function AiAssistant() {
       <p className="text-xs text-gray-500">Answers use only this business's data</p>
       {needsUpgrade ? (
         <div className="mt-3 text-sm">
-          <p>Kopa AI is available on Solo and Pro plans. Upgrade to chat with your business data.</p>
+          <p>Kopa AI answers questions on every plan. Free gives 5 questions a day. Starter adds sale and expense actions (20 questions a day). Solo and Pro unlock the full AI assistant.</p>
           <button onClick={() => nav("/app/settings")} className="mt-2 w-full bg-black text-white py-2 rounded-lg">
             See plans
           </button>
@@ -98,6 +100,16 @@ export default function AiAssistant() {
                     <p className="text-xs text-gray-500 mb-1">AI is resting, here is what your books say.</p>
                   )}
                   {m.text}
+                  {m.waLink && (
+                    <a
+                      href={m.waLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-block bg-green-600 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+                    >
+                      Send on WhatsApp
+                    </a>
+                  )}
                 </div>
               </div>
             ))}
@@ -126,7 +138,10 @@ export default function AiAssistant() {
           </button>
           {usage && (
             <p className="text-[11px] text-gray-400 mt-1 text-right">
-              {usage.used_today}/{usage.daily_limit} used today
+              {usage.used_today}/{usage.daily_limit} questions today
+              {usage.actions_limit !== null && usage.actions_limit !== undefined
+                ? ` - ${usage.actions_today || 0}/${usage.actions_limit} actions`
+                : ""}
             </p>
           )}
         </>
