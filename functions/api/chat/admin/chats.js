@@ -1,18 +1,29 @@
-// GET /api/chat/admin/chats?key=xxx&siteId=xxx&search=xxx - list chat sessions (with site filter + search)
+// GET /api/chat/admin/chats?siteId=xxx&search=xxx - list chat sessions (with site filter + search)
+// Auth: platform admin key, or logged-in business user with Chat Center access
+// (owner/partner always; staff only when owner enabled staff chat).
+// For session auth the site is forced to the caller's business; a client-passed
+// siteId is only honored for the platform key.
+import { getAuthContext } from '../../_utils.js';
+import { canUseChatCenter, businessSiteId } from '../_access.js';
+
 export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
+    const db = env.KOPABOOK_DB;
+    let forcedSiteId = null;
+
     if (url.searchParams.get('key') !== env.KOPABOOK_ADMIN_KEY) {
-      // Also allow session auth (for chat-center.html)
-      const { getAuthContext } = await import('../../_utils.js');
+      // Session auth (for chat-center.html): must have Chat Center access.
       const auth = await getAuthContext(request, env);
-      if (!auth || !auth.user) {
+      if (!auth || !(await canUseChatCenter(db, auth))) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 });
       }
+      forcedSiteId = businessSiteId(auth.business.id);
     }
-    const siteId = url.searchParams.get('siteId');
+
     const needsHuman = url.searchParams.get('needsHuman') === '1';
     const search = url.searchParams.get('search');
+    const siteId = forcedSiteId || url.searchParams.get('siteId');
 
     let query = `
       SELECT s.id, s.site_id, s.visitor_name, s.status, s.last_activity, s.needs_human,
@@ -40,7 +51,7 @@ export async function onRequestGet({ request, env }) {
     }
     query += ` ORDER BY s.needs_human DESC, s.last_activity DESC LIMIT 50`;
 
-    const sessions = await env.KOPABOOK_DB.prepare(query).bind(...params).all();
+    const sessions = await db.prepare(query).bind(...params).all();
     return Response.json({ chats: sessions.results, sessions: sessions.results });
   } catch (e) {
     return Response.json({ error: 'Failed' }, { status: 500 });
