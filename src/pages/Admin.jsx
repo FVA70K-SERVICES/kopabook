@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 
 function Tab({ id, label, active, set }) {
@@ -391,20 +391,139 @@ function CryptoPayments() {
   );
 }
 
-function ChatCenter() {
+function FloatingChatCenter({ open, onClose }) {
+  const [minimized, setMinimized] = useState(false);
+  const [pos, setPos] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem("kb-cc-pos") || "null");
+      if (s && typeof s.x === "number" && typeof s.y === "number") return s;
+    } catch (e) {}
+    return null;
+  });
+  const panelRef = useRef(null);
+  const drag = useRef(null);
+
+  const startDrag = (clientX, clientY) => {
+    const el = panelRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    drag.current = { dx: clientX - r.left, dy: clientY - r.top, moved: false };
+  };
+
+  useEffect(() => {
+    const onMove = (clientX, clientY) => {
+      const d = drag.current;
+      if (!d) return;
+      const w = 400, h = 560;
+      const x = Math.max(0, Math.min(window.innerWidth - 80, clientX - d.dx));
+      const y = Math.max(0, Math.min(window.innerHeight - 60, clientY - d.dy));
+      d.moved = true;
+      setPos({ x, y });
+    };
+    const mv = (e) => onMove(e.clientX, e.clientY);
+    const tmv = (e) => { if (drag.current && e.touches[0]) { onMove(e.touches[0].clientX, e.touches[0].clientY); } };
+    const up = () => {
+      if (drag.current && drag.current.moved) {
+        try { localStorage.setItem("kb-cc-pos", JSON.stringify(pos)); } catch (e) {}
+      }
+      drag.current = null;
+    };
+    window.addEventListener("mousemove", mv);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("touchmove", tmv, { passive: true });
+    window.addEventListener("touchend", up);
+    return () => {
+      window.removeEventListener("mousemove", mv);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchmove", tmv);
+      window.removeEventListener("touchend", up);
+    };
+  }, [pos]);
+
+  if (!open) return null;
+
+  if (minimized) {
+    return (
+      <button
+        type="button"
+        onClick={() => setMinimized(false)}
+        aria-label="Open Chat Center"
+        style={{
+          position: "fixed", right: 20, bottom: 20, zIndex: 9999,
+          width: 56, height: 56, borderRadius: "50%", border: "none",
+          background: "#166534", color: "#fff", fontSize: 26, cursor: "pointer",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+        }}
+      >
+        &#128172;
+      </button>
+    );
+  }
+
+  const panelStyle = pos
+    ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" }
+    : { right: 20, bottom: 88 };
+
   return (
-    <div>
-      <iframe
-        title="Chat Center"
-        src="/chat-center.html"
-        style={{ width: "100%", minHeight: "70vh", height: "calc(100vh - 220px)", border: "none", borderRadius: 12, background: "#fff" }}
-      />
-    </div>
+    <>
+      <div
+        ref={panelRef}
+        style={{
+          position: "fixed", zIndex: 9998,
+          width: "min(400px, calc(100vw - 40px))", height: "min(560px, calc(100vh - 120px))",
+          background: "#fff", borderRadius: 14, overflow: "hidden",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.3)",
+          display: "flex", flexDirection: "column",
+          ...panelStyle,
+        }}
+      >
+        <div
+          onMouseDown={(e) => startDrag(e.clientX, e.clientY)}
+          onTouchStart={(e) => { if (e.touches[0]) startDrag(e.touches[0].clientX, e.touches[0].clientY); }}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "10px 12px", background: "#166534", color: "#fff",
+            cursor: "move", userSelect: "none", touchAction: "none", flexShrink: 0,
+          }}
+        >
+          <span style={{ fontWeight: 700, fontSize: 15 }}>Chat Center</span>
+          <span style={{ display: "flex", gap: 4 }}>
+            <button
+              type="button" onClick={() => setMinimized(true)} aria-label="Minimize"
+              style={{ background: "none", border: "none", color: "#fff", fontSize: 18, cursor: "pointer", padding: "2px 8px" }}
+            >&#8211;</button>
+            <button
+              type="button" onClick={onClose} aria-label="Close"
+              style={{ background: "none", border: "none", color: "#fff", fontSize: 18, cursor: "pointer", padding: "2px 8px" }}
+            >&times;</button>
+          </span>
+        </div>
+        <iframe
+          title="Chat Center"
+          src="/chat-center.html"
+          style={{ flex: 1, width: "100%", border: "none", background: "#fff" }}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close Chat Center"
+        style={{
+          position: "fixed", right: 20, bottom: 20, zIndex: 9999,
+          width: 56, height: 56, borderRadius: "50%", border: "none",
+          background: "#166534", color: "#fff", fontSize: 26, cursor: "pointer",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+        }}
+      >
+        &#128172;
+      </button>
+    </>
   );
 }
 
 export default function AdminPage() {
   const [tab, setTab] = useState("overview");
+  const [ccOpen, setCcOpen] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -426,7 +545,14 @@ export default function AdminPage() {
         <Tab id="crypto" label="Crypto" active={tab} set={setTab} />
         <Tab id="plans" label="Plans & fees" active={tab} set={setTab} />
         <Tab id="apikeys" label="API keys" active={tab} set={setTab} />
-        <Tab id="chatcenter" label="Chat Center" active={tab} set={setTab} />
+        <button
+          type="button"
+          className={"btn btn-sm " + (ccOpen ? "btn-primary" : "btn-secondary")}
+          onClick={() => setCcOpen((v) => !v)}
+          style={{ marginRight: 8, marginBottom: 8 }}
+        >
+          Chat Center
+        </button>
       </div>
       {tab === "overview" && <Overview />}
       {tab === "accounts" && <Accounts />}
@@ -435,7 +561,7 @@ export default function AdminPage() {
       {tab === "crypto" && <CryptoPayments />}
       {tab === "plans" && <Plans />}
       {tab === "apikeys" && <ApiKeys />}
-      {tab === "chatcenter" && <ChatCenter />}
+      <FloatingChatCenter open={ccOpen} onClose={() => setCcOpen(false)} />
     </>
   );
 }
