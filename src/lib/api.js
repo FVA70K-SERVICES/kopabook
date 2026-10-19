@@ -38,7 +38,7 @@ export const api = {
   del: (path) => request(path, { method: "DELETE" }),
 
   me: () => request("/api/auth/me"),
-  login: (email, password) => request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  login: (identifier, password) => request("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, password }) }),
   logout: () => request("/api/auth/logout", { method: "POST" }),
 };
 
