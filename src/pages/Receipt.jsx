@@ -56,10 +56,198 @@ function Row({ label, value, bold }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Receipt image generator: draws a paper-style receipt on a canvas and
+// returns a PNG blob. No external dependencies, works offline.
+// ---------------------------------------------------------------------------
+
+const IMG_W = 420;
+const IMG_PAD = 20;
+
+function drawReceiptCanvas({ business, sale, items, payments }) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const F_TITLE = "bold 22px 'Courier New', Courier, monospace";
+  const F_BOLD = "bold 15px 'Courier New', Courier, monospace";
+  const F_BODY = "15px 'Courier New', Courier, monospace";
+  const F_SMALL = "13px 'Courier New', Courier, monospace";
+  const F_TINY = "11px 'Courier New', Courier, monospace";
+  const F_TOTAL = "bold 19px 'Courier New', Courier, monospace";
+
+  const maxW = IMG_W - IMG_PAD * 2;
+
+  // Collect draw ops first so we can size the canvas.
+  // Each op: { kind: 'text', text, font, align, dy } or { kind: 'dash', dy } or { kind: 'gap', dy }
+  const ops = [];
+  const push = (op) => ops.push(op);
+  const gap = (h) => push({ kind: "gap", dy: h });
+  const text = (t, font, align) => push({ kind: "text", text: String(t), font, align: align || "left" });
+  const center = (t, font) => text(t, font, "center");
+  const dash = () => push({ kind: "dash" });
+
+  function wrapped(t, font, align) {
+    ctx.font = font;
+    const words = String(t).split(" ");
+    let line = "";
+    const out = [];
+    for (const w of words) {
+      const test = line ? line + " " + w : w;
+      if (ctx.measureText(test).width > maxW && line) {
+        out.push(line);
+        line = w;
+      } else {
+        line = test;
+      }
+    }
+    if (line) out.push(line);
+    out.forEach((l) => text(l, font, align));
+  }
+
+  // Header
+  gap(14);
+  wrapped(business.name || "My Business", F_TITLE, "center");
+  gap(4);
+  if (business.tagline) wrapped(business.tagline, F_SMALL, "center");
+  if (business.receipt_address) wrapped(business.receipt_address, F_SMALL, "center");
+  if (business.receipt_phone) center("Tel: " + business.receipt_phone, F_SMALL);
+  gap(6);
+  dash();
+  gap(6);
+
+  // Title + meta
+  center("SALES RECEIPT", F_BOLD);
+  gap(8);
+  const date = (sale.created_at || "").slice(0, 16).replace("T", " ");
+  text("Receipt: " + (sale.sale_number || "#" + sale.id), F_BODY, "left");
+  // date right-aligned on same visual line handled by two ops
+  text(date, F_SMALL, "right");
+  if (sale.customer_name) {
+    gap(2);
+    text("Customer: " + sale.customer_name, F_BODY, "left");
+  }
+  gap(6);
+  dash();
+  gap(6);
+
+  // Items
+  (items || []).forEach((it) => {
+    const name = it.product_name || "Item";
+    wrapped(name, F_BODY, "left");
+    const qtyPart = `${it.quantity}${it.product_unit ? " " + it.product_unit : ""} x ${money(it.unit_price)}`;
+    // draw qty left and line total right on one row: use two ops with manual y
+    push({ kind: "row", left: qtyPart, right: money(it.line_total), font: F_BODY });
+    gap(6);
+  });
+  dash();
+  gap(6);
+
+  // Totals
+  push({ kind: "row", left: "Subtotal", right: money(sale.subtotal || sale.total_amount), font: F_BODY });
+  gap(4);
+  if (Number(sale.discount_amount) > 0) {
+    push({ kind: "row", left: "Discount", right: money(sale.discount_amount), font: F_BODY });
+    gap(4);
+  }
+  push({ kind: "row", left: "TOTAL", right: money(sale.total_amount), font: F_TOTAL });
+  gap(6);
+  dash();
+  gap(6);
+
+  // Payments
+  const payList = payments && payments.length ? payments : [{ amount: sale.amount_paid, mode: sale.payment_method }];
+  payList.forEach((p) => {
+    push({ kind: "row", left: `Paid (${p.mode || "Cash"})`, right: money(p.amount), font: F_BODY });
+    gap(4);
+  });
+  if (Number(sale.balance_due) > 0) {
+    gap(2);
+    push({ kind: "row", left: "Balance due", right: money(sale.balance_due), font: F_BOLD });
+    gap(4);
+  }
+  gap(2);
+  dash();
+  gap(8);
+
+  // Footer
+  center(business.receipt_footer || "Thank you for your patronage!", F_SMALL);
+  gap(6);
+  center("Powered by KopaBook", F_TINY);
+  gap(16);
+
+  // Measure: walk ops, sum heights.
+  let y = 0;
+  const lineH = (font) => {
+    if (font === F_TITLE) return 28;
+    if (font === F_TOTAL) return 26;
+    if (font === F_TINY) return 16;
+    return 21;
+  };
+  const measured = ops.map((op) => {
+    if (op.kind === "gap") { y += op.dy; return { ...op, y: y - op.dy, h: op.dy }; }
+    if (op.kind === "dash") { y += 10; return { ...op, y: y - 10, h: 10 }; }
+    const h = lineH(op.font);
+    y += h;
+    return { ...op, y: y - h, h };
+  });
+  const H = Math.ceil(y) + 8;
+
+  canvas.width = IMG_W;
+  canvas.height = H;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, IMG_W, H);
+  ctx.fillStyle = "#111111";
+  ctx.textBaseline = "top";
+
+  measured.forEach((op) => {
+    if (op.kind === "gap") return;
+    if (op.kind === "dash") {
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(IMG_PAD, op.y + 5);
+      ctx.lineTo(IMG_W - IMG_PAD, op.y + 5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      return;
+    }
+    if (op.kind === "row") {
+      ctx.font = op.font;
+      ctx.textAlign = "left";
+      ctx.fillText(op.left, IMG_PAD, op.y);
+      ctx.textAlign = "right";
+      ctx.fillText(op.right, IMG_W - IMG_PAD, op.y);
+      return;
+    }
+    ctx.font = op.font;
+    if (op.align === "center") {
+      ctx.textAlign = "center";
+      ctx.fillText(op.text, IMG_W / 2, op.y);
+    } else if (op.align === "right") {
+      ctx.textAlign = "right";
+      ctx.fillText(op.text, IMG_W - IMG_PAD, op.y);
+    } else {
+      ctx.textAlign = "left";
+      ctx.fillText(op.text, IMG_PAD, op.y);
+    }
+  });
+
+  return canvas;
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not create image"))), "image/png");
+  });
+}
+
 export function SaleReceiptPage({ saleId }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [waPhone, setWaPhone] = useState("");
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgMsg, setImgMsg] = useState("");
 
   useEffect(() => {
     if (saleId === "0") {
@@ -89,6 +277,7 @@ export function SaleReceiptPage({ saleId }) {
   const { business, sale, items, payments } = data;
   const width = business.receipt_paper_width || "80mm";
   const date = (sale.created_at || "").slice(0, 16).replace("T", " ");
+  const imgName = `kopabook-receipt-${sale.sale_number || sale.id}.png`;
 
   const waText = receiptText({
     saleNumber: sale.sale_number,
@@ -102,6 +291,68 @@ export function SaleReceiptPage({ saleId }) {
       unit: it.product_unit || undefined,
     })),
   });
+
+  async function makeImageBlob() {
+    const canvas = drawReceiptCanvas({ business, sale, items, payments });
+    return canvasToBlob(canvas);
+  }
+
+  async function downloadImage() {
+    setImgBusy(true);
+    setImgMsg("");
+    try {
+      const blob = await makeImageBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = imgName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      setImgMsg("Image saved. Share it from your gallery or files to WhatsApp.");
+    } catch (e) {
+      setImgMsg("Could not create the image. Try again.");
+    } finally {
+      setImgBusy(false);
+    }
+  }
+
+  async function shareImage() {
+    setImgBusy(true);
+    setImgMsg("");
+    try {
+      const blob = await makeImageBlob();
+      const file = new File([blob], imgName, { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Receipt " + (sale.sale_number || "") });
+        setImgMsg("");
+      } else {
+        // Fall back to download when direct share is not supported.
+        await downloadImage();
+      }
+    } catch (e) {
+      if (e && e.name !== "AbortError") setImgMsg("Sharing was cancelled or is not supported on this device. Use Download instead.");
+    } finally {
+      setImgBusy(false);
+    }
+  }
+
+  async function copyImage() {
+    setImgBusy(true);
+    setImgMsg("");
+    try {
+      const blob = await makeImageBlob();
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      setImgMsg("Receipt image copied. Paste it straight into WhatsApp.");
+    } catch (e) {
+      setImgMsg("Copy is not supported on this device. Use Download instead.");
+    } finally {
+      setImgBusy(false);
+    }
+  }
+
+  const canCopy = typeof ClipboardItem !== "undefined" && !!navigator.clipboard?.write;
 
   return (
     <ReceiptShell width={width}>
@@ -118,6 +369,22 @@ export function SaleReceiptPage({ saleId }) {
           Share on WhatsApp
         </a>
       </div>
+      <div className="noprint" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <button className="btn btn-secondary btn-sm" onClick={downloadImage} disabled={imgBusy}>
+          📷 {imgBusy ? "Working..." : "Save receipt image"}
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={shareImage} disabled={imgBusy}>
+          ↗ Share image
+        </button>
+        {canCopy && (
+          <button className="btn btn-secondary btn-sm" onClick={copyImage} disabled={imgBusy}>
+            📋 Copy image
+          </button>
+        )}
+      </div>
+      {imgMsg && (
+        <p className="hint noprint" style={{ textAlign: "center", marginBottom: 12 }}>{imgMsg}</p>
+      )}
       <ReceiptHeader business={business} />
       <div className="r-center r-title">SALES RECEIPT</div>
       <Row label={`Receipt: ${sale.sale_number || "#" + sale.id}`} value={date} />
