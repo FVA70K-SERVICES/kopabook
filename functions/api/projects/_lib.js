@@ -5,6 +5,9 @@
 import { json, getAuthContext, requireAuth, audit } from "../_utils";
 import { getBusinessOwnerTier } from "../billing";
 
+// Re-exported so project route files can `import { json } from "./_lib"`.
+export { json };
+
 export const PROJECT_TYPES = [
   "construction",
   "event",
