@@ -16,7 +16,7 @@ import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } f
 import { getBusinessOwnerTier, LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
 
-const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const HISTORY_LIMIT = 6;
 
 // Per-tier AI allowances. tools: [] = read-only answers; "all" = every tool.
