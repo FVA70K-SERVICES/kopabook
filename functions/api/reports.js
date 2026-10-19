@@ -1,11 +1,23 @@
-// GET /api/reports — date-range summaries
+// GET /api/reports — date-range summaries (Starter feature)
 import { json, getAuthContext, requireAuth } from "./_utils";
+import { getBusinessOwnerTier } from "./billing";
+
+// Tier gate: paid feature, business-scoped (staff act under the owner's plan).
+async function requireFeatureTier(db, businessId) {
+  const { tier } = await getBusinessOwnerTier(db, businessId);
+  if (!["pro", "solo", "starter"].includes(tier)) {
+    return json({ ok: false, upgradeRequired: true, message: "Full reports are a Starter feature. Upgrade to use them." }, 403);
+  }
+  return null;
+}
 
 export async function onRequestGet(context) {
   try {
     const auth = await getAuthContext(context);
     const denied = requireAuth(auth);
     if (denied) return denied;
+    const tierGate = await requireFeatureTier(context.env.KOPABOOK_DB, auth.business.id);
+    if (tierGate) return tierGate;
 
     const url = new URL(context.request.url);
     const from = url.searchParams.get("from") || new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
