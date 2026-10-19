@@ -61,13 +61,17 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [byQty, setByQty] = useState(false);
+  const [needsUpgrade, setNeedsUpgrade] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
       const d = await api.get(`/api/reports?from=${from}&to=${to}`);
-      setData(d); setError("");
-    } catch (e) { setError(e.message); }
+      setData(d); setError(""); setNeedsUpgrade(false);
+    } catch (e) {
+      if (e.upgradeRequired) { setNeedsUpgrade(true); setError(""); }
+      else setError(e.message);
+    }
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -103,7 +107,13 @@ export default function ReportsPage() {
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
-      {loading ? <div className="loading">Loading...</div> : data && (
+      {needsUpgrade ? (
+        <div className="card">
+          <h2>Reports is a Starter feature</h2>
+          <p className="hint">Upgrade to Starter or higher for full reports with CSV export.</p>
+          <a className="btn btn-primary" href="/app/settings">View plans</a>
+        </div>
+      ) : loading ? <div className="loading">Loading...</div> : data && (
         <>
           <div className="metric-grid">
             <div className="metric-card"><span>Sales</span><strong>{fmt(data.totals.salesTotal)}</strong></div>
