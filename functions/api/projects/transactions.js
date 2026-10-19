@@ -1,17 +1,14 @@
 // /api/projects/transactions — GET list transactions for a project,
 // POST record income/expense, DELETE remove a transaction.
-import { json, audit } from "../_utils";
-import { projectContext, getProject } from "./_lib";
+// Project members (invitees) see ONLY the invited project. Contributors can
+// add records; viewers are read-only. Deletes stay owner/partner only.
+import { json, safeAudit, projectAccessContext } from "./_lib";
 
 export async function onRequestGet(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
     const projectId = Number(new URL(context.request.url).searchParams.get("projectId")) || null;
-    if (!projectId) return json({ ok: false, message: "projectId is required." }, 400);
-
-    const project = await getProject(db, auth.business.id, projectId);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
+    const { auth, db, project, error } = await projectAccessContext(context, projectId);
+    if (error) return error;
 
     const rows = await db
       .prepare(
@@ -21,7 +18,7 @@ export async function onRequestGet(context) {
          WHERE t.project_id = ?
          ORDER BY t.created_at DESC, t.id DESC`
       )
-      .bind(projectId)
+      .bind(project.id)
       .all();
     return json({ ok: true, transactions: rows.results || [] });
   } catch (e) {
@@ -31,15 +28,13 @@ export async function onRequestGet(context) {
 
 export async function onRequestPost(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
-
     const body = await context.request.json().catch(() => ({}));
     const projectId = Number(body.projectId) || null;
-    if (!projectId) return json({ ok: false, message: "projectId is required." }, 400);
-
-    const project = await getProject(db, auth.business.id, projectId);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
+    const { auth, db, project, access, error } = await projectAccessContext(context, projectId);
+    if (error) return error;
+    if (!access.canWrite) {
+      return json({ ok: false, message: "Viewers cannot add records to this project." }, 403);
+    }
 
     const kind = body.kind === "income" ? "income" : "expense";
     const amount = Number(body.amount) || 0;
@@ -54,10 +49,10 @@ export async function onRequestPost(context) {
         `INSERT INTO project_transactions (project_id, business_id, kind, amount, category, description, receipt_url, recorded_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .bind(projectId, auth.business.id, kind, amount, category, description, receiptUrl, auth.user.id)
+      .bind(project.id, project.business_id, kind, amount, category, description, receiptUrl, auth.user.id)
       .run();
 
-    await audit(context, auth, "project.transaction", "project_transaction", res.meta.last_row_id, { projectId, kind, amount });
+    await safeAudit(context, auth, "project.transaction", "project_transaction", res.meta.last_row_id, { projectId: project.id, kind, amount });
     return json({ ok: true, id: res.meta.last_row_id }, 201);
   } catch (e) {
     return json({ ok: false, message: "Could not record transaction.", error: String(e) }, 500);
@@ -66,19 +61,24 @@ export async function onRequestPost(context) {
 
 export async function onRequestDelete(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
     const id = Number(new URL(context.request.url).searchParams.get("id")) || null;
     if (!id) return json({ ok: false, message: "Transaction id is required." }, 400);
 
+    const db = context.env.KOPABOOK_DB;
     const tx = await db
-      .prepare(`SELECT id, project_id FROM project_transactions WHERE id = ? AND business_id = ?`)
-      .bind(id, auth.business.id)
+      .prepare(`SELECT id, project_id, business_id FROM project_transactions WHERE id = ?`)
+      .bind(id)
       .first();
     if (!tx) return json({ ok: false, message: "Transaction not found." }, 404);
 
+    const { auth, access, error } = await projectAccessContext(context, tx.project_id);
+    if (error) return error;
+    if (!access.isOwnerPartner) {
+      return json({ ok: false, message: "Only the project owner can delete records." }, 403);
+    }
+
     await db.prepare(`DELETE FROM project_transactions WHERE id = ?`).bind(id).run();
-    await audit(context, auth, "project.transaction.delete", "project_transaction", id, { projectId: tx.project_id });
+    await safeAudit(context, auth, "project.transaction.delete", "project_transaction", id, { projectId: tx.project_id });
     return json({ ok: true });
   } catch (e) {
     return json({ ok: false, message: "Could not delete transaction.", error: String(e) }, 500);
