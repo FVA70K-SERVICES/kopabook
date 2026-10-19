@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api, nav } from "../lib/api";
 import ThemeToggle from "../components/ThemeToggle";
 import Logo from "../components/Logo";
@@ -277,6 +277,305 @@ function ShowcaseTour() {
   );
 }
 
+// ---- RealBook: a 3D book that opens to reveal the app inside ----
+const BOOK_PAGES = [
+  { icon: "\uD83D\uDCCA", name: "Dashboard", access: "free", visual: "dashboard", caption: "Today's sales, expenses, debts and low stock at a glance." },
+  { icon: "\uD83E\uDDFE", name: "New sale", access: "free", visual: "sale", caption: "A sale recorded in under 5 taps." },
+  { icon: "\uD83D\uDCE6", name: "Products and stock", access: "free", visual: "stock", caption: "Stock deducts itself with every sale." },
+  { icon: "\uD83D\uDC65", name: "Customers and debts", access: "free", visual: "debts", caption: "Who owes what, always up to date." },
+  { icon: "\uD83D\uDCB8", name: "Expenses", access: "free", visual: "expenses", caption: "Every naira that leaves, captured." },
+  { icon: "\uD83D\uDCC8", name: "Reports", access: "paid", tiers: "Starter, Solo and Pro", visual: "reports", caption: "Profit trend, best sellers, slow movers." },
+  { icon: "\uD83E\uDDFB", name: "Receipts", access: "free", visual: "receipt", caption: "Share on WhatsApp or save as an image." },
+  { icon: "\uD83E\uDD16", name: "Ask Kopa AI", access: "tiered", visual: "ai", caption: "Ask about your business in plain words." },
+  { icon: "\uD83D\uDCCB", name: "Projects", access: "paid", tiers: "Starter, Solo and Pro", visual: "projects", caption: "Full accountability for any project." },
+  { icon: "\uD83D\uDE9A", name: "Shipments", access: "paid", tiers: "Solo and Pro", visual: "shipments", caption: "Track every delivery to your customer." },
+  { icon: "\uD83C\uDFE8", name: "Hotel module", access: "paid", tiers: "Solo and Pro", visual: "hotel", caption: "Rooms, bookings and guest folios." },
+  { icon: "\uD83D\uDCE3", name: "Messages", access: "free", visual: "messages", caption: "Promos to customers on WhatsApp." },
+  { icon: "\uD83D\uDCD3", name: "Notebook", access: "free", visual: "notebook", caption: "Shared notes and private notes." },
+  { icon: "\uD83E\uDDD1\u200D\uD83D\uDCBC", name: "Staff and roles", access: "free", visual: "staff", caption: "Everyone sees only their workspace." },
+];
+
+function BookVisual(props) {
+  var kind = props.kind;
+  var row = { fontSize: 10.5, padding: "4px 0", borderBottom: "1px solid #f0ead6" };
+  var money = { float: "right", fontWeight: 700 };
+  if (kind === "dashboard") return (<div>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 5 }}>
+      <div style={{ background: "#f0fdf4", borderRadius: 7, padding: 5 }}><div style={{ fontSize: 8, color: "#666" }}>Sales today</div><div style={{ fontWeight: 800, fontSize: 12 }}>&#8358;24,500</div></div>
+      <div style={{ background: "#fefce8", borderRadius: 7, padding: 5 }}><div style={{ fontSize: 8, color: "#666" }}>Owed to you</div><div style={{ fontWeight: 800, fontSize: 12 }}>&#8358;6,200</div></div>
+    </div>
+    <div style={row}>Rice x2 <span style={money}>&#8358;1,000</span></div>
+    <div style={row}>Palm Oil x1 <span style={money}>&#8358;1,200</span></div>
+  </div>);
+  if (kind === "sale") return (<div>
+    <div style={row}>Rice x2 <span style={money}>&#8358;1,000</span></div>
+    <div style={row}>Beans x1 <span style={money}>&#8358;800</span></div>
+    <div style={{ marginTop: 7, background: "#15803d", color: "#fff", textAlign: "center", padding: 7, borderRadius: 8, fontWeight: 700, fontSize: 11 }}>+ Record sale</div>
+  </div>);
+  if (kind === "stock") return (<div>
+    <div style={row}>Rice <span className="stock-ok">48 pcs</span></div>
+    <div style={row}>Palm Oil <span className="stock-ok">12 litres</span></div>
+    <div style={row}>Beans <span className="stock-tag">Low: 3 pcs</span></div>
+  </div>);
+  if (kind === "debts") return (<div>
+    <div style={row}>Mama Nkechi <span style={money}>&#8358;4,500</span></div>
+    <div style={row}>Emeka <span style={money}>&#8358;1,700</span></div>
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>Paid bit by bit, tracked fully.</div>
+  </div>);
+  if (kind === "expenses") return (<div>
+    <div style={row}>Transport <span style={money}>&#8358;500</span></div>
+    <div style={row}>Stock purchase <span style={money}>&#8358;12,000</span></div>
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>Logged by category.</div>
+  </div>);
+  if (kind === "reports") return (<div>
+    <div className="tour-bar-row" style={{ height: 64, marginTop: 2 }}>
+      <div className="tour-bar" style={{ height: "40%" }} />
+      <div className="tour-bar" style={{ height: "65%" }} />
+      <div className="tour-bar" style={{ height: "52%" }} />
+      <div className="tour-bar" style={{ height: "85%" }} />
+      <div className="tour-bar" style={{ height: "100%" }} />
+    </div>
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>Profit trend, best sellers, CSV export.</div>
+  </div>);
+  if (kind === "receipt") return (<div>
+    <div style={{ border: "1.5px dashed #b9ac86", borderRadius: 8, padding: 8, textAlign: "center" }}>
+      <div style={{ fontSize: 9, letterSpacing: 2, color: "#6b6250" }}>RECEIPT</div>
+      <div style={{ fontWeight: 800, fontSize: 14, margin: "3px 0" }}>&#8358;3,000</div>
+      <div style={{ fontSize: 9, color: "#6b6250" }}>Paid &#183; Thank you</div>
+    </div>
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>WhatsApp share or PNG image.</div>
+  </div>);
+  if (kind === "ai") return (<div>
+    <div className="chat-u" style={{ fontSize: 10.5, margin: "5px 0 5px 22px" }}>How did we do today?</div>
+    <div className="chat-a" style={{ fontSize: 10.5, margin: "5px 22px 5px 0" }}>&#8358;24,500 from 18 sales.</div>
+  </div>);
+  if (kind === "projects") return (<div>
+    <div style={{ fontSize: 10.5, fontWeight: 700 }}>Shop renovation</div>
+    <div style={{ height: 8, background: "#eee9d5", borderRadius: 99, marginTop: 6 }}>
+      <div style={{ width: "65%", height: "100%", background: "#15803d", borderRadius: 99 }} />
+    </div>
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>3 of 5 milestones done</div>
+  </div>);
+  if (kind === "shipments") return (<div>
+    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
+      <span style={{ width: 14, height: 14, borderRadius: "50%", background: "#15803d" }} />
+      <span style={{ flex: 1, height: 2, background: "#15803d" }} />
+      <span style={{ width: 14, height: 14, borderRadius: "50%", background: "#15803d" }} />
+      <span style={{ flex: 1, height: 2, background: "#ddd5b8" }} />
+      <span style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #b9ac86" }} />
+    </div>
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>Pending &#183; Shipped &#183; Delivered</div>
+  </div>);
+  if (kind === "hotel") return (<div>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginTop: 4 }}>
+      <div style={{ background: "#15803d", color: "#fff", borderRadius: 7, padding: 6, fontSize: 10, fontWeight: 700 }}>101 &#183; In</div>
+      <div style={{ background: "#15803d", color: "#fff", borderRadius: 7, padding: 6, fontSize: 10, fontWeight: 700 }}>102 &#183; In</div>
+      <div style={{ border: "1.5px solid #b9ac86", borderRadius: 7, padding: 5, fontSize: 10, color: "#6b6250" }}>103 &#183; Free</div>
+      <div style={{ border: "1.5px solid #b9ac86", borderRadius: 7, padding: 5, fontSize: 10, color: "#6b6250" }}>104 &#183; Free</div>
+    </div>
+  </div>);
+  if (kind === "messages") return (<div>
+    <div className="chat-u" style={{ fontSize: 10.5, margin: "5px 0 5px 22px" }}>New stock just arrived. Come and see.</div>
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>Sent to 48 customers on WhatsApp.</div>
+  </div>);
+  if (kind === "notebook") return (<div style={{ marginTop: 4 }}>
+    <div style={{ borderBottom: "1px solid #d8cfb2", height: 16 }} />
+    <div style={{ borderBottom: "1px solid #d8cfb2", height: 16 }} />
+    <div style={{ borderBottom: "1px solid #d8cfb2", height: 16 }} />
+    <div style={{ fontSize: 10, color: "#6b6250", marginTop: 5 }}>Shared notes and private notes.</div>
+  </div>);
+  return (<div>
+    <div className="role-row" style={{ fontSize: 11 }}><span>Chidi</span><span className="role-tag">Cashier</span></div>
+    <div className="role-row" style={{ fontSize: 11 }}><span>Fatima</span><span className="role-tag">Storekeeper</span></div>
+  </div>);
+}
+
+function BookPageFace(props) {
+  var page = props.page; var num = props.num;
+  return (
+    <div className="bk-face">
+      <div className="bk-page-num">{num}</div>
+      <div style={{ fontSize: 20 }}>{page.icon}</div>
+      <div className="bk-page-title">{page.name}</div>
+      <TierBadge access={page.access} tiers={page.tiers} />
+      <BookVisual kind={page.visual} />
+      <div className="bk-caption">{page.caption}</div>
+    </div>
+  );
+}
+
+const BOOK_CSS = `
+.bk-wrap { display: flex; flex-direction: column; align-items: center; padding: 8px 0 4px; }
+.bk-stage { perspective: 2200px; width: 100%; display: flex; justify-content: center; outline: none; }
+.bk-book { position: relative; width: min(640px, 94vw); aspect-ratio: 1.52; transform-style: preserve-3d; transform: rotateX(17deg); }
+.bk-floaty { animation: bk-floaty 7s ease-in-out infinite; }
+@keyframes bk-floaty { 0%,100% { transform: rotateX(17deg) translateY(0); } 50% { transform: rotateX(17deg) translateY(-10px); } }
+.bk-back { position: absolute; inset: 0; background: linear-gradient(135deg, #0b3d24, #14532d); border-radius: 8px 16px 16px 8px; transform: translateZ(-14px); box-shadow: 0 30px 60px rgba(0,0,0,.28); }
+.bk-spread { position: absolute; inset: 7px; display: grid; grid-template-columns: 1fr 1fr; }
+.bk-side { position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 18px; }
+.bk-side-l { background: #f6f1e3; border-radius: 4px 0 0 4px; border-right: 1px solid #e3dcc4; }
+.bk-side-r { background: #fffdf6; border-radius: 0 4px 4px 0; }
+.bk-leaf { position: absolute; top: 7px; bottom: 7px; left: 50%; width: calc(50% - 7px); transform-origin: left center; transform-style: preserve-3d; transition: transform 1.15s cubic-bezier(.4,.1,.3,1); }
+.bk-leaf.flipped { transform: rotateY(-180deg); }
+.bk-leaf .bk-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: #fffdf6; border-left: 1px solid #eee5cd; padding: 13px 11px; overflow: hidden; text-align: left; }
+.bk-leaf .bk-face.bk-backface { transform: rotateY(180deg); border-left: none; border-right: 1px solid #eee5cd; }
+.bk-cover { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; transform-origin: left center; transform-style: preserve-3d; transform: translateZ(16px); transition: transform 1.5s cubic-bezier(.5,.05,.3,1); }
+.bk-cover.bk-opening { transform: translateZ(16px) rotateY(-168deg); }
+.bk-cover .cfront, .bk-cover .cback { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 8px 16px 16px 8px; overflow: hidden; }
+.bk-cover .cback { transform: rotateY(180deg); background: #f6f1e3; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; color: #6b6250; font-size: 14px; }
+.bk-coverart { position: relative; height: 100%; background: linear-gradient(150deg, #0e4a2b 0%, #166534 55%, #0b3d24 100%); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; border-left: 16px solid #082b19; }
+.bk-coverart::before { content: ""; position: absolute; inset: 12px 12px 12px 28px; border: 2px solid rgba(201,160,107,.65); border-radius: 4px; pointer-events: none; }
+.bk-ctitle { font-size: clamp(32px, 6vw, 54px); font-weight: 800; letter-spacing: -1px; }
+.bk-ctag { color: #f0d49a; margin-top: 10px; font-size: clamp(12px, 2.4vw, 17px); }
+.bk-cfoot { position: absolute; bottom: 26px; font-size: 11px; letter-spacing: 3px; color: rgba(255,255,255,.65); }
+.bk-page-num { position: absolute; bottom: 7px; right: 10px; font-size: 10px; color: #b9ac86; }
+.bk-page-title { font-weight: 800; font-size: 15px; margin: 2px 0 0; color: #1f2937; }
+.bk-caption { font-size: 11.5px; color: #6b6250; margin-top: 6px; line-height: 1.45; }
+.bk-face .tier-badge { font-size: 9px; padding: 2px 8px; margin: 5px 0 4px; }
+.bk-controls { display: flex; align-items: center; gap: 14px; margin-top: 22px; }
+.bk-arrow { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 20px; cursor: pointer; line-height: 1; }
+.bk-arrow:disabled { opacity: .35; cursor: default; }
+.bk-dots { display: flex; gap: 6px; }
+.bk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); border: none; padding: 0; cursor: pointer; }
+.bk-dot.on { background: var(--brand); }
+.bk-count { font-size: 13px; color: var(--muted); min-width: 74px; text-align: center; }
+.bk-shadow { width: 68%; height: 26px; background: radial-gradient(ellipse, rgba(0,0,0,.30), transparent 70%); margin-top: 2px; }
+.bk-openbtn { margin-top: 20px; }
+@media (max-width: 640px) { .bk-page-title { font-size: 12.5px; } .bk-caption { font-size: 10px; } .bk-leaf .bk-face { padding: 9px 7px; } .bk-side { padding: 12px; } }
+@media (prefers-reduced-motion: reduce) { .bk-floaty { animation: none; } .bk-leaf, .bk-cover { transition: none; } }
+`;
+
+function RealBook() {
+  var LEAVES = 7;
+  var reduced = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var _a = useState("closed"), stage = _a[0], setStage = _a[1];
+  var _b = useState(0), flipped = _b[0], setFlipped = _b[1];
+  var auto = useRef(true);
+  var paused = useRef(false);
+  var touchX = useRef(null);
+
+  useEffect(function () {
+    if (reduced) { setStage("open"); setFlipped(2); return; }
+    var t1, t2, iv;
+    var el = document.getElementById("kb-realbook");
+    function begin() {
+      t1 = setTimeout(function () { if (auto.current) setStage("opening"); }, 900);
+      t2 = setTimeout(function () { if (auto.current) { setStage("open"); setFlipped(0); } }, 2400);
+      iv = setInterval(function () {
+        if (!auto.current || paused.current || document.hidden) return;
+        setFlipped(function (f) { return f < LEAVES ? f + 1 : f; });
+      }, 4600);
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { io.disconnect(); begin(); } });
+    }, { threshold: 0.3 });
+    if (el) io.observe(el);
+    return function () { io.disconnect(); clearTimeout(t1); clearTimeout(t2); clearInterval(iv); };
+  }, []);
+
+  function go(n) {
+    auto.current = false;
+    if (stage === "closed") setStage("open");
+    setFlipped(Math.max(0, Math.min(LEAVES, n)));
+  }
+  function openNow() {
+    setStage("opening");
+    setTimeout(function () { setStage("open"); setFlipped(0); }, 1300);
+  }
+
+  var leaves = [];
+  for (var i = 0; i < LEAVES; i++) {
+    var front = BOOK_PAGES[2 * i + 1];
+    var backPage = BOOK_PAGES[2 * i + 2];
+    var isFlipped = flipped > i;
+    leaves.push(
+      <div key={i} className={"bk-leaf" + (isFlipped ? " flipped" : "")} style={{ zIndex: isFlipped ? 201 + i : 100 - i }}>
+        <div className="bk-face"><BookPageFace page={front} num={2 * i + 2} /></div>
+        <div className="bk-face bk-backface">
+          {backPage ? <BookPageFace page={backPage} num={2 * i + 3} /> : (
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#1f2937" }}>Your whole shop, in one book.</div>
+              <div className="bk-caption" style={{ textAlign: "center" }}>Fourteen pages, one login, zero paper.</div>
+              <a href="/register" className="btn btn-primary btn-sm" style={{ marginTop: 10 }}>Start free</a>
+              <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={function () { go(0); }}>Read again</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  var dots = [];
+  for (var d = 0; d <= LEAVES; d++) {
+    (function (n) {
+      dots.push(<button key={n} className={"bk-dot" + (flipped === n ? " on" : "")} aria-label={"Go to page spread " + (n + 1)} onClick={function () { go(n); }} />);
+    })(d);
+  }
+
+  return (
+    <div className="bk-wrap">
+      <div
+        id="kb-realbook"
+        className="bk-stage"
+        tabIndex="0"
+        role="region"
+        aria-label="KopaBook book tour. Use left and right arrow keys to turn pages."
+        onKeyDown={function (e) { if (e.key === "ArrowRight") go(flipped + 1); if (e.key === "ArrowLeft") go(flipped - 1); }}
+        onMouseEnter={function () { paused.current = true; }}
+        onMouseLeave={function () { paused.current = false; }}
+        onTouchStart={function (e) { paused.current = true; touchX.current = e.touches[0].clientX; }}
+        onTouchEnd={function (e) {
+          paused.current = false;
+          if (touchX.current === null) return;
+          var dx = e.changedTouches[0].clientX - touchX.current;
+          touchX.current = null;
+          if (dx < -40) go(flipped + 1);
+          else if (dx > 40) go(flipped - 1);
+        }}
+      >
+        <div className={"bk-book" + (stage === "closed" && !reduced ? " bk-floaty" : "")}>
+          <div className="bk-back" />
+          <div className="bk-spread">
+            <div className="bk-side bk-side-l">
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#14532d" }}>KopaBook</div>
+              <div style={{ fontSize: 11.5, color: "#6b6250", marginTop: 8, lineHeight: 1.5 }}>Every naira, every sale, every debt.<br />Written down.</div>
+            </div>
+            <div className="bk-side bk-side-r">
+              <BookPageFace page={BOOK_PAGES[0]} num={1} />
+            </div>
+          </div>
+          {leaves}
+          <div className={"bk-cover" + (stage !== "closed" ? " bk-opening" : "")} style={{ zIndex: stage === "open" ? 150 : 220 }}>
+            <div className="cfront">
+              <div className="bk-coverart">
+                <div style={{ fontSize: 40 }}>&#x1F4D3;</div>
+                <div className="bk-ctitle">KopaBook</div>
+                <div className="bk-ctag">Know your sales, stock and debts.</div>
+                <div className="bk-cfoot">FVA70K SERVICES</div>
+              </div>
+            </div>
+            <div className="cback">
+              <div>From paper to app.<br />This is where the story turns.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="bk-shadow" aria-hidden="true" />
+      {stage === "closed" ? (
+        <button className="btn btn-primary bk-openbtn" onClick={openNow}>Open the book</button>
+      ) : (
+        <div className="bk-controls">
+          <button className="bk-arrow" aria-label="Previous page" disabled={flipped === 0} onClick={function () { go(flipped - 1); }}>&#8249;</button>
+          <div className="bk-dots">{dots}</div>
+          <div className="bk-count">{flipped === LEAVES ? "The end" : "Page " + (flipped + 1) + " of " + (LEAVES + 1)}</div>
+          <button className="bk-arrow" aria-label="Next page" disabled={flipped === LEAVES} onClick={function () { go(flipped + 1); }}>&#8250;</button>
+        </div>
+      )}
+      <style>{BOOK_CSS}</style>
+    </div>
+  );
+}
+
 
 export function LandingPage() {
   useEffect(() => {
@@ -403,7 +702,18 @@ export function LandingPage() {
         <style>{HERO_CSS}</style>
       </section>
 
-            <section className="section" id="kb-showcase">
+            <section className="section" id="kb-book-section" style={{ overflow: "hidden" }}>
+        <div className="wrap" style={{ textAlign: "center" }}>
+          <h2>The notebook became an app</h2>
+          <p className="sub">Watch the book open. Every page inside is a real tool in KopaBook, in the order you use them.</p>
+        </div>
+        <RealBook />
+        <div className="wrap" style={{ textAlign: "center", marginTop: 6 }}>
+          <a href="/register" className="btn btn-primary">Start free</a>
+        </div>
+      </section>
+
+      <section className="section" id="kb-showcase">
         <div className="wrap">
           <h2>Everything inside KopaBook</h2>
           <p className="sub">Every tool in the real app, explained plainly. Take the tour, then browse the full list. Green means free forever, gold means paid plans.</p>
