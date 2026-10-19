@@ -9,14 +9,37 @@
 // something, the model emits an ACTION line, the backend validates and
 // executes it against the real tables, then confirms with real numbers.
 //
-// Tier-gated to Solo/Pro. 20 answers per business per UTC day. 60/hr rate limit.
+// Tiered AI for every plan. Free: 5 questions/day, read-only. Starter: 20/day,
+// read + record_sale/add_expense (10 actions/day). Solo: 50/day, all tools.
+// Pro: 100/day, all tools. 60/hr rate limit on top.
 import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "../_utils";
 import { getBusinessOwnerTier, LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
 
 const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
-const DAILY_CAP = 20;
 const HISTORY_LIMIT = 6;
+
+// Per-tier AI allowances. tools: [] = read-only answers; "all" = every tool.
+// actionsPerDay: null = unlimited actions within the question cap.
+const AI_TIER_LIMITS = {
+  free:    { questionsPerDay: 5,   tools: [], actionsPerDay: 0 },
+  starter: { questionsPerDay: 20,  tools: ["record_sale", "add_expense", "draft_debtor_message"], actionsPerDay: 10 },
+  solo:    { questionsPerDay: 50,  tools: "all", actionsPerDay: null },
+  pro:     { questionsPerDay: 100, tools: "all", actionsPerDay: null },
+};
+const ALL_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "get_customer_balance", "draft_debtor_message", "send_debtor_message"];
+const UPGRADE_NUDGE = "Upgrade to Starter for AI actions, or Solo/Pro for the full AI assistant.";
+
+function tierAllowsTool(tier, tool) {
+  const cfg = AI_TIER_LIMITS[tier] || AI_TIER_LIMITS.free;
+  if (cfg.tools === "all") return true;
+  return cfg.tools.includes(tool);
+}
+
+function allowedToolsForTier(tier) {
+  const cfg = AI_TIER_LIMITS[tier] || AI_TIER_LIMITS.free;
+  return cfg.tools === "all" ? ALL_TOOLS : cfg.tools;
+}
 
 // Roles that may use every AI tool. Everyone else (shop staff) may only
 // record sales and check customer balances.
@@ -192,9 +215,36 @@ function snapshotText(snap, currency) {
 }
 
 // ---------------------------------------------------------------------------
-// System prompt: conversational manager + action protocol.
+// System prompt: conversational manager + action protocol. The tool list is
+// tailored to the business's tier so the model only offers what is allowed.
 // ---------------------------------------------------------------------------
-function systemPrompt(snap, currency) {
+const TOOL_DOCS = {
+  record_sale: `- record_sale: {"items": [{"product": "product name", "qty": 2}], "customer_name": "optional", "amount_paid": optional number, "payment_method": "cash"}. Use the EXACT product names from the snapshot. If amount_paid is missing, assume full payment.`,
+  add_expense: `- add_expense: {"description": "what it was for", "amount": number, "category": "optional"}`,
+  add_product: `- add_product: {"name": "product name", "price": number, "unit": "optional e.g. cup", "stock": optional number}`,
+  record_customer_payment: `- record_customer_payment: {"customer_name": "name", "amount": number}`,
+  set_reminder: `- set_reminder: {"text": "what to remember", "remind_at": "e.g. tomorrow 9am"}`,
+  get_customer_balance: `- get_customer_balance: {"customer_name": "name"}`,
+  draft_debtor_message: `- draft_debtor_message: {"customer_name": "name", "tone": "polite|firm|final" (optional, default polite)}. Writes a professional payment reminder to a customer who owes money. I will show you the draft for review first.`,
+  send_debtor_message: `- send_debtor_message: {"customer_name": "name", "message": "the EXACT draft text"}. Sends a debtor reminder ONLY after you have shown the user the draft and they said yes. The message param must match the draft you showed them word for word.`,
+};
+
+function systemPrompt(snap, currency, tier) {
+  const allowed = allowedToolsForTier(tier);
+  const toolDocs = allowed.map((t) => TOOL_DOCS[t]).join("\n");
+  const actionSection = allowed.length
+    ? `ACTIONS (you can DO things, not just answer):
+When the user asks you to DO something, output ONE line on its own, exactly in this format, with no code fences:
+ACTION: {"tool": "tool_name", "params": {...}}
+Then on the next lines write your normal reply text (e.g. what you are about to do).
+
+Available tools and params:
+${toolDocs}
+
+DEBTOR MESSAGES: when the user wants a payment reminder written for a customer who owes money, use draft_debtor_message. I will show the draft for review. Only use send_debtor_message after the user has seen the draft and explicitly said yes (e.g. "yes", "send it", "go ahead"). The message you send must be word-for-word the draft they approved.
+
+Only output an ACTION line when the user clearly wants something done. For plain questions, just answer in natural text with no ACTION line.`
+    : `ACTIONS: you are in read-only mode on this plan. You cannot record sales, add expenses, or take any other action. If the user asks you to DO something, answer warmly that actions need an upgrade: "${UPGRADE_NUDGE}"`;
   return `You are Kopa, the KopaBook business assistant for Nigerian small business owners. You talk like a knowledgeable, warm human shop manager who knows this business inside out, not like a robot. Keep answers short and practical. Use Nigerian business language naturally.
 
 RULES:
@@ -205,20 +255,7 @@ RULES:
 BUSINESS SNAPSHOT (live data, read just now):
 ${snapshotText(snap, currency)}
 
-ACTIONS (you can DO things, not just answer):
-When the user asks you to DO something (record a sale, add an expense, add a product, record a customer payment, set a reminder, check a customer's balance), output ONE line on its own, exactly in this format, with no code fences:
-ACTION: {"tool": "tool_name", "params": {...}}
-Then on the next lines write your normal reply text (e.g. what you are about to do).
-
-Available tools and params:
-- record_sale: {"items": [{"product": "product name", "qty": 2}], "customer_name": "optional", "amount_paid": optional number, "payment_method": "cash"}. Use the EXACT product names from the snapshot. If amount_paid is missing, assume full payment.
-- add_expense: {"description": "what it was for", "amount": number, "category": "optional"}
-- add_product: {"name": "product name", "price": number, "unit": "optional e.g. cup", "stock": optional number}
-- record_customer_payment: {"customer_name": "name", "amount": number}
-- set_reminder: {"text": "what to remember", "remind_at": "e.g. tomorrow 9am"}
-- get_customer_balance: {"customer_name": "name"}
-
-Only output an ACTION line when the user clearly wants something done. For plain questions, just answer in natural text with no ACTION line.`;
+${actionSection}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -591,6 +628,83 @@ async function execGetCustomerBalance(db, auth, params, currency) {
   };
 }
 
+// Draft a professional debtor reminder. The model writes the draft via a
+// second AI call using the customer's REAL balance; the reply is the draft
+// for the user to review. Nothing is sent.
+async function execDraftDebtorMessage(ai, db, auth, params, currency) {
+  const name = String(params.customer_name || params.customerName || "").trim();
+  if (!name) return { ok: false, clarification: "Which customer should I write the reminder for?" };
+  const matches = await matchCustomer(db, auth.business.id, name);
+  if (!matches.length) return { ok: false, clarification: `I could not find a customer called "${name}". Check the name and try again.` };
+  if (matches.length > 1) return { ok: false, clarification: `"${name}" matches more than one customer: ${matches.map((c) => c.name).join(", ")}. Which one?` };
+  const c = matches[0];
+  if (c.balance <= 0) return { ok: false, clarification: `${c.name} has no outstanding balance, so there is no reminder to write.` };
+  const tone = ["polite", "firm", "final"].includes(String(params.tone || "").toLowerCase())
+    ? String(params.tone).toLowerCase() : "polite";
+  const businessName = auth.business.name || "us";
+  let draft;
+  try {
+    const resp = await ai.run(AI_MODEL, {
+      messages: [
+        { role: "system", content: `You write short, professional payment reminders for Nigerian small businesses. Tone: ${tone} (${tone === "polite" ? "warm and respectful, first reminder" : tone === "firm" ? "direct but respectful, second reminder" : "serious and final, last warning before further action"}). Rules: address the customer by first name only, state the EXACT amount owed, mention the business name once, sign off with the business name, no emojis, no slang, keep it under 60 words. Plain text only, no quotes around it.` },
+        { role: "user", content: `Customer: ${c.name}. Owes: ${fmt(c.balance, currency)}. Business: ${businessName}. Write the ${tone} reminder now.` },
+      ],
+    });
+    draft = resp && (resp.response || resp.answer || resp.text);
+    if (!draft) throw new Error("empty");
+    draft = String(draft).trim();
+  } catch (e) {
+    draft = `Hello ${c.name.split(" ")[0]}, this is ${businessName}. This is a friendly reminder that you have an outstanding balance of ${fmt(c.balance, currency)} with us. Kindly pay at your earliest convenience. Thank you. - ${businessName}`;
+  }
+  await logAiAction(db, auth, params, "draft_debtor_message", { customer: c.name, balance: c.balance, tone }, { draft });
+  return {
+    ok: true,
+    isDraft: true,
+    draft,
+    summary: `Drafted a ${tone} payment reminder for ${c.name} (${fmt(c.balance, currency)}).`,
+  };
+}
+
+// Send a debtor reminder ONLY after the user approved the exact draft.
+// Delivery is a wa.me link the user taps; Kopa never auto-sends WhatsApp.
+async function execSendDebtorMessage(db, auth, params, currency, history) {
+  const name = String(params.customer_name || params.customerName || "").trim();
+  const message = String(params.message || "").trim();
+  if (!name || !message) return { ok: false, clarification: "Tell me which customer and the exact message to send." };
+  // Enforcement: the previous assistant message must contain the exact draft.
+  const lastAssistant = [...(history || [])].reverse().find((h) => h.role === "assistant");
+  const approved = lastAssistant && typeof lastAssistant.content === "string" && lastAssistant.content.includes(message);
+  if (!approved) {
+    return { ok: false, clarification: `I need you to see and approve the message before I send anything. Tell me which customer you want reminded and I will draft it first.` };
+  }
+  const matches = await matchCustomer(db, auth.business.id, name);
+  if (!matches.length) return { ok: false, clarification: `I could not find a customer called "${name}".` };
+  if (matches.length > 1) return { ok: false, clarification: `"${name}" matches more than one customer. Which one?` };
+  const c = matches[0];
+  // Fetch phone for the wa.me link.
+  const row = await db.prepare(`SELECT phone FROM customers WHERE id = ? AND business_id = ?`).bind(c.id, auth.business.id).first().catch(() => null);
+  const digits = String((row && row.phone) || "").replace(/\D/g, "");
+  let link = null;
+  if (digits) {
+    const intl = digits.startsWith("234") ? digits : digits.startsWith("0") ? "234" + digits.slice(1) : digits;
+    link = `https://wa.me/${intl}?text=${encodeURIComponent(message)}`;
+  }
+  await logAiAction(db, auth, params, "send_debtor_message", { customer: c.name, balance: c.balance }, { waLink: link, hasPhone: !!digits });
+  if (!link) {
+    return { ok: true, summary: `Message approved for ${c.name}, but I don't have a phone number saved for them, so I can't open WhatsApp. Here is the message to copy:\n\n${message}` };
+  }
+  return { ok: true, waLink: link, summary: `Ready to send to ${c.name} on WhatsApp.` };
+}
+
+async function logAiAction(db, auth, params, tool, p, result) {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    await db.prepare(
+      `INSERT INTO ai_action_log (business_id, user_id, day, tool, params, result) VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(auth.business.id, auth.user.id, day, tool, JSON.stringify(p || params || {}), JSON.stringify(result || {})).run();
+  } catch (e) { /* logging must never break the action */ }
+}
+
 const TOOL_EXECUTORS = {
   record_sale: execRecordSale,
   add_expense: execAddExpense,
@@ -598,6 +712,8 @@ const TOOL_EXECUTORS = {
   record_customer_payment: execRecordCustomerPayment,
   set_reminder: execSetReminder,
   get_customer_balance: execGetCustomerBalance,
+  draft_debtor_message: execDraftDebtorMessage,
+  send_debtor_message: execSendDebtorMessage,
 };
 
 // ---------------------------------------------------------------------------
@@ -657,18 +773,10 @@ export async function onRequestPost(context) {
     if (!businessId) return json({ ok: false, message: "Pick a business first." }, 400);
     const currency = auth.business.currency || "NGN";
 
-    // Tier gate: Kopa AI is a Solo/Pro feature. Staff use the owner's plan.
-    const { tier } = await getBusinessOwnerTier(db, businessId);
-    if (!LIMITS[tier] || !LIMITS[tier].aiWorker) {
-      return json(
-        {
-          ok: false,
-          upgradeRequired: true,
-          message: "Kopa AI is available on Solo and Pro plans. Upgrade to chat with your business data.",
-        },
-        403
-      );
-    }
+    // Tiered AI: every plan gets Kopa AI. Staff use the business owner's plan.
+    const { tier: rawTier } = await getBusinessOwnerTier(db, businessId);
+    const tier = AI_TIER_LIMITS[rawTier] ? rawTier : "free";
+    const tierCfg = AI_TIER_LIMITS[tier];
 
     // Abuse guard on top of the daily AI cap.
     if (!(await checkRateLimit(db, `ai_${auth.user.id}`, 60, 3600000))) {
@@ -682,19 +790,27 @@ export async function onRequestPost(context) {
       ? body.history.filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string").slice(-HISTORY_LIMIT)
       : [];
 
-    // Daily cap: 20 AI answers per business per UTC day.
+    // Daily question cap for this tier (per business per UTC day).
     const day = new Date().toISOString().slice(0, 10);
-    const usage = await db.prepare(`SELECT count FROM ai_usage WHERE business_id = ? AND day = ?`).bind(String(businessId), day).first();
+    const usage = await db.prepare(`SELECT count, actions FROM ai_usage WHERE business_id = ? AND day = ?`).bind(String(businessId), day).first();
     const usedToday = usage ? Number(usage.count) || 0 : 0;
-    if (usedToday >= DAILY_CAP) {
+    const actionsToday = usage ? Number(usage.actions) || 0 : 0;
+    const bumpActions = async () => {
+      await db.prepare(
+        `INSERT INTO ai_usage (business_id, day, count, actions) VALUES (?, ?, 0, 1)
+         ON CONFLICT(business_id, day) DO UPDATE SET actions = actions + 1`
+      ).bind(String(businessId), day).run().catch(() => {});
+    };
+    if (usedToday >= tierCfg.questionsPerDay) {
+      const capMsg = `You have used today's Kopa AI limit (${tierCfg.questionsPerDay} questions on your plan). It resets tomorrow, and your data is untouched.` + (tier === "free" ? ` ${UPGRADE_NUDGE}` : "");
       return json({
         ok: true,
-        reply: "You have used today's Kopa AI limit (20 questions). It resets tomorrow, and your data is untouched.",
-        answer: "You have used today's Kopa AI limit (20 questions). It resets tomorrow, and your data is untouched.",
+        reply: capMsg,
+        answer: capMsg,
         actions_taken: [],
         fallback: true,
         capped: true,
-        usage: { used_today: usedToday, daily_limit: DAILY_CAP },
+        usage: { used_today: usedToday, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay },
       });
     }
 
@@ -710,12 +826,12 @@ export async function onRequestPost(context) {
     const newUsed = usedToday + 1;
 
     const ai = context.env.AI;
-    const sys = systemPrompt(snap, currency);
+    const sys = systemPrompt(snap, currency, tier);
 
     // Graceful degradation: the app must never break because AI is down.
     if (!ai) {
       const reply = `Kopa AI is not connected yet, but here is what your books say.\n${snapshotFallbackText}`;
-      return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: DAILY_CAP } });
+      return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } });
     }
 
     let modelText;
@@ -729,31 +845,50 @@ export async function onRequestPost(context) {
       modelText = String(modelText);
     } catch (e) {
       const reply = `Kopa AI is resting at the moment, but your books are fine.\n${snapshotFallbackText}`;
-      return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: DAILY_CAP } });
+      return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } });
     }
 
     // Agentic path: the model asked to DO something.
     const action = parseAction(modelText);
     const actionsTaken = [];
     if (action && !action.parseError) {
+      const usageObj = () => ({ used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay });
       if (!TOOL_EXECUTORS[action.tool]) {
         return json({
-          ok: true, reply: `I understood you want me to do something, but "${action.tool}" is not something I can do. Try asking me to record a sale, add an expense, add a product, record a customer payment, set a reminder, or check a balance.`,
+          ok: true, reply: `I understood you want me to do something, but "${action.tool}" is not something I can do. Try asking me to record a sale, add an expense, or draft a debtor reminder.`,
           answer: `I understood you want me to do something, but "${action.tool}" is not something I can do.`,
-          actions_taken: [], fallback: false, usage: { used_today: newUsed, daily_limit: DAILY_CAP },
+          actions_taken: [], fallback: false, usage: usageObj(),
         });
+      }
+      // Tier check first: Free is read-only; Starter has a small tool set.
+      if (!tierAllowsTool(tier, action.tool)) {
+        const tierMsg = tier === "free"
+          ? `I can answer questions about your business on your Free plan, but doing things like that needs an upgrade. ${UPGRADE_NUDGE}`
+          : `Your ${tier[0].toUpperCase() + tier.slice(1)} plan does not include "${action.tool}". Upgrade to Solo or Pro for the full AI assistant.`;
+        return json({ ok: true, reply: tierMsg, answer: tierMsg, actions_taken: [], fallback: false, usage: usageObj() });
       }
       if (!toolAllowed(auth, action.tool)) {
         return json({
           ok: true,
           reply: "Your staff role does not allow that action. You can record sales and check customer balances; everything else needs the owner or an admin.",
           answer: "Your staff role does not allow that action.",
-          actions_taken: [], fallback: false, usage: { used_today: newUsed, daily_limit: DAILY_CAP },
+          actions_taken: [], fallback: false, usage: usageObj(),
         });
+      }
+      // Per-day action cap for capped tiers (Starter).
+      if (tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
+        const capMsg = `You have used today's AI action limit (${tierCfg.actionsPerDay} actions on Starter). It resets tomorrow. Upgrade to Solo or Pro for more.`;
+        return json({ ok: true, reply: capMsg, answer: capMsg, actions_taken: [], fallback: false, capped: true, usage: usageObj() });
       }
       let result;
       try {
-        result = await TOOL_EXECUTORS[action.tool](context, db, auth, action.params, currency);
+        const exec = TOOL_EXECUTORS[action.tool];
+        // Debtor tools need the Workers AI handle and conversation history.
+        result = action.tool === "draft_debtor_message"
+          ? await exec(ai, db, auth, action.params, currency)
+          : action.tool === "send_debtor_message"
+            ? await exec(db, auth, action.params, currency, history)
+            : await exec(context, db, auth, action.params, currency);
       } catch (e) {
         result = { ok: false, clarification: "Something went wrong while doing that. Your data is untouched. Try again." };
       }
@@ -761,10 +896,28 @@ export async function onRequestPost(context) {
         // Never execute on ambiguity. Ask the user, conversationally.
         return json({
           ok: true, reply: result.clarification, answer: result.clarification,
-          actions_taken: [], fallback: false, usage: { used_today: newUsed, daily_limit: DAILY_CAP },
+          actions_taken: [], fallback: false, usage: usageObj(),
         });
       }
-      actionsTaken.push({ tool: action.tool, summary: result.summary });
+      await bumpActions();
+      actionsTaken.push({ tool: action.tool, summary: result.summary, waLink: result.waLink || null });
+
+      // Drafts are returned as-is for review (with a send prompt for Solo/Pro).
+      if (result.isDraft) {
+        const draftReply = `${result.draft}\n\nShall I send this?`;
+        return json({
+          ok: true, reply: draftReply, answer: draftReply, actions_taken: actionsTaken,
+          draft: result.draft, fallback: false, usage: usageObj(),
+        });
+      }
+      // WhatsApp send links ride along on the confirmation.
+      if (result.waLink) {
+        const waReply = `${result.summary}\n\nTap to send on WhatsApp:\n${result.waLink}`;
+        return json({
+          ok: true, reply: waReply, answer: waReply, actions_taken: actionsTaken,
+          waLink: result.waLink, fallback: false, usage: usageObj(),
+        });
+      }
 
       // Confirmation in Kopa's voice, with real numbers.
       let reply;
@@ -783,7 +936,7 @@ export async function onRequestPost(context) {
       }
       return json({
         ok: true, reply, answer: reply, actions_taken: actionsTaken,
-        fallback: false, usage: { used_today: newUsed, daily_limit: DAILY_CAP },
+        fallback: false, usage: usageObj(),
       });
     }
 
@@ -791,7 +944,7 @@ export async function onRequestPost(context) {
     const cleanReply = action && action.rest ? action.rest : modelText;
     return json({
       ok: true, reply: cleanReply, answer: cleanReply, actions_taken: [],
-      fallback: false, usage: { used_today: newUsed, daily_limit: DAILY_CAP },
+      fallback: false, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay },
     });
   } catch (error) {
     return json({ ok: false, message: "Something went wrong. Try again." }, 500);
