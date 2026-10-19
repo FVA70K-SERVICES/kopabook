@@ -129,16 +129,15 @@ export function LandingPage() {
           <h2>See how KopaBook works for your shop</h2>
           <p className="sub" style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 30px" }}>Watch the 5-minute tour below. If you can use WhatsApp, you can use KopaBook.</p>
           <div style={{ maxWidth: 760, margin: "0 auto 40px" }}>
-            <a href="https://youtu.be/tII6wBaWhqE?is=CcsYga-K99LgyezC" target="_blank" rel="noopener noreferrer" aria-label="Watch the KopaBook full walkthrough on YouTube" style={{ display: "block", position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 12, border: "1px solid var(--line)", background: "linear-gradient(135deg, #0d5c2e 0%, #16a34a 100%)", textDecoration: "none" }}>
-              <span style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", padding: "0 24px", textAlign: "center" }}>
-                <span style={{ width: 72, height: 72, borderRadius: "50%", background: "rgba(255,255,255,0.95)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                  <span style={{ width: 0, height: 0, borderTop: "14px solid transparent", borderBottom: "14px solid transparent", borderLeft: "22px solid #0d5c2e", marginLeft: 6 }} />
-                </span>
-                <span style={{ fontWeight: 800, fontSize: 22, lineHeight: 1.3 }}>KopaBook Full Walkthrough</span>
-                <span style={{ fontSize: 14, opacity: 0.9, marginTop: 8 }}>Track sales, stock and debtors on your phone</span>
-              </span>
-              <span style={{ position: "absolute", bottom: 12, right: 12, background: "rgba(0,0,0,0.75)", color: "#fff", fontSize: 13, fontWeight: 600, padding: "3px 8px", borderRadius: 6 }}>5:02</span>
-            </a>
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              src="https://pub-9febb8d034344470ae8c0f7493a261f9.r2.dev/kopabook-walkthrough-FINAL.mp4"
+              style={{ width: "100%", display: "block", borderRadius: 12, aspectRatio: "16 / 9", background: "#000", border: "1px solid var(--line)" }}
+            >
+              Sorry, your browser cannot play this video. Watch it on YouTube: https://youtu.be/tII6wBaWhqE?is=CcsYga-K99LgyezC
+            </video>
           </div>
           <h3 style={{ textAlign: "center", marginBottom: 24 }}>Three steps and you are set</h3>
           <div className="steps narrow" style={{ margin: "0 auto 40px" }}>
