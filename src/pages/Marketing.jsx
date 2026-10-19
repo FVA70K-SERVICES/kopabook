@@ -133,7 +133,7 @@ export function LandingPage() {
               <iframe src="https://www.youtube-nocookie.com/embed/tII6wBaWhqE?rel=0" title="KopaBook Full Walkthrough: Track Sales, Stock and Debtors Free on Your Phone" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }} />
             </div>
             <p style={{ textAlign: "center", marginTop: -24, marginBottom: 40, fontSize: 14 }}>
-              <a href="https://youtu.be/tII6wBaWhqE" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>
+              <a href="https://youtu.be/tII6wBaWhqE?is=ZqRyrnHze3IOgQyi" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>
             </p>
           </div>
           <h3 style={{ textAlign: "center", marginBottom: 24 }}>Three steps and you are set</h3>
