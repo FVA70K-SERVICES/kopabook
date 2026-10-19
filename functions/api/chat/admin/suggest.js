@@ -8,7 +8,7 @@
 import { getAuthContext } from '../../_utils.js';
 import { canUseChatCenter, businessSiteId } from '../_access.js';
 
-const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 export async function onRequestGet({ request, env }) {
   try {
