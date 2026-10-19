@@ -2,20 +2,16 @@
 // Returns everything the frontend needs to render the printable report:
 // project details, totals, per-category breakdowns, all transactions,
 // milestones and who recorded what.
-import { json } from "../_utils";
-import { projectContext, getProject, projectTotals } from "./_lib";
+// Project members (invitees) see ONLY the invited project.
+import { json, projectAccessContext, projectTotals } from "./_lib";
 
 export async function onRequestGet(context) {
   try {
-    const { auth, db, error } = await projectContext(context);
-    if (error) return error;
     const projectId = Number(new URL(context.request.url).searchParams.get("projectId")) || null;
-    if (!projectId) return json({ ok: false, message: "projectId is required." }, 400);
+    const { auth, db, project, error } = await projectAccessContext(context, projectId);
+    if (error) return error;
 
-    const project = await getProject(db, auth.business.id, projectId);
-    if (!project) return json({ ok: false, message: "Project not found." }, 404);
-
-    const totals = await projectTotals(db, projectId);
+    const totals = await projectTotals(db, project.id);
 
     const byCategory = await db
       .prepare(
@@ -23,7 +19,7 @@ export async function onRequestGet(context) {
          FROM project_transactions WHERE project_id = ?
          GROUP BY kind, category ORDER BY kind, total DESC`
       )
-      .bind(projectId)
+      .bind(project.id)
       .all();
 
     const transactions = await db
@@ -35,17 +31,17 @@ export async function onRequestGet(context) {
          WHERE t.project_id = ?
          ORDER BY t.created_at ASC, t.id ASC`
       )
-      .bind(projectId)
+      .bind(project.id)
       .all();
 
     const milestones = await db
       .prepare(`SELECT id, title, description, due_date, status, created_at FROM project_milestones WHERE project_id = ? ORDER BY id ASC`)
-      .bind(projectId)
+      .bind(project.id)
       .all();
 
     const business = await db
       .prepare(`SELECT name FROM businesses WHERE id = ?`)
-      .bind(auth.business.id)
+      .bind(project.business_id)
       .first();
 
     return json({
