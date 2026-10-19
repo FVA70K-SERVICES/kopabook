@@ -149,7 +149,7 @@ function AppRoute({ session }) {
         <Suspense fallback={<div className="loading">Loading section...</div>}>
           <div id="main">{page}</div>
         </Suspense>
-        <AiAssistant />
+        {path !== "/app/admin" && <AiAssistant />}
       </Layout>
     );
   }
