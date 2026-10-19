@@ -147,6 +147,10 @@ export default function NotebookPage({ session }) {
         <button className="btn btn-primary btn-sm" onClick={openNew}>+ New note</button>
       </div>
 
+      <p style={{ margin: "0 0 10px", fontSize: 13, color: "#6b7280" }}>
+        Showing notes for: <strong>{session.business?.name || "your business"}</strong>
+      </p>
+
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <button className={"btn btn-sm " + (tab === "shared" ? "btn-primary" : "btn-secondary")}
           onClick={() => setTab("shared")}>Shared with everyone</button>
