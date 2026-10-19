@@ -500,7 +500,7 @@ function FloatingChatCenter({ open, onClose }) {
         </div>
         <iframe
           title="Chat Center"
-          src="/chat-center.html"
+          src="/chat-center"
           style={{ flex: 1, width: "100%", border: "none", background: "#fff" }}
         />
       </div>
