@@ -596,19 +596,41 @@ const TOOL_EXECUTORS = {
 // ---------------------------------------------------------------------------
 function parseAction(text) {
   if (!text) return null;
-  const lines = String(text).split("\n");
-  for (const line of lines) {
-    const m = line.match(/^\s*ACTION:\s*(\{.*\})\s*$/);
-    if (m) {
-      try {
-        const obj = JSON.parse(m[1]);
-        if (obj && typeof obj.tool === "string" && obj.params && typeof obj.params === "object") {
-          return { tool: obj.tool, params: obj.params, rest: lines.filter((l) => l !== line).join("\n").trim() };
-        }
-      } catch (e) {
-        return { parseError: true };
-      }
+  // Be lenient: strip code fences in case the model wraps the JSON anyway.
+  const stripped = String(text).replace(/```(?:json)?/gi, "");
+  const idx = stripped.search(/^\s*ACTION:/m);
+  if (idx < 0) return null;
+  // Extract a balanced JSON object starting after "ACTION:".
+  const start = stripped.indexOf("{", idx);
+  if (start < 0) return { parseError: true };
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let end = -1;
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') {
+      inStr = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
     }
+  }
+  if (end < 0) return { parseError: true };
+  try {
+    const obj = JSON.parse(stripped.slice(start, end));
+    if (obj && typeof obj.tool === "string" && obj.params && typeof obj.params === "object") {
+      const rest = (stripped.slice(0, idx) + stripped.slice(end)).replace(/^\s*ACTION:\s*/m, "").trim();
+      return { tool: obj.tool, params: obj.params, rest };
+    }
+  } catch (e) {
+    return { parseError: true };
   }
   return null;
 }
