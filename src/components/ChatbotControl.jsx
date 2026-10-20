@@ -49,6 +49,10 @@ export default function ChatbotControl() {
   const [convos, setConvos] = useState([]);
   const [confirmClear, setConfirmClear] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [assistantName, setAssistantName] = useState("Kopa");
+  const [assistantVoice, setAssistantVoice] = useState("default");
+  const [assistantLanguage, setAssistantLanguage] = useState("en");
+  const [canName, setCanName] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -61,6 +65,10 @@ export default function ChatbotControl() {
       setHours(Number(d.settings?.auto_clear_hours) || 24);
       setSiteId(d.settings?.site_id || "");
       setConvos(d.conversations || []);
+      setAssistantName(d.assistant_name || "Kopa");
+      setAssistantVoice(d.assistant_voice || "default");
+      setAssistantLanguage(d.assistant_language || "en");
+      setCanName(!!d.can_name);
     } catch (e) {
       setError(e.message || "Could not load chatbot controls.");
     }
@@ -80,6 +88,50 @@ export default function ChatbotControl() {
       setOk(next
         ? "Chatbot is on. It will answer new visitor chats."
         : "Chatbot is off. New visitor chats will wait for you in the Chat Center instead.");
+    } catch (e) {
+      setError(e.message);
+    }
+    setBusy(false);
+  }
+
+  async function saveAssistantName() {
+    const name = assistantName.trim();
+    setBusy(true);
+    setError("");
+    setOk("");
+    try {
+      const d = await api.post("/api/chat/control", { action: "set_assistant_name", name });
+      setAssistantName(d.assistant_name || name);
+      setOk(d.message || `Your assistant is now called ${d.assistant_name || name}.`);
+    } catch (e) {
+      setError(e.message);
+    }
+    setBusy(false);
+  }
+
+  async function changeAssistantVoice(voice) {
+    if (!canName && voice !== "default") return;
+    setBusy(true);
+    setError("");
+    setOk("");
+    try {
+      const d = await api.post("/api/chat/control", { action: "set_assistant_voice", voice });
+      setAssistantVoice(d.assistant_voice || voice);
+      setOk(d.message || "Assistant voice updated.");
+    } catch (e) {
+      setError(e.message);
+    }
+    setBusy(false);
+  }
+
+  async function changeAssistantLanguage(language) {
+    setBusy(true);
+    setError("");
+    setOk("");
+    try {
+      const d = await api.post("/api/chat/control", { action: "set_assistant_language", language });
+      setAssistantLanguage(d.assistant_language || language);
+      setOk(d.message || "Assistant language updated.");
     } catch (e) {
       setError(e.message);
     }
@@ -173,6 +225,93 @@ export default function ChatbotControl() {
               : "Only you and partners can use the Chat Center. Staff will not see it."}
           </p>
         </div>
+      </div>
+
+      <hr style={{ border: "none", borderTop: "1px solid var(--line, #e5e7eb)", margin: "16px 0" }} />
+
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>Your assistant</div>
+      <p className="hint" style={{ marginTop: 0 }}>
+        Your assistant in Ask Kopa AI: its name, its voice and its language.
+      </p>
+
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>Name</div>
+      {canName ? (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <input
+            type="text"
+            maxLength={24}
+            value={assistantName}
+            disabled={busy}
+            onChange={(e) => setAssistantName(e.target.value)}
+            aria-label="Assistant name"
+            style={{ padding: "6px 8px", border: "1px solid var(--line, #e5e7eb)", borderRadius: 8 }}
+          />
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={saveAssistantName}>
+            {busy ? "Saving..." : "Save"}
+          </button>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 12 }}>
+          <div>Your assistant is called <strong>Kopa</strong></div>
+          <p className="hint" style={{ margin: "4px 0 0" }}>
+            {"Naming your assistant is part of Solo and Pro. On your current plan your assistant is called Kopa."}
+          </p>
+        </div>
+      )}
+
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>Voice</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 4 }}>
+        {[
+          { value: "ng_female", label: "Nigerian female" },
+          { value: "ng_male", label: "Nigerian male" },
+          { value: "default", label: "Device default" },
+        ].map((opt) => {
+          const locked = !canName && opt.value !== "default";
+          return (
+            <label key={opt.value} style={{ fontSize: 14, display: "flex", gap: 8, alignItems: "center", opacity: locked ? 0.55 : 1 }}>
+              <input
+                type="radio"
+                name="assistant-voice"
+                value={opt.value}
+                checked={assistantVoice === opt.value}
+                disabled={busy || locked}
+                onChange={() => changeAssistantVoice(opt.value)}
+              />
+              {opt.label}
+            </label>
+          );
+        })}
+      </div>
+      {!canName && (
+        <p className="hint" style={{ marginTop: 0 }}>
+          {"Choosing your assistant's voice is part of Solo and Pro."}
+        </p>
+      )}
+      <p className="hint" style={{ marginTop: 0 }}>
+        {"Voices come from your phone. For a full Nigerian voice, add English (Nigeria) in your phone's text-to-speech settings, it is free."}
+      </p>
+      <p className="hint" style={{ marginTop: 0 }}>
+        {"On Android: open Settings, search for Text-to-speech, open the preferred engine settings, and install the English (Nigeria) voice data."}
+      </p>
+
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>Language</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+        <label style={{ fontSize: 14 }}>
+          Assistant language{" "}
+          <select
+            value={assistantLanguage}
+            disabled={busy}
+            onChange={(e) => changeAssistantLanguage(e.target.value)}
+            aria-label="Assistant language"
+            style={{ padding: "6px 8px", border: "1px solid var(--line, #e5e7eb)", borderRadius: 8 }}
+          >
+            <option value="en">English (Nigerian)</option>
+            <option value="pcm">Nigerian Pidgin</option>
+            <option value="ha">Hausa</option>
+            <option value="yo">Yoruba</option>
+            <option value="ig">Igbo</option>
+          </select>
+        </label>
       </div>
 
       <hr style={{ border: "none", borderTop: "1px solid var(--line, #e5e7eb)", margin: "16px 0" }} />
