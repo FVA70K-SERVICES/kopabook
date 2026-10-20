@@ -9,7 +9,9 @@
 // something, the model emits an ACTION line, the backend validates and
 // executes it against the real tables, then confirms with real numbers.
 //
-// Tiered AI for every plan. Free: 5 questions/day, read-only. Starter: 20/day,
+// Tiered AI for every plan. Free: 5 questions/day, read-only for general
+// actions, PLUS project writes in their own bucket of 5 executed project
+// actions/day (Projects itself is open to all plans). Starter: 20/day,
 // read + record_sale/add_expense (10 actions/day). Solo: 50/day, all tools.
 // Pro: 100/day, all tools. 60/hr rate limit on top.
 import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "../_utils";
@@ -200,19 +202,21 @@ const PROJECT_WRITE_TOOLS = [
 ];
 const PROJECT_TOOLS = [...PROJECT_WRITE_TOOLS, "project_report"];
 const ALL_TOOLS = [...BASE_TOOLS, ...PROJECT_TOOLS];
-const PROJECT_TIERS = ["starter", "solo", "pro"];
 const UPGRADE_NUDGE = "Upgrade to Starter for AI actions, or Solo/Pro for the full AI assistant.";
 
-function projectTierEligible(tier) {
-  return PROJECT_TIERS.includes(tier);
-}
+// Projects is open to every plan, Free included (Fortune, 2026-10-20), so
+// the project tools are allowed on all tiers. What stays tiered is HOW MANY
+// AI project actions a Free business may execute: its own bucket of 5 per
+// day, counted on execution only (see countProjectActionsToday). Every
+// other Free write stays behind the standing read-only rule.
+const FREE_PROJECT_ACTIONS_PER_DAY = 5;
+const FREE_PROJECT_CAP_MSG = "You have used today's 5 free AI project actions for this business. Project actions resume tomorrow, or upgrade to Starter, Solo or Pro for more AI actions. Nothing was created or changed.";
 
 function tierAllowsTool(tier, tool) {
-  // A project report is read-only. The Projects endpoints make the final
-  // access decision, including the invited-member path, so do not hide that
-  // one read behind the active business's write entitlement.
-  if (tool === "project_report") return true;
-  if (PROJECT_TOOLS.includes(tool)) return projectTierEligible(tier);
+  // Project tools are open on every plan. The Projects endpoints make the
+  // final access decision, including the invited-member path, and the Free
+  // project-action bucket is enforced separately below.
+  if (PROJECT_TOOLS.includes(tool)) return true;
   const cfg = AI_TIER_LIMITS[tier] || AI_TIER_LIMITS.free;
   if (cfg.tools === "all") return true;
   return cfg.tools.includes(tool);
@@ -221,7 +225,7 @@ function tierAllowsTool(tier, tool) {
 function allowedToolsForTier(tier) {
   const cfg = AI_TIER_LIMITS[tier] || AI_TIER_LIMITS.free;
   const base = cfg.tools === "all" ? BASE_TOOLS : [...cfg.tools];
-  return projectTierEligible(tier) ? [...new Set([...base, ...PROJECT_TOOLS])] : base;
+  return [...new Set([...base, ...PROJECT_TOOLS])];
 }
 
 // Roles that may use every AI tool. Everyone else (shop staff) may only
@@ -467,20 +471,16 @@ MISSING DETAILS: if a write request is missing a detail that cannot be known fro
 
 Only output an ACTION line when the user clearly wants something done. For plain questions, just answer in natural text with no ACTION line.`
     : `ACTIONS: you are in read-only mode on this plan. You cannot record sales, add expenses, or take any other action. If the user asks you to DO something, answer warmly that actions need an upgrade: "${UPGRADE_NUDGE}"`;
-  const projectSection = projectTierEligible(tier)
-    ? `PROJECT INTERVIEW AND MANAGEMENT:
+  const projectSection = `PROJECT INTERVIEW AND MANAGEMENT:
 - When the user wants a NEW project planned or created, interview briefly, ONE missing item at a time: first the project name, then its type (${PROJECT_TYPES.join(", ")}), then the goal. Do not invent the name, type or goal, and emit NO project ACTION while one is missing.
 - Once name, type and goal are known, draft an ordered milestone list and planned budget lines from the goal and anything the user gave you, then emit create_project_plan. If the user gave no budget information at all, ask ONE question for a rough total or the main cost lines before emitting it. Planned budget lines are a draft for confirmation, not recorded spending.
 - For an existing project, use the exact project name or id from the snapshot. If more than one visible project could match, ask which one; never guess.
 - Use project_report for every status question about a project. Use the project management tools only for the active business's projects, each as a separate proposal.
 
-`
-    : `PROJECTS ON THIS PLAN:
-Projects is a Starter feature. If the user asks you to plan, create or manage a project, or invite someone to one, do not emit a project write ACTION and do not pretend anything was done: explain that Projects is a Starter feature and they can upgrade to Starter, Solo or Pro.
-One read-only exception: for a project that was shared with this user by invitation, you may answer a status question with exactly this ACTION format:
-ACTION: {"tool": "project_report", "params": {"project": "exact project name or id"}}
+${tier === "free" ? `PROJECT ACTIONS ON THE FREE PLAN:
+Projects itself is open on this plan, in the app and through you. You may plan, create and manage projects with the project tools, always as proposals the user confirms first. Free includes ${FREE_PROJECT_ACTIONS_PER_DAY} AI project actions a day for this business, counted only when a confirmed project action is actually carried out; proposals, cancellations and project reports never use one up. If the system says today's free project actions are used up, relay that plainly and do not emit a project ACTION. Every OTHER kind of action (recording sales, adding expenses, adding products and so on) still needs an upgrade on this plan.
 
-`;
+` : ""}`;
   const managerSection = profile.paEnabled
     ? `MANAGER AND PA ROLE:
 You are also the owner's business manager and personal assistant. Be proactive about stock, debts and reminders: flag low stock, overdue debts and due reminders when they matter. Use what you remember about this business (see the memory section above) when you advise and plan. Draft messages for the owner's approval and never send anything silently.
@@ -1686,6 +1686,24 @@ async function loadPendingProposal(db, businessId, sessionKey) {
   }
 }
 
+// The Free project-action bucket: how many project write proposals this
+// business has EXECUTED today (UTC day). Proposals, cancels and failures
+// never count; project reports are reads, not proposals, so they never
+// count either. Per business per day by construction (business_id + the
+// resolved_at day), and yesterday's executions fall out automatically.
+async function countProjectActionsToday(db, businessId, day) {
+  try {
+    await ensurePendingProposals(db);
+    const marks = PROJECT_WRITE_TOOLS.map(() => "?").join(", ");
+    const row = await db.prepare(
+      `SELECT COUNT(*) AS n FROM ai_pending_proposals
+       WHERE business_id = ? AND status = 'executed' AND tool IN (${marks})
+         AND substr(resolved_at, 1, 10) = ?`
+    ).bind(businessId, ...PROJECT_WRITE_TOOLS, day).first();
+    return row ? Number(row.n) || 0 : 0;
+  } catch (e) { return 0; }
+}
+
 async function updateProposalStatus(db, businessId, proposalId, status, resultText) {
   try {
     if (resultText !== undefined) {
@@ -2102,6 +2120,18 @@ export async function runKopaAiChat(context, auth, body) {
     const pendingProposal = await loadPendingProposal(db, businessId, sessionKey);
     if (pendingProposal) {
       if (intentMatches(CONFIRM_RE, message)) {
+        // Free project-action bucket, enforced again at execution time: a
+        // proposal prepared earlier must not land once today's 5 free
+        // project actions are used up (another session may have spent
+        // them in between). The proposal is closed as failed, nothing is
+        // created, and the user hears the plain cap message.
+        if (tier === "free" && !isPlatformOwner && PROJECT_WRITE_TOOLS.includes(pendingProposal.tool)) {
+          const usedProjectActions = await countProjectActionsToday(db, businessId, day);
+          if (usedProjectActions >= FREE_PROJECT_ACTIONS_PER_DAY) {
+            await updateProposalStatus(db, businessId, pendingProposal.id, "failed", FREE_PROJECT_CAP_MSG);
+            return { status: 200, body: { ok: true, reply: FREE_PROJECT_CAP_MSG, answer: FREE_PROJECT_CAP_MSG, actions_taken: [], fallback: false, capped: true } };
+          }
+        }
         let storedParams = {};
         try { storedParams = JSON.parse(pendingProposal.params || "{}") || {}; } catch (e) { storedParams = {}; }
         let execResult;
@@ -2282,13 +2312,12 @@ export async function runKopaAiChat(context, auth, body) {
           actions_taken: [], fallback: false, usage: usageObj(),
         } };
       }
-      // Tier check first: Free is read-only; Starter has a small tool set.
+      // Tier check first: Free is read-only EXCEPT project writes (their
+      // own bucket, checked below); Starter has a small tool set.
       if (!tierAllowsTool(tier, action.tool)) {
-        const tierMsg = PROJECT_WRITE_TOOLS.includes(action.tool)
-          ? "Projects is a Starter feature. Upgrade to Starter, Solo or Pro to let me plan, create and manage projects for this business. Nothing was created or changed."
-          : tier === "free"
-            ? `I can answer questions about your business on your Free plan, but doing things like that needs an upgrade. ${UPGRADE_NUDGE}`
-            : `Your ${tier[0].toUpperCase() + tier.slice(1)} plan does not include "${action.tool}". Upgrade to Solo or Pro for the full AI assistant.`;
+        const tierMsg = tier === "free"
+          ? `I can answer questions about your business on your Free plan, but doing things like that needs an upgrade. ${UPGRADE_NUDGE}`
+          : `Your ${tier[0].toUpperCase() + tier.slice(1)} plan does not include "${action.tool}". Upgrade to Solo or Pro for the full AI assistant.`;
         return { status: 200, body: { ok: true, reply: tierMsg, answer: tierMsg, actions_taken: [], fallback: false, usage: usageObj() } };
       }
       if (!toolAllowed(auth, action.tool)) {
@@ -2299,9 +2328,18 @@ export async function runKopaAiChat(context, auth, body) {
           actions_taken: [], fallback: false, usage: usageObj(),
         } };
       }
-      // Per-day action cap for capped tiers (Starter). Read-only project
-      // reports do not consume an action.
-      if (action.tool !== "project_report" && !isPlatformOwner && tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
+      // Per-day action caps. Project writes on Free use their OWN bucket:
+      // 5 executed project actions per business per day, counted on
+      // execution only, so once the bucket is full no new proposal is
+      // created. Every other capped tier (Starter) keeps the shared
+      // ai_usage action counter exactly as before, project actions
+      // included. Read-only project reports consume no action anywhere.
+      if (PROJECT_WRITE_TOOLS.includes(action.tool) && tier === "free" && !isPlatformOwner) {
+        const usedProjectActions = await countProjectActionsToday(db, businessId, day);
+        if (usedProjectActions >= FREE_PROJECT_ACTIONS_PER_DAY) {
+          return { status: 200, body: { ok: true, reply: FREE_PROJECT_CAP_MSG, answer: FREE_PROJECT_CAP_MSG, actions_taken: [], fallback: false, capped: true, usage: usageObj() } };
+        }
+      } else if (action.tool !== "project_report" && !isPlatformOwner && tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
         const capMsg = `You have used today's AI action limit (${tierCfg.actionsPerDay} actions on Starter). It resets tomorrow. Upgrade to Solo or Pro for more.`;
         return { status: 200, body: { ok: true, reply: capMsg, answer: capMsg, actions_taken: [], fallback: false, capped: true, usage: usageObj() } };
       }
