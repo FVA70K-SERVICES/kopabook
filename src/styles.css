@@ -175,6 +175,19 @@ a:hover { text-decoration: underline; }
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: 2px solid var(--brand); outline-offset: -1px; border-color: var(--brand);
 }
+/* password visibility toggle (login) */
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 46px; }
+.pw-toggle {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  width: 34px; height: 34px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; border-radius: 8px; cursor: pointer;
+  color: var(--muted);
+}
+.pw-toggle:hover { color: var(--ink); background: var(--brand-soft); }
+.pw-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.pw-toggle svg { width: 20px; height: 20px; display: block; }
 .field .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 639px) { .field .row2 { grid-template-columns: 1fr; } }
 .alert {
