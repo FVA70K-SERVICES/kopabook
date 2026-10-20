@@ -153,3 +153,61 @@
   font-size: 12.5px; text-align: center; border-radius: 999px;
 }
 .fva-switch-btn { border: none; cursor: pointer; font-family: inherit; }
+
+/* Kopa Support case history (kept record, client view) */
+#fva-support-tools { padding: 8px 12px 0; background: #f8faf9; }
+#fva-history-btn {
+  background: none; border: none; padding: 2px 0; cursor: pointer;
+  color: var(--brand, #1a6b3c); font-size: 12.5px; font-weight: 700; font-family: inherit;
+}
+#fva-history-btn:hover { text-decoration: underline; }
+#fva-case-history {
+  flex: 1; overflow-y: auto; padding: 12px 14px; background: #fbfdfc;
+}
+.fva-history-head {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+}
+.fva-history-head strong { font-size: 14.5px; color: #14231a; }
+#fva-history-back, .fva-case-backlist {
+  background: white; border: 1px solid #dbe7dd; border-radius: 999px;
+  padding: 5px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  color: var(--brand, #1a6b3c); font-family: inherit;
+}
+.fva-history-note { font-size: 12px; color: #64748b; line-height: 1.45; margin: 0 0 10px; }
+.fva-history-empty { font-size: 13px; color: #64748b; line-height: 1.5; padding: 10px 2px; }
+.fva-case-item {
+  display: block; width: 100%; text-align: left; cursor: pointer; font-family: inherit;
+  background: white; border: 1px solid #e2eae3; border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 8px;
+}
+.fva-case-item:hover { border-color: var(--brand, #1a6b3c); }
+.fva-case-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.fva-case-chip {
+  display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.02em;
+  border-radius: 999px; padding: 2px 9px; text-transform: uppercase;
+}
+.fva-case-chip.open { background: #e3f4e5; color: #166534; }
+.fva-case-chip.resolved { background: #e0ecff; color: #1d4ed8; }
+.fva-case-chip.closed { background: #eceff1; color: #546e7a; }
+.fva-case-date { font-size: 11.5px; color: #84918a; }
+.fva-case-preview {
+  display: block; font-size: 13px; color: #26332a; line-height: 1.4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fva-case-confirmed { display: block; font-size: 11.5px; color: #1d4ed8; margin-top: 3px; }
+.fva-case-more {
+  display: block; width: 100%; background: none; border: none; cursor: pointer;
+  color: var(--brand, #1a6b3c); font-size: 13px; font-weight: 700; padding: 8px; font-family: inherit;
+}
+.fva-case-detail-head { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.fva-case-msgs { display: flex; flex-direction: column; gap: 8px; }
+.fva-case-events { margin-top: 14px; border-top: 1px solid #e2eae3; padding-top: 10px; }
+.fva-case-events-title { font-size: 12px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.fva-case-event { font-size: 12.5px; color: #5d6f63; line-height: 1.5; }
+.fva-case-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.fva-case-act {
+  background: white; border: 1px solid var(--brand, #1a6b3c); color: var(--brand, #1a6b3c);
+  border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+.fva-case-act.primary { background: var(--brand, #1a6b3c); color: white; }
+.fva-case-open-note { font-size: 12.5px; color: #5d6f63; line-height: 1.45; }

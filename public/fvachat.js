@@ -215,6 +215,8 @@
       return 'A person from the KopaBook team has joined';
     }
     if (supportState.needsHuman) return 'Waiting for a human from the KopaBook team';
+    if (supportState.caseStatus === 'resolved') return 'The team marked this support case resolved';
+    if (supportState.caseStatus === 'closed') return 'This support case is closed. Sending a message starts a new case';
     if (supportState.status === 'closed') return 'Kopa Bot is answering';
     return 'Kopa Bot is answering';
   }
@@ -232,6 +234,9 @@
       if (chatMode === 'support') { st.style.display = 'block'; st.textContent = supportStatusText(); }
       else st.style.display = 'none';
     }
+    const tools = body.querySelector('#fva-support-tools');
+    if (tools) tools.style.display = chatMode === 'support' ? 'block' : 'none';
+    if (chatMode !== 'support') closeCaseHistory();
   }
 
   function showDoorPicker() {
@@ -273,6 +278,182 @@
     div.textContent = text;
     wrap.appendChild(div);
     wrap.scrollTop = wrap.scrollHeight;
+  }
+
+  // ---- Kopa Support case history (client view) ----
+  // Support conversations are kept as a record (see /api/chat/cases).
+  // This view is read-mostly: a closed case never silently resumes, but
+  // the client can reopen one, or confirm a resolution, from here.
+  let caseListCursor = null;
+  let caseListLoading = false;
+
+  function fmtStamp(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) +
+      ', ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  function caseStatusLabel(s) {
+    return s === 'resolved' ? 'Resolved' : s === 'closed' ? 'Closed' : 'Open';
+  }
+  function eventText(e) {
+    const who = e.actor_type === 'client' ? (e.actor_name || 'You') : (e.actor_name || 'Support team');
+    if (e.event === 'opened') return 'Case opened';
+    if (e.event === 'resolved') return 'Marked resolved by ' + who;
+    if (e.event === 'closed') return 'Closed by ' + who;
+    if (e.event === 'reopened') return 'Reopened by ' + who;
+    if (e.event === 'confirmed') return 'Resolution confirmed by ' + who;
+    return e.event;
+  }
+
+  function setLiveVisible(v) {
+    ['#fva-chat-messages', '#fva-chat-input-area', '#fva-chat-quick'].forEach(sel => {
+      const el = body.querySelector(sel);
+      if (el) el.style.display = v ? '' : 'none';
+    });
+    const tools = body.querySelector('#fva-support-tools');
+    if (tools && !v) tools.style.display = 'none';
+    if (v) renderModeTabs();
+  }
+
+  function openCaseHistory() {
+    const view = body.querySelector('#fva-case-history');
+    if (!view) return;
+    setLiveVisible(false);
+    view.style.display = 'block';
+    const detail = body.querySelector('#fva-history-detail');
+    if (detail) detail.style.display = 'none';
+    const list = body.querySelector('#fva-history-list');
+    if (list) list.style.display = 'block';
+    caseListCursor = null;
+    loadCaseList(true);
+  }
+
+  function closeCaseHistory() {
+    const view = body.querySelector('#fva-case-history');
+    if (!view || view.style.display === 'none') return;
+    view.style.display = 'none';
+    setLiveVisible(true);
+  }
+
+  async function loadCaseList(reset) {
+    const list = body.querySelector('#fva-history-list');
+    if (!list || caseListLoading) return;
+    caseListLoading = true;
+    if (reset) list.innerHTML = '<p class="fva-history-empty">Loading your support chats...</p>';
+    try {
+      const url = API + '/cases?limit=15' + (caseListCursor ? '&cursor=' + encodeURIComponent(caseListCursor) : '');
+      const res = await fetch(url);
+      const data = await res.json();
+      const cases = data.cases || [];
+      if (reset) list.innerHTML = '';
+      if (!cases.length && reset) {
+        list.innerHTML = '<p class="fva-history-empty">No support chats yet. When you talk to Kopa Support, the conversation is kept here as a record.</p>';
+      }
+      cases.forEach(c => {
+        const item = document.createElement('button');
+        item.className = 'fva-case-item';
+        item.type = 'button';
+        item.innerHTML =
+          '<span class="fva-case-top"><span class="fva-case-chip ' + escapeHtml(c.status) + '">' + caseStatusLabel(c.status) + '</span>' +
+          '<span class="fva-case-date">' + escapeHtml(fmtStamp(c.opened_at)) + '</span></span>' +
+          '<span class="fva-case-preview">' + escapeHtml(c.last_message || 'Support conversation') + '</span>' +
+          (c.confirmed_at ? '<span class="fva-case-confirmed">You confirmed this was resolved</span>' : '');
+        item.addEventListener('click', () => openCaseDetail(c.id));
+        list.appendChild(item);
+      });
+      const oldMore = list.querySelector('.fva-case-more');
+      if (oldMore) oldMore.remove();
+      caseListCursor = data.nextCursor || null;
+      if (caseListCursor) {
+        const more = document.createElement('button');
+        more.className = 'fva-case-more';
+        more.type = 'button';
+        more.textContent = 'Show older chats';
+        more.addEventListener('click', () => loadCaseList(false));
+        list.appendChild(more);
+      }
+    } catch (e) {
+      if (reset) list.innerHTML = '<p class="fva-history-empty">Could not load your support chats. Please try again.</p>';
+    }
+    caseListLoading = false;
+  }
+
+  async function openCaseDetail(caseId) {
+    const detail = body.querySelector('#fva-history-detail');
+    const list = body.querySelector('#fva-history-list');
+    if (!detail) return;
+    if (list) list.style.display = 'none';
+    detail.style.display = 'block';
+    detail.innerHTML = '<p class="fva-history-empty">Loading...</p>';
+    try {
+      const res = await fetch(API + '/cases?caseId=' + encodeURIComponent(caseId));
+      const data = await res.json();
+      if (!res.ok || !data.case) {
+        detail.innerHTML = '<p class="fva-history-empty">That support chat could not be loaded.</p>';
+        return;
+      }
+      const c = data.case;
+      let html = '<button class="fva-case-backlist" type="button">All support chats</button>';
+      html += '<div class="fva-case-detail-head"><span class="fva-case-chip ' + escapeHtml(c.status) + '">' + caseStatusLabel(c.status) + '</span>' +
+        '<span class="fva-case-date">Opened ' + escapeHtml(fmtStamp(c.opened_at)) + '</span></div>';
+      html += '<div class="fva-case-msgs">';
+      (data.messages || []).forEach(m => {
+        const who = m.sender === 'visitor' ? 'visitor' : m.sender === 'agent' ? 'agent' : 'bot';
+        html += '<div class="fva-msg ' + who + '">' +
+          (m.sender === 'agent' && m.sender_name ? '<div class="bot-label">👤 ' + escapeHtml(m.sender_name) + '</div>' : '') +
+          escapeHtml(m.message) +
+          '<div class="time">' + escapeHtml(fmtStamp(m.created_at)) + '</div></div>';
+      });
+      html += '</div>';
+      const events = data.events || [];
+      if (events.length) {
+        html += '<div class="fva-case-events"><div class="fva-case-events-title">Case history</div>' +
+          events.map(e => '<div class="fva-case-event">' + escapeHtml(eventText(e)) + ' · ' + escapeHtml(fmtStamp(e.created_at)) + '</div>').join('') +
+          '</div>';
+      }
+      html += '<div class="fva-case-actions">';
+      if (c.status === 'resolved' && !c.confirmed_at) {
+        html += '<button class="fva-case-act primary" type="button" data-act="confirm">Confirm resolved</button>';
+      }
+      if (c.status === 'resolved' || c.status === 'closed') {
+        html += '<button class="fva-case-act" type="button" data-act="reopen">' + (c.status === 'resolved' ? 'Not resolved yet, reopen' : 'Reopen this case') + '</button>';
+      }
+      if (c.status === 'open') {
+        html += '<span class="fva-case-open-note">This case is open. Just send a message in Kopa Support to continue it.</span>';
+      }
+      html += '</div>';
+      detail.innerHTML = html;
+      const backBtn = detail.querySelector('.fva-case-backlist');
+      if (backBtn) backBtn.addEventListener('click', openCaseHistory);
+      detail.querySelectorAll('.fva-case-act').forEach(b => {
+        b.addEventListener('click', () => caseAction(caseId, b.getAttribute('data-act')));
+      });
+    } catch (e) {
+      detail.innerHTML = '<p class="fva-history-empty">Could not load that support chat. Please try again.</p>';
+    }
+  }
+
+  async function caseAction(caseId, action) {
+    try {
+      const res = await fetch(API + '/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseId, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(data.error || 'That did not work. Please try again.'); return; }
+      if (action === 'reopen') {
+        closeCaseHistory();
+        setChatMode('support', true);
+        appendModeNote('This support case is open again, with the full conversation kept. Send your message here.');
+        poll();
+      } else {
+        openCaseDetail(caseId);
+      }
+    } catch (e) {
+      alert('That did not work. Please try again.');
+    }
   }
 
   function closeChat() {
@@ -338,11 +519,23 @@
         '<button data-mode="support">Kopa Support</button>' +
       '</div>' +
       '<div id="fva-support-status" style="display:none;"></div>' +
+      '<div id="fva-support-tools" style="display:none;">' +
+        '<button id="fva-history-btn" type="button">Past support chats</button>' +
+      '</div>' +
+      '<div id="fva-case-history" style="display:none;">' +
+        '<div class="fva-history-head">' +
+          '<button id="fva-history-back" type="button">Back to chat</button>' +
+          '<strong>Past support chats</strong>' +
+        '</div>' +
+        '<p class="fva-history-note">Support conversations are kept as a record for you and the FVA70K team. Ask Kopa AI keeps the last 24 hours.</p>' +
+        '<div id="fva-history-list"></div>' +
+        '<div id="fva-history-detail" style="display:none;"></div>' +
+      '</div>' +
       '<div id="fva-door-picker" style="display:none;">' +
         '<div class="fva-door-title">Who do you want to talk to?</div>' +
         '<button class="fva-door-btn" data-mode="ai"><strong>Ask Kopa AI</strong><span>Your shop assistant. Records sales and expenses, and answers from your own records.</span></button>' +
         '<button class="fva-door-btn" data-mode="support"><strong>Kopa Support</strong><span>Chat with the FVA70K team about KopaBook itself. Quick platform answers first, a real person when you need one.</span></button>' +
-        '<div class="fva-door-note">One chat, one history. This chat keeps the last 24 hours, shared across both sides.</div>' +
+        '<div class="fva-door-note">One chat, two doors. Ask Kopa AI keeps the last 24 hours. Kopa Support conversations are kept as a record, so you and the FVA70K team can always look back at what was said.</div>' +
       '</div>' +
       '<div id="fva-chat-messages"></div>' +
       '<div id="fva-typing">Someone is typing...</div>' +
@@ -391,6 +584,10 @@
     if (tabsEl) tabsEl.querySelectorAll('button').forEach(b => {
       b.addEventListener('click', () => switchMode(b.getAttribute('data-mode')));
     });
+    const histBtn = body.querySelector('#fva-history-btn');
+    if (histBtn) histBtn.addEventListener('click', openCaseHistory);
+    const histBack = body.querySelector('#fva-history-back');
+    if (histBack) histBack.addEventListener('click', closeCaseHistory);
     loadHistory();
     poll();
     afterOwnerUI();
