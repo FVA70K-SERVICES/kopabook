@@ -28,6 +28,171 @@
   if (chatMode !== 'ai' && chatMode !== 'support') chatMode = '';
   let supportState = null;
   let doorPickerShown = false;
+  const renderedProposalIds = new Set();
+
+  // ---- Personal assistant (PA) profile, Ask Kopa AI side ----
+  // GET /api/ai/pa returns { ok, assistant: { name, custom_name, voice, language },
+  // pa_enabled, cards: [...] }. Fetched once per open in owner mode.
+  let paProfile = null;
+  let paFetchedThisOpen = false;
+  let paCardsRenderedThisOpen = false;
+  let localAssistantLanguage = '';
+  let activeProposal = null;
+
+  // ---- Live voice (Web Speech API, AI mode, owner mode) ----
+  let voiceMode = false;
+  let voiceState = 'idle'; // idle | listening | processing | speaking
+  let recognition = null;
+  let recognitionRunning = false;
+  let recognitionHadResult = false;
+  let voiceRestartTimer = null;
+  let voiceUnsupportedNoteShownThisOpen = false;
+  let langVoiceNoteShown = false;
+  let introSpokenThisVoiceSession = false;
+  const spokenMessageIds = new Set();
+  const spokenTexts = new Set();
+  let speechQueue = [];
+  let speechSpeaking = false;
+  let cachedVoices = [];
+
+  function getSR() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  }
+  function paAssistant() {
+    return (paProfile && paProfile.assistant) || null;
+  }
+  function paEnabled() {
+    return !!paProfile && paProfile.pa_enabled !== false;
+  }
+  function assistantCustomName() {
+    const a = paAssistant();
+    if (!paEnabled() || !a || !a.custom_name || !a.name) return '';
+    return String(a.name).trim();
+  }
+  function paLanguage() {
+    const a = paAssistant();
+    const lang = (a && a.language) || localAssistantLanguage || 'en';
+    return ['en', 'pcm', 'ha', 'yo', 'ig'].indexOf(lang) !== -1 ? lang : 'en';
+  }
+
+  function resolveLang(language) {
+    const map = { en: 'en-NG', pcm: 'en-NG', ha: 'ha-NG', yo: 'yo-NG', ig: 'ig-NG' };
+    return map[language] || 'en-NG';
+  }
+
+  function voiceGenderMatch(voice, choice) {
+    const n = String((voice && voice.name) || '').toLowerCase();
+    if (choice === 'ng_female') return n.indexOf('female') !== -1;
+    if (choice === 'ng_male') return n.indexOf('male') !== -1 && n.indexOf('female') === -1;
+    return false;
+  }
+  function pickGenderedVoice(list, choice) {
+    if (!list || !list.length) return null;
+    for (let i = 0; i < list.length; i++) {
+      if (voiceGenderMatch(list[i], choice)) return list[i];
+    }
+    return list[0];
+  }
+  function resolveVoice(choice, voicesList) {
+    const profiles = {
+      ng_female: { pitch: 1.1, rate: 1.0 },
+      ng_male: { pitch: 0.85, rate: 0.98 },
+      default: { pitch: 1, rate: 1 },
+    };
+    const profile = profiles[choice] || profiles.default;
+    if (!choice || choice === 'default' || !profiles[choice]) {
+      return { voice: null, pitch: 1, rate: 1 };
+    }
+    const list = Array.isArray(voicesList) ? voicesList : [];
+    const langOf = v => String((v && v.lang) || '').toLowerCase();
+    const ng = list.filter(v => langOf(v).indexOf('en-ng') === 0);
+    if (ng.length) return { voice: pickGenderedVoice(ng, choice), pitch: profile.pitch, rate: profile.rate };
+    const english = list.filter(v => langOf(v).indexOf('en') === 0);
+    if (english.length) {
+      const tier = v => {
+        const l = langOf(v);
+        if (l.indexOf('en-gb') === 0) return 0;
+        if (l.indexOf('en-us') === 0) return 1;
+        return 2;
+      };
+      const sorted = english.slice().sort((a, b) => tier(a) - tier(b));
+      let chosen = null;
+      for (let i = 0; i < sorted.length; i++) {
+        if (voiceGenderMatch(sorted[i], choice)) { chosen = sorted[i]; break; }
+      }
+      return { voice: chosen || sorted[0], pitch: profile.pitch, rate: profile.rate };
+    }
+    return { voice: null, pitch: profile.pitch, rate: profile.rate };
+  }
+
+  // Voice for a specific utterance language: match the language first,
+  // apply gender resolution inside that pool, else fall back to the
+  // English resolution above.
+  function resolveVoiceDetailed(choice, voicesList, langTag) {
+    const primary = String(langTag || 'en-NG').split('-')[0].toLowerCase();
+    if (!choice || choice === 'default') {
+      return { voice: null, pitch: 1, rate: 1, matchedLang: primary === 'en' };
+    }
+    if (primary !== 'en') {
+      const list = Array.isArray(voicesList) ? voicesList : [];
+      const matching = list.filter(v => String((v && v.lang) || '').toLowerCase().split('-')[0] === primary);
+      if (matching.length) {
+        const base = resolveVoice(choice, []);
+        return { voice: pickGenderedVoice(matching, choice), pitch: base.pitch, rate: base.rate, matchedLang: true };
+      }
+      const fb = resolveVoice(choice, list);
+      return { voice: fb.voice, pitch: fb.pitch, rate: fb.rate, matchedLang: false };
+    }
+    const r = resolveVoice(choice, voicesList);
+    return { voice: r.voice, pitch: r.pitch, rate: r.rate, matchedLang: true };
+  }
+
+  window.__FVA_VOICE_TEST__ = { resolveVoice, resolveLang };
+
+  function refreshCachedVoices() {
+    try {
+      if ('speechSynthesis' in window) {
+        const v = window.speechSynthesis.getVoices();
+        if (v && v.length) cachedVoices = v;
+      }
+    } catch (e) {}
+    return cachedVoices;
+  }
+  if ('speechSynthesis' in window && window.speechSynthesis && typeof window.speechSynthesis.addEventListener === 'function') {
+    try { window.speechSynthesis.addEventListener('voiceschanged', refreshCachedVoices); } catch (e) {}
+  }
+
+  function detectLanguageSwitch(text) {
+    const raw = String(text || '');
+    const names = { english: 'en', pidgin: 'pcm', hausa: 'ha', yoruba: 'yo', igbo: 'ig' };
+    let found = '';
+    const bare = raw.trim().toLowerCase().replace(/[.!]+$/, '');
+    if (names[bare]) found = names[bare];
+    if (!found) {
+      const m = raw.toLowerCase().match(/(?:speak|talk|switch|change|use|reply|respond|answer|continue|in|to)\s+(?:to\s+|in\s+)?(english|pidgin|hausa|yoruba|igbo)\b/);
+      if (m && names[m[1]]) found = names[m[1]];
+    }
+    if (found) {
+      localAssistantLanguage = found;
+      const a = paAssistant();
+      if (a) a.language = found;
+    }
+    return found;
+  }
+
+  function prefersReducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { return false; }
+  }
+
+  function scrollMessagesToBottom(wrap) {
+    if (!wrap) return;
+    if (prefersReducedMotion()) { wrap.scrollTop = wrap.scrollHeight; return; }
+    try {
+      wrap.scrollTo({ top: wrap.scrollHeight, behavior: 'smooth' });
+    } catch (e) { wrap.scrollTop = wrap.scrollHeight; }
+  }
 
   function routeSide() {
     const p = window.location.pathname;
@@ -41,7 +206,10 @@
   }
   function modeName(mode) { return mode === 'ai' ? 'Ask Kopa AI' : 'Kopa Support'; }
   function botLabel() {
-    if (IS_KOPABOOK && isOwnerMode()) return chatMode === 'ai' ? 'Kopa AI' : 'Kopa Bot';
+    if (IS_KOPABOOK && isOwnerMode()) {
+      if (chatMode === 'ai') return assistantCustomName() || 'Kopa AI';
+      return 'Kopa Bot';
+    }
     return BOT_NAME;
   }
   function navigateChatRoute(mode) {
@@ -146,6 +314,11 @@
   }
 
   function openChat(requestedMode) {
+    paFetchedThisOpen = false;
+    paCardsRenderedThisOpen = false;
+    voiceUnsupportedNoteShownThisOpen = false;
+    langVoiceNoteShown = false;
+    activeProposal = null;
     if (IS_KOPABOOK && isOwnerMode()) {
       const side = routeSide();
       if (requestedMode === 'ai' || requestedMode === 'support') setChatMode(requestedMode, true);
@@ -180,7 +353,9 @@
   function switchMode(mode) {
     if (!IS_KOPABOOK || !isOwnerMode()) return;
     if (mode === chatMode) return;
+    if (mode !== 'ai') stopVoiceMode();
     setChatMode(mode, false);
+    if (mode === 'ai') { loadPaProfile(); renderPaCards(); updateVoiceControls(); }
     // Keep the address bar on the clean route for the active side.
     const target = chatRouteFor(mode);
     if (routeSide() && window.location.pathname !== target) {
@@ -195,7 +370,8 @@
     const status = win.querySelector('#fva-chat-status');
     if (!title) return;
     if (IS_KOPABOOK && isOwnerMode()) {
-      title.textContent = chatMode ? modeName(chatMode) : 'Chat';
+      const custom = chatMode === 'ai' ? assistantCustomName() : '';
+      title.textContent = custom || (chatMode ? modeName(chatMode) : 'Chat');
       if (status) {
         status.textContent = chatMode === 'ai'
           ? 'Your shop assistant, automated'
@@ -237,6 +413,8 @@
     const tools = body.querySelector('#fva-support-tools');
     if (tools) tools.style.display = chatMode === 'support' ? 'block' : 'none';
     if (chatMode !== 'support') closeCaseHistory();
+    renderPaCards();
+    updateVoiceControls();
   }
 
   function showDoorPicker() {
@@ -266,8 +444,390 @@
     if (!(IS_KOPABOOK && isOwnerMode())) return;
     updateHeaderPersona();
     renderModeTabs();
+    loadPaProfile();
     if (!chatMode) showDoorPicker();
     else showInitialQuickReplies();
+  }
+
+  // ---- PA profile and cards ----
+  async function loadPaProfile() {
+    if (!IS_KOPABOOK || !isOwnerMode()) return null;
+    if (paFetchedThisOpen) return paProfile;
+    paFetchedThisOpen = true;
+    try {
+      const res = await fetch((API_BASE || '') + '/api/ai/pa');
+      const data = await res.json().catch(() => null);
+      if (data && (data.assistant || data.cards || data.pa_enabled !== undefined)) {
+        paProfile = data;
+      }
+    } catch (e) {}
+    updateHeaderPersona();
+    renderPaCards();
+    updateVoiceControls();
+    return paProfile;
+  }
+
+  function renderPaCards() {
+    if (!IS_KOPABOOK || !isOwnerMode() || chatMode !== 'ai') return;
+    if (paCardsRenderedThisOpen || !paEnabled()) return;
+    const cards = Array.isArray(paProfile.cards) ? paProfile.cards : [];
+    const wrap = body.querySelector('#fva-chat-messages');
+    if (!wrap) return;
+    paCardsRenderedThisOpen = true;
+    if (!cards.length) return;
+    cards.forEach(card => {
+      if (card) wrap.appendChild(buildPaCard(card));
+    });
+    scrollMessagesToBottom(wrap);
+  }
+
+  function buildPaCard(card) {
+    const el = document.createElement('div');
+    el.className = 'fva-pa-card';
+    if (card.type) el.setAttribute('data-pa-type', String(card.type));
+    if (card.id !== undefined && card.id !== null) el.setAttribute('data-pa-id', String(card.id));
+
+    const text = document.createElement('div');
+    text.className = 'fva-pa-card-text';
+    text.textContent = card.text || '';
+    el.appendChild(text);
+
+    const err = document.createElement('div');
+    err.className = 'fva-pa-card-error';
+    err.style.display = 'none';
+
+    if (card.type === 'briefing') {
+      const actions = document.createElement('div');
+      actions.className = 'fva-pa-card-actions';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fva-pa-btn fva-pa-btn-primary';
+      b.textContent = 'Brief me';
+      b.addEventListener('click', () => sendMessage('Brief me'));
+      actions.appendChild(b);
+      el.appendChild(actions);
+    } else if (card.type === 'reminder_due') {
+      const actions = document.createElement('div');
+      actions.className = 'fva-pa-card-actions';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fva-pa-btn fva-pa-btn-primary';
+      b.textContent = 'Mark done';
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        err.style.display = 'none';
+        try {
+          const res = await fetch((API_BASE || '') + '/api/ai/pa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'reminder_done', reminder_id: card.reminder_id }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || (data && data.ok === false)) throw new Error('failed');
+          el.remove();
+        } catch (e) {
+          b.disabled = false;
+          err.textContent = 'Could not mark that done. Please try again.';
+          err.style.display = 'block';
+        }
+      });
+      actions.appendChild(b);
+      el.appendChild(actions);
+    } else {
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'fva-pa-dismiss';
+      dismiss.textContent = '×';
+      dismiss.setAttribute('aria-label', 'Dismiss');
+      dismiss.addEventListener('click', () => el.remove());
+      el.appendChild(dismiss);
+    }
+    el.appendChild(err);
+    return el;
+  }
+
+  // ---- Live voice engine ----
+  function setVoiceChip(text) {
+    const chip = body.querySelector('#fva-voice-chip');
+    if (!chip) return;
+    if (!text) { chip.style.display = 'none'; chip.textContent = ''; return; }
+    chip.style.display = 'inline-flex';
+    chip.textContent = text;
+  }
+  function updateVoiceButtonState() {
+    const b = body.querySelector('#fva-voice-btn');
+    if (!b) return;
+    b.textContent = voiceMode ? '⏹' : '🎤';
+    b.classList.toggle('active', !!voiceMode);
+    b.classList.toggle('listening', !!(voiceMode && voiceState === 'listening'));
+    b.setAttribute('aria-label', voiceMode ? 'Stop voice mode' : 'Start voice mode');
+    b.setAttribute('aria-pressed', voiceMode ? 'true' : 'false');
+  }
+  function updateVoiceControls() {
+    const area = body.querySelector('#fva-chat-input-area');
+    if (!area) return;
+    const eligible = IS_KOPABOOK && isOwnerMode() && chatMode === 'ai';
+    let btnEl = body.querySelector('#fva-voice-btn');
+    if (!eligible) {
+      if (voiceMode) stopVoiceMode();
+      btnEl = body.querySelector('#fva-voice-btn');
+      if (btnEl) btnEl.remove();
+      setVoiceChip('');
+      return;
+    }
+    if (!getSR()) {
+      if (btnEl) btnEl.remove();
+      setVoiceChip('');
+      if (!voiceUnsupportedNoteShownThisOpen && body.querySelector('#fva-chat-messages')) {
+        voiceUnsupportedNoteShownThisOpen = true;
+        appendModeNote('Voice works in Chrome and in the Android app. Typing works everywhere.');
+      }
+      return;
+    }
+    if (!btnEl) {
+      btnEl = document.createElement('button');
+      btnEl.type = 'button';
+      btnEl.id = 'fva-voice-btn';
+      btnEl.textContent = '🎤';
+      btnEl.setAttribute('aria-label', 'Start voice mode');
+      btnEl.addEventListener('click', toggleVoiceMode);
+      const inputEl = body.querySelector('#fva-chat-input');
+      if (inputEl) area.insertBefore(btnEl, inputEl);
+      else area.appendChild(btnEl);
+    }
+    btnEl.style.display = '';
+    updateVoiceButtonState();
+  }
+
+  function toggleVoiceMode() {
+    if (voiceMode) stopVoiceMode();
+    else startVoiceMode();
+  }
+
+  function startVoiceMode() {
+    if (voiceMode) return;
+    if (!(IS_KOPABOOK && isOwnerMode() && chatMode === 'ai')) return;
+    if (!getSR()) { updateVoiceControls(); return; }
+    loadPaProfile();
+    voiceMode = true;
+    introSpokenThisVoiceSession = false;
+    voiceState = 'processing';
+    updateVoiceButtonState();
+    setVoiceChip('Listening...');
+    const custom = assistantCustomName();
+    if (custom && soundOn && 'speechSynthesis' in window) {
+      introSpokenThisVoiceSession = true;
+      enqueueSpeech('Hi, this is ' + custom + '.');
+      // Listening starts when the introduction finishes (queue onend path).
+      if (!speechSpeaking && !speechQueue.length) startListening();
+    } else {
+      startListening();
+    }
+  }
+
+  function stopVoiceMode() {
+    if (voiceRestartTimer) { clearTimeout(voiceRestartTimer); voiceRestartTimer = null; }
+    voiceMode = false;
+    voiceState = 'idle';
+    speechQueue = [];
+    speechSpeaking = false;
+    if (recognition) {
+      try { if (typeof recognition.abort === 'function') recognition.abort(); else if (typeof recognition.stop === 'function') recognition.stop(); } catch (e) {}
+      recognitionRunning = false;
+      recognition = null;
+    }
+    try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch (e) {}
+    updateVoiceButtonState();
+    setVoiceChip('');
+  }
+
+  function scheduleListeningRestart(delay) {
+    if (!voiceMode) return;
+    if (voiceRestartTimer) clearTimeout(voiceRestartTimer);
+    voiceRestartTimer = setTimeout(() => {
+      voiceRestartTimer = null;
+      startListening();
+    }, delay || 350);
+  }
+
+  function startListening(retryLang) {
+    if (!voiceMode || speechSpeaking || speechQueue.length || recognitionRunning) return;
+    const SR = getSR();
+    if (!SR) { stopVoiceMode(); return; }
+    let rec;
+    try { rec = new SR(); } catch (e) { scheduleListeningRestart(600); return; }
+    recognition = rec;
+    recognitionHadResult = false;
+    rec.lang = retryLang || resolveLang(paLanguage());
+    try { rec.interimResults = false; } catch (e) {}
+    try { rec.maxAlternatives = 1; } catch (e) {}
+    try { rec.continuous = false; } catch (e) {}
+    voiceState = 'listening';
+    setVoiceChip('Listening...');
+    updateVoiceButtonState();
+    rec.onresult = event => {
+      let finalText = '';
+      let hasFinal = false;
+      try {
+        for (let i = 0; i < event.results.length; i++) {
+          const r = event.results[i];
+          if (r && r.isFinal) { hasFinal = true; if (r[0]) finalText += r[0].transcript || ''; }
+        }
+      } catch (e) {}
+      if (!hasFinal) return;
+      recognitionHadResult = true;
+      const t = finalText.trim();
+      if (!t) { handleRecognitionNoMatch(); return; }
+      voiceState = 'processing';
+      setVoiceChip('Thinking...');
+      updateVoiceButtonState();
+      try { rec.stop(); } catch (e) {}
+      recognitionRunning = false;
+      sendMessage(t);
+      // If the reply is not spoken (for example sound is off), resume listening.
+      setTimeout(() => {
+        if (voiceMode && voiceState === 'processing' && !speechSpeaking && !speechQueue.length) {
+          scheduleListeningRestart(600);
+        }
+      }, 2500);
+    };
+    rec.onnomatch = () => handleRecognitionNoMatch();
+    rec.onerror = event => {
+      const err = event && event.error;
+      recognitionRunning = false;
+      if (!voiceMode) return;
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        appendModeNote('Microphone is blocked. Allow mic access in your browser settings, or keep typing.');
+        stopVoiceMode();
+        return;
+      }
+      if (err === 'language-not-supported') {
+        const langNow = paLanguage();
+        if (!retryLang && (langNow === 'en' || langNow === 'pcm')) { startListening('en-GB'); return; }
+        appendModeNote('Voice recognition is not available for that language on this device. Typing works everywhere.');
+        stopVoiceMode();
+        return;
+      }
+      if (err === 'aborted') return;
+      if (voiceState === 'listening') scheduleListeningRestart(500);
+    };
+    rec.onend = () => {
+      recognitionRunning = false;
+      if (voiceMode && voiceState === 'listening' && !recognitionHadResult) {
+        scheduleListeningRestart(500);
+      }
+    };
+    try {
+      recognitionRunning = true;
+      rec.start();
+    } catch (e) {
+      recognitionRunning = false;
+      scheduleListeningRestart(600);
+    }
+  }
+
+  function handleRecognitionNoMatch() {
+    if (!voiceMode) return;
+    try { if (recognition && typeof recognition.stop === 'function') recognition.stop(); } catch (e) {}
+    recognitionRunning = false;
+    if (activeProposal && !activeProposal.noMatchPrompted) {
+      activeProposal.noMatchPrompted = true;
+      voiceState = 'processing';
+      setVoiceChip('Thinking...');
+      enqueueSpeech('I did not catch that. Say yes to confirm, or no to cancel.');
+      if (!speechSpeaking && !speechQueue.length) scheduleListeningRestart(400);
+    } else {
+      scheduleListeningRestart(400);
+    }
+  }
+
+  function cleanTextForSpeech(text) {
+    return String(text || '')
+      .replace(/https?:\/\/[^\s]+/g, '')
+      .replace(/www\.[^\s]+/g, '')
+      .replace(/[✓✔]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function enqueueSpeech(text) {
+    const clean = cleanTextForSpeech(text);
+    if (!clean) return;
+    if (!soundOn) return;
+    if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance !== 'function') return;
+    speechQueue.push(clean);
+    processSpeechQueue();
+  }
+
+  function processSpeechQueue() {
+    if (speechSpeaking) return;
+    if (!speechQueue.length) return;
+    if (!voiceMode) { speechQueue = []; return; }
+    const text = speechQueue.shift();
+    let utter;
+    try {
+      utter = new window.SpeechSynthesisUtterance(text);
+    } catch (e) { processSpeechQueue(); return; }
+    speechSpeaking = true;
+    voiceState = 'speaking';
+    setVoiceChip('Speaking...');
+    updateVoiceButtonState();
+    const langTag = resolveLang(paLanguage());
+    utter.lang = langTag;
+    const voices = refreshCachedVoices();
+    const choice = (paAssistant() && paAssistant().voice) || 'default';
+    const resolved = resolveVoiceDetailed(choice, voices, langTag);
+    const primary = langTag.split('-')[0].toLowerCase();
+    if (primary !== 'en' && !resolved.matchedLang && !langVoiceNoteShown) {
+      langVoiceNoteShown = true;
+      appendModeNote("Voices come from your phone. For a full Nigerian voice, add English (Nigeria) in your phone's text-to-speech settings, it is free.");
+    }
+    if (resolved.voice) { try { utter.voice = resolved.voice; } catch (e) {} }
+    utter.pitch = resolved.pitch;
+    utter.rate = resolved.rate;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      speechSpeaking = false;
+      if (speechQueue.length) { processSpeechQueue(); return; }
+      if (voiceMode) {
+        voiceState = 'processing';
+        setVoiceChip('Listening...');
+        updateVoiceButtonState();
+        scheduleListeningRestart(350);
+      }
+    };
+    utter.onend = finish;
+    utter.onerror = finish;
+    try {
+      window.speechSynthesis.speak(utter);
+    } catch (e) { finish(); }
+  }
+
+  function maybeSpeakBotText(text, msgId) {
+    if (!voiceMode || chatMode !== 'ai') return;
+    const clean = cleanTextForSpeech(text);
+    if (!clean) return;
+    if (msgId !== undefined && msgId !== null && msgId !== '') {
+      const key = String(msgId);
+      if (spokenMessageIds.has(key)) return;
+      spokenMessageIds.add(key);
+    }
+    if (spokenTexts.has(clean)) return;
+    spokenTexts.add(clean);
+    enqueueSpeech(clean);
+  }
+
+  function speakProposal(lines) {
+    if (!voiceMode) return;
+    const parts = (lines || []).map(l => {
+      const s = String(l).trim();
+      if (!s) return '';
+      return /[.!?]$/.test(s) ? s : s + '.';
+    }).filter(Boolean);
+    const text = (parts.join(' ') + ' Say yes to confirm, or no to cancel.').trim();
+    enqueueSpeech(text);
   }
 
   function appendModeNote(text) {
@@ -277,7 +837,7 @@
     div.className = 'fva-mode-note';
     div.textContent = text;
     wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
+    scrollMessagesToBottom(wrap);
   }
 
   // ---- Kopa Support case history (client view) ----
@@ -457,6 +1017,7 @@
   }
 
   function closeChat() {
+    stopVoiceMode();
     isOpen = false;
     win.classList.remove('open');
     btn.innerHTML = '💬<span id="fva-chat-badge">0</span>';
@@ -540,6 +1101,7 @@
       '<div id="fva-chat-messages"></div>' +
       '<div id="fva-typing">Someone is typing...</div>' +
       '<div id="fva-chat-quick"></div>' +
+      '<div id="fva-voice-chip" style="display:none;"></div>' +
       '<div id="fva-emoji-picker" style="display:none;">' +
         EMOJIS.map(e => '<button class="fva-emoji">' + e + '</button>').join('') +
       '</div>' +
@@ -638,6 +1200,13 @@
       appendModeNote('Choose Ask Kopa AI or Kopa Support first, then send that again.');
       return;
     }
+    // Local language switch mirror (for example "speak Yoruba"), so voice
+    // recognition and speech switch in this session straight away.
+    if (IS_KOPABOOK && isOwnerMode()) detectLanguageSwitch(text);
+    const normText = String(text || '').trim().toLowerCase();
+    if (activeProposal && ['confirm', 'cancel', 'yes', 'no', 'na so'].indexOf(normText) !== -1) {
+      activeProposal = null;
+    }
     const msgId = 'local_' + Date.now();
     appendMsg('visitor', text, Date.now(), msgId, false);
     showBotTyping();
@@ -666,7 +1235,104 @@
       if (data.botReply && data.botReply.action) {
         showActionButton(data.botReply.action);
       }
+      // Speak the bot reply on the send path in voice mode. The poll path
+      // speaks the same text by message id and by text, so it is not repeated.
+      if (data.botReply && data.botReply.answer) {
+        maybeSpeakBotText(data.botReply.answer);
+      }
+      // Confirmation proposal card for a write action proposed by Ask Kopa AI.
+      // Confirming or cancelling is an ordinary chat message: the server
+      // interprets the exact texts "Confirm" and "Cancel".
+      if (data.botReply && data.botReply.proposal) {
+        renderProposalCard(data.botReply.proposal);
+      }
     } catch (e) { hideBotTyping(); }
+  }
+
+  function renderProposalCard(p) {
+    if (!p) return;
+    if (p.id !== undefined && p.id !== null && p.id !== '') {
+      const key = String(p.id);
+      if (renderedProposalIds.has(key)) return;
+      renderedProposalIds.add(key);
+    }
+    const wrap = body.querySelector('#fva-chat-messages');
+    if (!wrap) return;
+
+    let lines = [];
+    if (Array.isArray(p.lines) && p.lines.length) {
+      lines = p.lines.map(l => String(l)).filter(l => l.trim() !== '');
+    }
+    if (!lines.length && p.summary) {
+      lines = String(p.summary).split(/\r?\n/).filter(l => l.trim() !== '');
+    }
+
+    const card = document.createElement('div');
+    card.className = 'fva-proposal-card';
+    if (p.id !== undefined && p.id !== null && p.id !== '') {
+      card.setAttribute('data-proposal-id', String(p.id));
+    }
+
+    const heading = document.createElement('div');
+    heading.className = 'fva-proposal-title';
+    heading.textContent = 'Please confirm';
+    card.appendChild(heading);
+
+    if (lines.length) {
+      const linesEl = document.createElement('div');
+      linesEl.className = 'fva-proposal-lines';
+      lines.forEach(line => {
+        const row = document.createElement('div');
+        row.className = 'fva-proposal-line';
+        row.textContent = line;
+        linesEl.appendChild(row);
+      });
+      card.appendChild(linesEl);
+    }
+
+    const note = document.createElement('div');
+    note.className = 'fva-proposal-note';
+    note.textContent = 'Expires in 10 minutes';
+    card.appendChild(note);
+
+    const status = document.createElement('div');
+    status.className = 'fva-proposal-status';
+    status.setAttribute('aria-live', 'polite');
+
+    const actions = document.createElement('div');
+    actions.className = 'fva-proposal-actions';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'fva-proposal-btn fva-proposal-confirm';
+    confirmBtn.textContent = 'Confirm';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'fva-proposal-btn fva-proposal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const choose = (statusText, message) => {
+      if (confirmBtn.disabled || cancelBtn.disabled) return;
+      confirmBtn.disabled = true;
+      cancelBtn.disabled = true;
+      card.classList.add('is-done');
+      if (activeProposal && activeProposal.cardEl === card) activeProposal = null;
+      status.textContent = statusText;
+      sendMessage(message);
+    };
+    confirmBtn.addEventListener('click', () => choose('You tapped Confirm', 'Confirm'));
+    cancelBtn.addEventListener('click', () => choose('You cancelled this', 'Cancel'));
+
+    actions.appendChild(confirmBtn);
+    actions.appendChild(cancelBtn);
+    card.appendChild(actions);
+    card.appendChild(status);
+
+    wrap.appendChild(card);
+    activeProposal = { id: (p.id !== undefined && p.id !== null ? p.id : null), lines, cardEl: card, noMatchPrompted: false };
+    scrollMessagesToBottom(wrap);
+    speakProposal(lines);
   }
 
   function markRead(localId) {
@@ -682,7 +1348,7 @@
     div.className = 'fva-msg bot typing';
     div.innerHTML = '<span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>';
     wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
+    scrollMessagesToBottom(wrap);
   }
 
   function hideBotTyping() {
@@ -720,7 +1386,7 @@
       return;
     }
     wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
+    scrollMessagesToBottom(wrap);
   }
 
   function appendMsg(sender, text, at, localId, isRead, senderName) {
@@ -741,10 +1407,10 @@
     html += '</div>';
     div.innerHTML = html;
     wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
+    scrollMessagesToBottom(wrap);
   }
 
-  function appendBotMsg(text, at) {
+  function appendBotMsg(text, at, msgId) {
     const wrap = body.querySelector('#fva-chat-messages');
     if (!wrap) return;
     const div = document.createElement('div');
@@ -752,7 +1418,8 @@
     const time = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     div.innerHTML = '<div class="bot-label">🤖 ' + escapeHtml(botLabel()) + '</div>' + formatMsg(text) + '<div class="time">' + time + '</div>';
     wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
+    scrollMessagesToBottom(wrap);
+    maybeSpeakBotText(text, msgId);
   }
 
   function formatMsg(s) {
@@ -802,7 +1469,7 @@
               return;
             }
           }
-          if (m.sender === 'bot') appendBotMsg(m.message, m.created_at);
+          if (m.sender === 'bot') appendBotMsg(m.message, m.created_at, m.id);
           else if (m.sender === 'system') appendModeNote(m.message);
           else appendMsg(m.sender, m.message, m.created_at, null, m.sender === 'visitor' ? !!m.read_by_agent : false, m.sender_name);
 
