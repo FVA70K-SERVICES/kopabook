@@ -116,6 +116,7 @@ export async function onRequestGet(context) {
         custom: !!profile.custom,
         voice: profile.voice || "default",
         language: profile.language || "en",
+        speech_enabled: profile.speech_enabled !== false,
       },
       pa_enabled: paEnabled,
       cards,

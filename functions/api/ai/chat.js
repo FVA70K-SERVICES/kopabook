@@ -1751,19 +1751,23 @@ async function ensureAssistantColumns(db) {
   try {
     await db.prepare(`ALTER TABLE business_chat_settings ADD COLUMN assistant_language TEXT NOT NULL DEFAULT 'en'`).run();
   } catch (e) { /* column already exists, or table not ready yet */ }
+  try {
+    await db.prepare(`ALTER TABLE business_chat_settings ADD COLUMN assistant_speech INTEGER NOT NULL DEFAULT 1`).run();
+  } catch (e) { /* column already exists, or table not ready yet */ }
 }
 
 export async function getAssistantSettings(db, businessId) {
   await ensureAssistantColumns(db);
   try {
     const row = await db.prepare(
-      `SELECT assistant_name, assistant_voice, assistant_language FROM business_chat_settings WHERE business_id = ?`
+      `SELECT assistant_name, assistant_voice, assistant_language, assistant_speech FROM business_chat_settings WHERE business_id = ?`
     ).bind(businessId).first();
     const voice = row && ASSISTANT_VOICES.includes(String(row.assistant_voice || "")) ? String(row.assistant_voice) : "default";
     const language = row && ASSISTANT_LANGUAGES[String(row.assistant_language || "")] ? String(row.assistant_language) : "en";
-    return { storedName: String((row && row.assistant_name) || "").trim(), voice, language };
+    const speech = !(row && (row.assistant_speech === 0 || row.assistant_speech === "0" || row.assistant_speech === false));
+    return { storedName: String((row && row.assistant_name) || "").trim(), voice, language, speech };
   } catch (e) {
-    return { storedName: "", voice: "default", language: "en" };
+    return { storedName: "", voice: "default", language: "en", speech: true };
   }
 }
 
@@ -1787,7 +1791,7 @@ export async function setAssistantLanguage(db, businessId, language) {
 
 export async function getAssistantProfile(db, businessId, tier) {
   const paEnabled = tier === "solo" || tier === "pro";
-  let settings = { storedName: "", voice: "default", language: "en" };
+  let settings = { storedName: "", voice: "default", language: "en", speech: true };
   try {
     settings = await getAssistantSettings(db, businessId);
   } catch (e) { /* defaults above stand */ }
@@ -1798,6 +1802,7 @@ export async function getAssistantProfile(db, businessId, tier) {
     paEnabled,
     voice: settings.voice,
     language: settings.language || "en",
+    speech_enabled: settings.speech !== false,
   };
 }
 

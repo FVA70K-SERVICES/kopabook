@@ -405,6 +405,15 @@ html[data-theme="dark"] #fva-chat-invite {
 }
 #fva-voice-btn.active { background: var(--fv-brand); border-color: var(--fv-brand); color: white; }
 #fva-voice-btn.listening { animation: fva-voice-pulse 1.4s ease-in-out infinite; }
+#fva-speech-btn {
+  background: var(--fv-panel); color: var(--fv-ink);
+  border: 1px solid var(--fv-line); border-radius: 50%;
+  width: 40px; height: 40px; min-width: 40px; cursor: pointer;
+  font-size: 17px; flex-shrink: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#fva-speech-btn.muted { opacity: 0.55; }
+#fva-speech-btn:focus-visible { outline: 2px solid var(--fv-brand); outline-offset: 2px; }
 @keyframes fva-voice-pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.12); opacity: 0.78; }

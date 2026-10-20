@@ -35,6 +35,9 @@ async function ensureAssistantColumns(db) {
   try {
     await db.prepare("ALTER TABLE business_chat_settings ADD COLUMN assistant_language TEXT NOT NULL DEFAULT 'en'").run();
   } catch (e) { /* column already exists */ }
+  try {
+    await db.prepare("ALTER TABLE business_chat_settings ADD COLUMN assistant_speech INTEGER NOT NULL DEFAULT 1").run();
+  } catch (e) { /* column already exists */ }
 }
 
 async function ensureSettings(db, businessId) {
@@ -48,16 +51,17 @@ async function ensureSettings(db, businessId) {
 // Assistant identity fields, read defensively: if migration 0053 has not
 // landed yet, fall back to defaults rather than failing the whole page.
 async function getAssistantFields(db, businessId) {
-  const fields = { assistant_name: "", assistant_voice: "default", assistant_language: "en" };
+  const fields = { assistant_name: "", assistant_voice: "default", assistant_language: "en", assistant_speech: true };
   try {
     const row = await db
-      .prepare("SELECT assistant_name, assistant_voice, assistant_language FROM business_chat_settings WHERE business_id = ?")
+      .prepare("SELECT assistant_name, assistant_voice, assistant_language, assistant_speech FROM business_chat_settings WHERE business_id = ?")
       .bind(businessId)
       .first();
     if (row) {
       fields.assistant_name = String(row.assistant_name || "");
       if (ASSISTANT_VOICES.includes(String(row.assistant_voice || ""))) fields.assistant_voice = String(row.assistant_voice);
       if (ASSISTANT_LANGUAGES.includes(String(row.assistant_language || ""))) fields.assistant_language = String(row.assistant_language);
+      fields.assistant_speech = !(row.assistant_speech === 0 || row.assistant_speech === "0" || row.assistant_speech === false);
     }
   } catch (e) {}
   return fields;
@@ -150,6 +154,7 @@ export async function onRequestGet(context) {
       assistant_name: assistantFields.assistant_name,
       assistant_voice: assistantFields.assistant_voice,
       assistant_language: assistantFields.assistant_language,
+      assistant_speech: assistantFields.assistant_speech,
       assistant_tier: assistantTier,
       can_name: canName,
       settings: {
@@ -160,6 +165,7 @@ export async function onRequestGet(context) {
         assistant_name: assistantFields.assistant_name,
         assistant_voice: assistantFields.assistant_voice,
         assistant_language: assistantFields.assistant_language,
+        assistant_speech: assistantFields.assistant_speech,
         assistant_tier: assistantTier,
         can_name: canName,
         site_id: siteId,
@@ -304,6 +310,29 @@ export async function onRequestPost(context) {
         }
       }
       return json({ ok: true, assistant_language: language });
+    }
+
+    if (action === "set_assistant_speech") {
+      // Spoken answers on or off for Ask Kopa voice. Like the language, this
+      // is an accessibility setting and is never tier gated. Stored per
+      // business in business_chat_settings, fully separate from the Admin
+      // AI voice settings (admin_ai_settings).
+      const raw = body.enabled !== undefined ? body.enabled : (body.assistant_speech !== undefined ? body.assistant_speech : body.on);
+      const enabled = !(raw === false || raw === 0 || raw === "0" || raw === "off");
+      await ensureSettings(db, businessId);
+      try {
+        await db
+          .prepare("UPDATE business_chat_settings SET assistant_speech = ?, updated_at = datetime('now') WHERE business_id = ?")
+          .bind(enabled ? 1 : 0, businessId)
+          .run();
+      } catch (e) {
+        try {
+          await db.prepare("UPDATE business_chat_settings SET assistant_speech = ? WHERE business_id = ?").bind(enabled ? 1 : 0, businessId).run();
+        } catch (e2) {
+          return json({ ok: false, message: "Apply migration 0058 in D1 first (assistant_speech column)." }, 400);
+        }
+      }
+      return json({ ok: true, assistant_speech: enabled });
     }
 
     if (action === "clear_session") {

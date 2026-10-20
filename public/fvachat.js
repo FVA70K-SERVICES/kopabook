@@ -41,6 +41,17 @@
   let activeProposal = null;
 
   // ---- Live voice (Web Speech API, AI mode, owner mode) ----
+  // Listening is a bounded session, never an open-ended loop: every session
+  // ends on a final transcript, after a short silence following speech, on a
+  // no-speech timeout, on an absolute maximum duration, on an error, or when
+  // the user taps Stop. There is deliberately NO auto-restart of an empty
+  // session: on iOS (above all in the standalone home-screen view) a
+  // recognition session can end instantly with no result and no error, and
+  // restarting it forever was the "Listening... never ends" hang.
+  const VOICE_TIMING = Object.assign(
+    { noSpeech: 9000, silence: 1600, finalGrace: 700, max: 30000 },
+    (typeof window !== 'undefined' && window.__FVA_VOICE_TIMING__) || {}
+  );
   let voiceMode = false;
   let voiceState = 'idle'; // idle | listening | processing | speaking
   let recognition = null;
@@ -51,10 +62,25 @@
   let langVoiceNoteShown = false;
   let introSpokenThisVoiceSession = false;
   const spokenMessageIds = new Set();
-  const spokenTexts = new Set();
+  const spokenTextTurns = new Map();
+  let userSendCount = 0;
   let speechQueue = [];
   let speechSpeaking = false;
+  let speechWatchdog = null;
   let cachedVoices = [];
+  // Spoken answers on/off, per business (business_chat_settings via the PA
+  // profile and /api/chat/control). Fully separate from Admin AI settings.
+  let speechEnabled = true;
+  // One listening session's bookkeeping. listenSession increments on every
+  // start and every teardown, so events from a dead session are ignored.
+  let listenSession = 0;
+  let listenActive = false;
+  let listenFinalText = '';
+  let listenInterimText = '';
+  let listenHeardAnything = false;
+  let listenNoSpeechTimer = null;
+  let listenSilenceTimer = null;
+  let listenMaxTimer = null;
 
   function getSR() {
     return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -148,7 +174,12 @@
     return { voice: r.voice, pitch: r.pitch, rate: r.rate, matchedLang: true };
   }
 
-  window.__FVA_VOICE_TEST__ = { resolveVoice, resolveLang };
+  window.__FVA_VOICE_TEST__ = {
+    resolveVoice, resolveLang, splitSpeechText,
+    getVoiceState: () => ({ voiceMode, voiceState, speechEnabled, listenActive, recognitionRunning, speechSpeaking, queued: speechQueue.length }),
+    setSpeechEnabled: on => setSpeechEnabled(on, false),
+    timing: VOICE_TIMING,
+  };
 
   function refreshCachedVoices() {
     try {
@@ -480,6 +511,12 @@
       const data = await res.json().catch(() => null);
       if (data && (data.assistant || data.cards || data.pa_enabled !== undefined)) {
         paProfile = data;
+        const a = data.assistant;
+        if (a && typeof a.speech_enabled === 'boolean') {
+          speechEnabled = a.speech_enabled;
+          if (!speechEnabled) cancelSpeech({ keepConversation: false });
+          updateSpeechButtonState();
+        }
       }
     } catch (e) {}
     updateHeaderPersona();
@@ -584,27 +621,62 @@
     b.setAttribute('aria-label', voiceMode ? 'Stop voice mode' : 'Start voice mode');
     b.setAttribute('aria-pressed', voiceMode ? 'true' : 'false');
   }
+  function updateSpeechButtonState() {
+    const b = body.querySelector('#fva-speech-btn');
+    if (!b) return;
+    b.textContent = speechEnabled ? '🔊' : '🔇';
+    b.classList.toggle('muted', !speechEnabled);
+    b.setAttribute('aria-label', speechEnabled ? 'Mute assistant voice' : 'Unmute assistant voice');
+    b.setAttribute('aria-pressed', speechEnabled ? 'false' : 'true');
+  }
+
+  function persistSpeechEnabled() {
+    try {
+      fetch((API_BASE || '') + '/api/chat/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_assistant_speech', enabled: speechEnabled }),
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
+  function setSpeechEnabled(on, persist = true) {
+    speechEnabled = !!on;
+    if (!speechEnabled) cancelSpeech({ keepConversation: true });
+    updateSpeechButtonState();
+    if (persist) persistSpeechEnabled();
+  }
+
+  function toggleSpeech() {
+    setSpeechEnabled(!speechEnabled, true);
+  }
+
   function updateVoiceControls() {
     const area = body.querySelector('#fva-chat-input-area');
     if (!area) return;
     const eligible = IS_KOPABOOK && isOwnerMode() && chatMode === 'ai';
     let btnEl = body.querySelector('#fva-voice-btn');
+    let speechBtn = body.querySelector('#fva-speech-btn');
     if (!eligible) {
       if (voiceMode) stopVoiceMode();
       btnEl = body.querySelector('#fva-voice-btn');
       if (btnEl) btnEl.remove();
+      speechBtn = body.querySelector('#fva-speech-btn');
+      if (speechBtn) speechBtn.remove();
       setVoiceChip('');
       return;
     }
     if (!getSR()) {
       if (btnEl) btnEl.remove();
+      if (speechBtn) speechBtn.remove();
       setVoiceChip('');
       if (!voiceUnsupportedNoteShownThisOpen && body.querySelector('#fva-chat-messages')) {
         voiceUnsupportedNoteShownThisOpen = true;
-        appendModeNote('Voice works in Chrome and in the Android app. Typing works everywhere.');
+        appendModeNote('Voice typing is not available in this view. Open KopaBook in your browser or type instead.');
       }
       return;
     }
+    const inputEl = body.querySelector('#fva-chat-input');
     if (!btnEl) {
       btnEl = document.createElement('button');
       btnEl.type = 'button';
@@ -612,12 +684,23 @@
       btnEl.textContent = '🎤';
       btnEl.setAttribute('aria-label', 'Start voice mode');
       btnEl.addEventListener('click', toggleVoiceMode);
-      const inputEl = body.querySelector('#fva-chat-input');
       if (inputEl) area.insertBefore(btnEl, inputEl);
       else area.appendChild(btnEl);
     }
+    // Speaker/mute control for spoken answers. Only meaningful when the
+    // device can speak at all; speech failure elsewhere degrades silently.
+    if (!speechBtn && 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function') {
+      speechBtn = document.createElement('button');
+      speechBtn.type = 'button';
+      speechBtn.id = 'fva-speech-btn';
+      speechBtn.addEventListener('click', toggleSpeech);
+      if (inputEl) area.insertBefore(speechBtn, inputEl);
+      else area.appendChild(speechBtn);
+    }
     btnEl.style.display = '';
+    if (speechBtn) speechBtn.style.display = '';
     updateVoiceButtonState();
+    updateSpeechButtonState();
   }
 
   function toggleVoiceMode() {
@@ -636,7 +719,9 @@
     updateVoiceButtonState();
     setVoiceChip('Listening...');
     const custom = assistantCustomName();
-    if (custom && soundOn && 'speechSynthesis' in window) {
+    const profileA = paAssistant();
+    if (profileA && typeof profileA.speech_enabled === 'boolean') speechEnabled = profileA.speech_enabled;
+    if (custom && speechEnabled && 'speechSynthesis' in window) {
       introSpokenThisVoiceSession = true;
       enqueueSpeech('Hi, this is ' + custom + '.');
       // Listening starts when the introduction finishes (queue onend path).
@@ -646,18 +731,34 @@
     }
   }
 
+  function clearListenTimers() {
+    if (listenNoSpeechTimer) { clearTimeout(listenNoSpeechTimer); listenNoSpeechTimer = null; }
+    if (listenSilenceTimer) { clearTimeout(listenSilenceTimer); listenSilenceTimer = null; }
+    if (listenMaxTimer) { clearTimeout(listenMaxTimer); listenMaxTimer = null; }
+  }
+
+  // Detach and discard the current recognition session, if any. Handlers are
+  // nulled first and the session counter moves on, so a late event from a
+  // dead session can never resurrect it.
+  function teardownListenSession() {
+    listenSession++;
+    listenActive = false;
+    clearListenTimers();
+    const rec = recognition;
+    recognition = null;
+    recognitionRunning = false;
+    if (rec) {
+      try { rec.onresult = null; rec.onerror = null; rec.onend = null; rec.onnomatch = null; } catch (e) {}
+      try { if (typeof rec.abort === 'function') rec.abort(); else if (typeof rec.stop === 'function') rec.stop(); } catch (e) {}
+    }
+  }
+
   function stopVoiceMode() {
     if (voiceRestartTimer) { clearTimeout(voiceRestartTimer); voiceRestartTimer = null; }
     voiceMode = false;
     voiceState = 'idle';
-    speechQueue = [];
-    speechSpeaking = false;
-    if (recognition) {
-      try { if (typeof recognition.abort === 'function') recognition.abort(); else if (typeof recognition.stop === 'function') recognition.stop(); } catch (e) {}
-      recognitionRunning = false;
-      recognition = null;
-    }
-    try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch (e) {}
+    teardownListenSession();
+    cancelSpeech({ keepConversation: false });
     updateVoiceButtonState();
     setVoiceChip('');
   }
@@ -671,94 +772,189 @@
     }, delay || 350);
   }
 
-  function startListening(retryLang) {
-    if (!voiceMode || speechSpeaking || speechQueue.length || recognitionRunning) return;
-    const SR = getSR();
-    if (!SR) { stopVoiceMode(); return; }
-    let rec;
-    try { rec = new SR(); } catch (e) { scheduleListeningRestart(600); return; }
-    recognition = rec;
-    recognitionHadResult = false;
-    rec.lang = retryLang || resolveLang(paLanguage());
-    try { rec.interimResults = false; } catch (e) {}
-    try { rec.maxAlternatives = 1; } catch (e) {}
-    try { rec.continuous = false; } catch (e) {}
-    voiceState = 'listening';
-    setVoiceChip('Listening...');
-    updateVoiceButtonState();
-    rec.onresult = event => {
-      let finalText = '';
-      let hasFinal = false;
-      try {
-        for (let i = 0; i < event.results.length; i++) {
-          const r = event.results[i];
-          if (r && r.isFinal) { hasFinal = true; if (r[0]) finalText += r[0].transcript || ''; }
-        }
-      } catch (e) {}
-      if (!hasFinal) return;
-      recognitionHadResult = true;
-      const t = finalText.trim();
-      if (!t) { handleRecognitionNoMatch(); return; }
+  function isIOSLike() {
+    try {
+      const ua = navigator.userAgent || '';
+      if (/iP(hone|ad|od)/.test(ua)) return true;
+      if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  function isStandaloneView() {
+    try {
+      if (window.navigator && window.navigator.standalone === true) return true;
+      if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  // The single exit door for a listening session. Whatever the reason, the
+  // session is torn down, the UI leaves the Listening state, and either the
+  // heard text is sent through the normal pipeline or the user gets one
+  // short, plain note. It never restarts an empty session.
+  function finishListenSession(reason) {
+    if (!listenActive) return;
+    const text = (listenFinalText + ' ' + listenInterimText).replace(/\s+/g, ' ').trim();
+    teardownListenSession();
+    listenFinalText = '';
+    listenInterimText = '';
+    if (!voiceMode) return;
+    if (text && reason !== 'stop' && reason !== 'silent' && reason !== 'blocked' &&
+        reason !== 'unavailable' && reason !== 'capture' && reason !== 'network') {
       voiceState = 'processing';
       setVoiceChip('Thinking...');
       updateVoiceButtonState();
-      try { rec.stop(); } catch (e) {}
-      recognitionRunning = false;
-      sendMessage(t);
-      // If the reply is not spoken (for example sound is off), resume listening.
+      sendMessage(text);
+      // If the reply is not spoken (for example speech is muted), resume
+      // listening for the next turn.
       setTimeout(() => {
         if (voiceMode && voiceState === 'processing' && !speechSpeaking && !speechQueue.length) {
           scheduleListeningRestart(600);
         }
       }, 2500);
+      return;
+    }
+    if (reason === 'stop' || reason === 'silent') { stopVoiceMode(); return; }
+    stopVoiceMode();
+    if (reason === 'blocked') {
+      appendModeNote('Microphone is blocked. Allow mic access in your browser settings, or keep typing.');
+    } else if (reason === 'unavailable') {
+      appendModeNote('Voice typing is not available in this view. Open KopaBook in your browser or type instead.');
+    } else if (reason === 'capture') {
+      appendModeNote('I could not find a microphone. Check your microphone, or type instead.');
+    } else if (reason === 'network') {
+      appendModeNote('Voice recognition is not available right now. Type instead, or try the mic again in a bit.');
+    } else {
+      appendModeNote('I did not hear anything. Tap the mic and try again, or type instead.');
+    }
+  }
+
+  function startListening(retryLang) {
+    if (!voiceMode || speechSpeaking || speechQueue.length || recognitionRunning || listenActive) return;
+    const SR = getSR();
+    if (!SR) { stopVoiceMode(); appendModeNote('Voice typing is not available in this view. Open KopaBook in your browser or type instead.'); return; }
+    let rec;
+    try { rec = new SR(); } catch (e) { stopVoiceMode(); appendModeNote('Voice typing is not available in this view. Open KopaBook in your browser or type instead.'); return; }
+    const mySession = ++listenSession;
+    recognition = rec;
+    recognitionHadResult = false;
+    listenFinalText = '';
+    listenInterimText = '';
+    listenHeardAnything = false;
+    listenActive = true;
+    const startedAt = Date.now();
+    rec.lang = retryLang || resolveLang(paLanguage());
+    // Interim results ON: iOS Safari often delivers speech as interim
+    // results that are never marked final, and the old code discarded
+    // anything that was not final, so nothing was ever sent.
+    try { rec.interimResults = true; } catch (e) {}
+    try { rec.maxAlternatives = 1; } catch (e) {}
+    // Single utterance per session on every platform, Safari included.
+    try { rec.continuous = false; } catch (e) {}
+    voiceState = 'listening';
+    setVoiceChip('Listening...');
+    updateVoiceButtonState();
+    rec.onresult = event => {
+      if (mySession !== listenSession || !listenActive) return;
+      let finals = '';
+      let interim = '';
+      let any = false;
+      try {
+        for (let i = 0; i < event.results.length; i++) {
+          const r = event.results[i];
+          if (!r || !r[0]) continue;
+          any = true;
+          if (r.isFinal) finals += r[0].transcript || '';
+          else interim += r[0].transcript || '';
+        }
+      } catch (e) {}
+      if (!any) return;
+      listenHeardAnything = true;
+      recognitionHadResult = true;
+      listenFinalText = finals.replace(/\s+/g, ' ').trim();
+      listenInterimText = interim.replace(/\s+/g, ' ').trim();
+      if (listenNoSpeechTimer) { clearTimeout(listenNoSpeechTimer); listenNoSpeechTimer = null; }
+      if (listenSilenceTimer) clearTimeout(listenSilenceTimer);
+      // A final result ends the session after a short grace period (a
+      // second final chunk can follow immediately); interim speech ends it
+      // after a short silence. Either way it ends.
+      const delay = finals ? VOICE_TIMING.finalGrace : VOICE_TIMING.silence;
+      listenSilenceTimer = setTimeout(() => {
+        if (mySession === listenSession) finishListenSession(finals ? 'final' : 'silence');
+      }, delay);
     };
-    rec.onnomatch = () => handleRecognitionNoMatch();
+    rec.onnomatch = () => {
+      if (mySession !== listenSession || !listenActive) return;
+      handleRecognitionNoMatch();
+    };
     rec.onerror = event => {
+      if (mySession !== listenSession || !listenActive) return;
       const err = event && event.error;
-      recognitionRunning = false;
-      if (!voiceMode) return;
-      if (err === 'not-allowed' || err === 'service-not-allowed') {
-        appendModeNote('Microphone is blocked. Allow mic access in your browser settings, or keep typing.');
-        stopVoiceMode();
-        return;
-      }
+      if (err === 'not-allowed' || err === 'service-not-allowed') { finishListenSession('blocked'); return; }
       if (err === 'language-not-supported') {
         const langNow = paLanguage();
-        if (!retryLang && (langNow === 'en' || langNow === 'pcm')) { startListening('en-GB'); return; }
-        appendModeNote('Voice recognition is not available for that language on this device. Typing works everywhere.');
+        if (!retryLang && (langNow === 'en' || langNow === 'pcm')) {
+          teardownListenSession();
+          startListening('en-GB');
+          return;
+        }
+        teardownListenSession();
         stopVoiceMode();
+        appendModeNote('Voice recognition is not available for that language on this device. Typing works everywhere.');
         return;
       }
-      if (err === 'aborted') return;
-      if (voiceState === 'listening') scheduleListeningRestart(500);
+      if (err === 'no-speech') { finishListenSession('nospeech'); return; }
+      if (err === 'audio-capture') { finishListenSession('capture'); return; }
+      if (err === 'network') { finishListenSession('network'); return; }
+      if (err === 'aborted') { finishListenSession('silent'); return; }
+      // Unknown error: send anything already heard, else close with the
+      // did-not-hear note. Never restart into a loop.
+      finishListenSession('error');
     };
     rec.onend = () => {
-      recognitionRunning = false;
-      if (voiceMode && voiceState === 'listening' && !recognitionHadResult) {
-        scheduleListeningRestart(500);
+      if (mySession !== listenSession || !listenActive) return;
+      // The browser ended the session on its own (common on iOS, where a
+      // session can end almost immediately with no result and no error).
+      const heard = (listenFinalText + ' ' + listenInterimText).trim();
+      if (heard) { finishListenSession('end'); return; }
+      if (isIOSLike() && isStandaloneView() && Date.now() - startedAt < 2500) {
+        finishListenSession('unavailable');
+        return;
       }
+      finishListenSession('end');
     };
+    // No-speech timeout: nothing at all heard within the window ends the
+    // session. On iOS this is also the phantom case: recognition exists but
+    // never returns anything, so the view simply cannot do voice typing.
+    listenNoSpeechTimer = setTimeout(() => {
+      if (mySession !== listenSession || !listenActive || listenHeardAnything) return;
+      finishListenSession(isIOSLike() && isStandaloneView() ? 'unavailable' : 'nospeech');
+    }, VOICE_TIMING.noSpeech);
+    // Absolute maximum: a session can never outlive this, whatever happens.
+    listenMaxTimer = setTimeout(() => {
+      if (mySession === listenSession) finishListenSession('max');
+    }, VOICE_TIMING.max);
     try {
       recognitionRunning = true;
       rec.start();
     } catch (e) {
-      recognitionRunning = false;
-      scheduleListeningRestart(600);
+      finishListenSession('unavailable');
     }
   }
 
   function handleRecognitionNoMatch() {
     if (!voiceMode) return;
-    try { if (recognition && typeof recognition.stop === 'function') recognition.stop(); } catch (e) {}
-    recognitionRunning = false;
     if (activeProposal && !activeProposal.noMatchPrompted) {
       activeProposal.noMatchPrompted = true;
+      teardownListenSession();
       voiceState = 'processing';
       setVoiceChip('Thinking...');
+      updateVoiceButtonState();
       enqueueSpeech('I did not catch that. Say yes to confirm, or no to cancel.');
       if (!speechSpeaking && !speechQueue.length) scheduleListeningRestart(400);
     } else {
-      scheduleListeningRestart(400);
+      finishListenSession('nospeech');
     }
   }
 
@@ -771,13 +967,66 @@
       .trim();
   }
 
+  // Split a reply into sentence-sized chunks (max about 200 characters,
+  // split at spaces, never mid-word where avoidable). One giant utterance
+  // is unreliable: browsers stall or cut long utterances, above all on
+  // iOS, and a stalled utterance used to block listening forever.
+  function splitSpeechText(text) {
+    const src = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!src) return [];
+    const sentences = src.match(/[^.!?…]+[.!?…]*["')\]]*\s*/g) || [src];
+    const parts = [];
+    let cur = '';
+    const push = s => { const t = String(s || '').trim(); if (t) parts.push(t); };
+    for (const raw of sentences) {
+      const s = String(raw || '').trim();
+      if (!s) continue;
+      if ((cur + ' ' + s).trim().length <= 200) { cur = (cur + ' ' + s).trim(); continue; }
+      if (cur) { push(cur); cur = ''; }
+      if (s.length <= 200) { cur = s; continue; }
+      let rest = s;
+      while (rest.length > 200) {
+        let cut = rest.lastIndexOf(' ', 200);
+        if (cut < 80) cut = 200;
+        push(rest.slice(0, cut));
+        rest = rest.slice(cut).trim();
+      }
+      cur = rest;
+    }
+    if (cur) push(cur);
+    return parts;
+  }
+
   function enqueueSpeech(text) {
     const clean = cleanTextForSpeech(text);
     if (!clean) return;
-    if (!soundOn) return;
+    if (!speechEnabled) return;
     if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance !== 'function') return;
-    speechQueue.push(clean);
+    splitSpeechText(clean).forEach(chunk => speechQueue.push(chunk));
     processSpeechQueue();
+  }
+
+  // Silence speech immediately and drop anything queued. With
+  // keepConversation, a voice conversation resumes listening afterwards
+  // (the mute toggle); without it, everything just stops (typing, Stop).
+  function cancelSpeech(opts) {
+    speechQueue = [];
+    if (speechWatchdog) { clearTimeout(speechWatchdog); speechWatchdog = null; }
+    const wasSpeaking = speechSpeaking;
+    speechSpeaking = false;
+    try { if ('speechSynthesis' in window && window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+    if (wasSpeaking && voiceMode && voiceState === 'speaking') {
+      if (opts && opts.keepConversation) {
+        voiceState = 'processing';
+        setVoiceChip('Listening...');
+        updateVoiceButtonState();
+        scheduleListeningRestart(350);
+      } else {
+        voiceState = 'idle';
+        setVoiceChip('');
+        updateVoiceButtonState();
+      }
+    }
   }
 
   function processSpeechQueue() {
@@ -810,6 +1059,7 @@
     const finish = () => {
       if (finished) return;
       finished = true;
+      if (speechWatchdog) { clearTimeout(speechWatchdog); speechWatchdog = null; }
       speechSpeaking = false;
       if (speechQueue.length) { processSpeechQueue(); return; }
       if (voiceMode) {
@@ -823,11 +1073,18 @@
     utter.onerror = finish;
     try {
       window.speechSynthesis.speak(utter);
-    } catch (e) { finish(); }
+    } catch (e) { finish(); return; }
+    // Watchdog: if the device never fires onend/onerror for this chunk
+    // (a known iOS stall), move on instead of blocking the conversation.
+    if (!finished) {
+      const est = Math.min(45000, Math.max(7000, 5000 + text.length * 110));
+      speechWatchdog = setTimeout(finish, est);
+    }
   }
 
   function maybeSpeakBotText(text, msgId) {
     if (!voiceMode || chatMode !== 'ai') return;
+    if (!speechEnabled) return;
     const clean = cleanTextForSpeech(text);
     if (!clean) return;
     if (msgId !== undefined && msgId !== null && msgId !== '') {
@@ -835,8 +1092,14 @@
       if (spokenMessageIds.has(key)) return;
       spokenMessageIds.add(key);
     }
-    if (spokenTexts.has(clean)) return;
-    spokenTexts.add(clean);
+    // The send path and the poll path can both deliver the same reply in
+    // the same turn; suppress only that same-turn repeat. Once the user
+    // sends something new, an identical answer is a new reply and is
+    // spoken again.
+    const prevTurn = spokenTextTurns.get(clean);
+    if (prevTurn !== undefined && prevTurn === userSendCount) return;
+    spokenTextTurns.set(clean, userSendCount);
+    if (spokenTextTurns.size > 200) spokenTextTurns.clear();
     enqueueSpeech(clean);
   }
 
@@ -1479,6 +1742,12 @@
 
     let typingTimeout;
     input.addEventListener('input', () => {
+      // Typing takes over from voice: any ongoing or queued speech stops
+      // at once, and a pending auto-listen does not fire mid-typing.
+      if (speechSpeaking || speechQueue.length) {
+        if (voiceRestartTimer) { clearTimeout(voiceRestartTimer); voiceRestartTimer = null; }
+        cancelSpeech({ keepConversation: false });
+      }
       sendTyping(true);
       clearTimeout(typingTimeout);
       typingTimeout = setTimeout(() => sendTyping(false), 2000);
@@ -1561,6 +1830,7 @@
     if (activeProposal && ['confirm', 'cancel', 'yes', 'no', 'na so'].indexOf(normText) !== -1) {
       activeProposal = null;
     }
+    userSendCount++;
     const msgId = 'local_' + Date.now();
     appendMsg('visitor', text, Date.now(), msgId, false);
     showBotTyping();
