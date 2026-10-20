@@ -939,14 +939,11 @@ function parseAction(text) {
 // ---------------------------------------------------------------------------
 // Main handler.
 // ---------------------------------------------------------------------------
-export async function onRequestPost(context) {
+export async function runKopaAiChat(context, auth, body) {
   const db = context.env.KOPABOOK_DB;
   try {
-    const auth = await getAuthContext(context);
-    const denied = requireAuth(auth);
-    if (denied) return denied;
     const businessId = auth.business && auth.business.id;
-    if (!businessId) return json({ ok: false, message: "Pick a business first." }, 400);
+    if (!businessId) return { status: 400, body: { ok: false, message: "Pick a business first." } };
     const currency = auth.business.currency || "NGN";
 
     // Tiered AI: every plan gets Kopa AI. Staff use the business owner's plan.
@@ -956,14 +953,14 @@ export async function onRequestPost(context) {
 
     // Abuse guard on top of the daily AI cap.
     if (!(await checkRateLimit(db, `ai_${auth.user.id}`, 60, 3600000))) {
-      return json({ ok: false, message: "Too many questions at once. Slow down a little." }, 429);
+      return { status: 429, body: { ok: false, message: "Too many questions at once. Slow down a little." } };
     }
 
-    const body = await context.request.json().catch(() => ({}));
-    const message = String(body.message || body.question || "").trim().slice(0, 1000);
-    if (!message) return json({ ok: false, message: "Ask a question first." }, 400);
-    const history = Array.isArray(body.history)
-      ? body.history.filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string").slice(-HISTORY_LIMIT)
+    const safeBody = body || {};
+    const message = String(safeBody.message || safeBody.question || "").trim().slice(0, 1000);
+    if (!message) return { status: 400, body: { ok: false, message: "Ask a question first." } };
+    const history = Array.isArray(safeBody.history)
+      ? safeBody.history.filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string").slice(-HISTORY_LIMIT)
       : [];
 
     // Daily question cap for this tier (per business per UTC day).
@@ -986,7 +983,7 @@ export async function onRequestPost(context) {
     };
     if (usedToday >= tierCfg.questionsPerDay) {
       const capMsg = `You have used today's Kopa AI limit (${tierCfg.questionsPerDay} questions on your plan). It resets tomorrow, and your data is untouched.` + (tier === "free" ? ` ${UPGRADE_NUDGE}` : "");
-      return json({
+      return { status: 200, body: {
         ok: true,
         reply: capMsg,
         answer: capMsg,
@@ -994,7 +991,7 @@ export async function onRequestPost(context) {
         fallback: true,
         capped: true,
         usage: { used_today: usedToday, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay },
-      });
+      } };
     }
 
     // Rich live snapshot, injected into every request.
@@ -1025,7 +1022,7 @@ export async function onRequestPost(context) {
     // Graceful degradation: the app must never break because AI is down.
     if (!aiProviderAvailable(context.env)) {
       const reply = `Kopa AI is not connected yet, but here is what your books say.\n${snapshotFallbackText}`;
-      return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } });
+      return { status: 200, body: { ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } } };
     }
 
     let modelText;
@@ -1036,7 +1033,7 @@ export async function onRequestPost(context) {
       modelText = await generateText(context.env, messages);
     } catch (e) {
       const reply = `Kopa AI is resting at the moment, but your books are fine.\n${snapshotFallbackText}`;
-      return json({ ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } });
+      return { status: 200, body: { ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } } };
     }
 
     // Agentic path: the model asked to DO something.
@@ -1045,31 +1042,31 @@ export async function onRequestPost(context) {
     if (action && !action.parseError) {
       const usageObj = () => ({ used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay });
       if (!TOOL_EXECUTORS[action.tool]) {
-        return json({
+        return { status: 200, body: {
           ok: true, reply: `I understood you want me to do something, but "${action.tool}" is not something I can do. Try asking me to record a sale, add an expense, or draft a debtor reminder.`,
           answer: `I understood you want me to do something, but "${action.tool}" is not something I can do.`,
           actions_taken: [], fallback: false, usage: usageObj(),
-        });
+        } };
       }
       // Tier check first: Free is read-only; Starter has a small tool set.
       if (!tierAllowsTool(tier, action.tool)) {
         const tierMsg = tier === "free"
           ? `I can answer questions about your business on your Free plan, but doing things like that needs an upgrade. ${UPGRADE_NUDGE}`
           : `Your ${tier[0].toUpperCase() + tier.slice(1)} plan does not include "${action.tool}". Upgrade to Solo or Pro for the full AI assistant.`;
-        return json({ ok: true, reply: tierMsg, answer: tierMsg, actions_taken: [], fallback: false, usage: usageObj() });
+        return { status: 200, body: { ok: true, reply: tierMsg, answer: tierMsg, actions_taken: [], fallback: false, usage: usageObj() } };
       }
       if (!toolAllowed(auth, action.tool)) {
-        return json({
+        return { status: 200, body: {
           ok: true,
           reply: "Your staff role does not allow that action. You can record sales and check customer balances; everything else needs the owner or an admin.",
           answer: "Your staff role does not allow that action.",
           actions_taken: [], fallback: false, usage: usageObj(),
-        });
+        } };
       }
       // Per-day action cap for capped tiers (Starter).
       if (tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
         const capMsg = `You have used today's AI action limit (${tierCfg.actionsPerDay} actions on Starter). It resets tomorrow. Upgrade to Solo or Pro for more.`;
-        return json({ ok: true, reply: capMsg, answer: capMsg, actions_taken: [], fallback: false, capped: true, usage: usageObj() });
+        return { status: 200, body: { ok: true, reply: capMsg, answer: capMsg, actions_taken: [], fallback: false, capped: true, usage: usageObj() } };
       }
       let result;
       try {
@@ -1085,10 +1082,10 @@ export async function onRequestPost(context) {
       }
       if (result.clarification) {
         // Never execute on ambiguity. Ask the user, conversationally.
-        return json({
+        return { status: 200, body: {
           ok: true, reply: result.clarification, answer: result.clarification,
           actions_taken: [], fallback: false, usage: usageObj(),
-        });
+        } };
       }
       await bumpActions();
       actionsTaken.push({ tool: action.tool, summary: result.summary, waLink: result.waLink || null });
@@ -1096,18 +1093,18 @@ export async function onRequestPost(context) {
       // Drafts are returned as-is for review (with a send prompt for Solo/Pro).
       if (result.isDraft) {
         const draftReply = `${result.draft}\n\nShall I send this?`;
-        return json({
+        return { status: 200, body: {
           ok: true, reply: draftReply, answer: draftReply, actions_taken: actionsTaken,
           draft: result.draft, fallback: false, usage: usageObj(),
-        });
+        } };
       }
       // WhatsApp send links ride along on the confirmation.
       if (result.waLink) {
         const waReply = `${result.summary}\n\nTap to send on WhatsApp:\n${result.waLink}`;
-        return json({
+        return { status: 200, body: {
           ok: true, reply: waReply, answer: waReply, actions_taken: actionsTaken,
           waLink: result.waLink, fallback: false, usage: usageObj(),
-        });
+        } };
       }
 
       // Confirmation in Kopa's voice, with real numbers.
@@ -1122,18 +1119,34 @@ export async function onRequestPost(context) {
       } catch (e) {
         reply = "Done. " + result.summary;
       }
-      return json({
+      return { status: 200, body: {
         ok: true, reply, answer: reply, actions_taken: actionsTaken,
         fallback: false, usage: usageObj(),
-      });
+      } };
     }
 
     // Plain conversational answer (ACTION line stripped if the model left one).
     const cleanReply = action && action.rest ? action.rest : modelText;
-    return json({
+    return { status: 200, body: {
       ok: true, reply: cleanReply, answer: cleanReply, actions_taken: [],
       fallback: false, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay },
-    });
+    } };
+  } catch (error) {
+    return { status: 500, body: { ok: false, message: "Something went wrong. Try again." } };
+  }
+}
+
+// POST /api/ai/chat wrapper: authenticates, then runs the shared engine.
+// The merged in-app chat (functions/api/chat/send.js) calls runKopaAiChat
+// directly with an already verified auth context.
+export async function onRequestPost(context) {
+  try {
+    const auth = await getAuthContext(context);
+    const denied = requireAuth(auth);
+    if (denied) return denied;
+    const body = await context.request.json().catch(() => ({}));
+    const result = await runKopaAiChat(context, auth, body);
+    return json(result.body, result.status || 200);
   } catch (error) {
     return json({ ok: false, message: "Something went wrong. Try again." }, 500);
   }

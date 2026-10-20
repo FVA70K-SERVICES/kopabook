@@ -3,11 +3,13 @@ import { getBotResponse, shouldEscalate } from './fvabot.js';
 import { handleOrderMessage } from './order-flow.js';
 import { handleBookingMessage } from './booking-flow.js';
 import { DEFAULT_MEMORY } from './business-memory.js';
-import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName, nameWelcome, WARM_CLARIFIERS, isBusinessDataQuestion, PUBLIC_LOCKDOWN_ANSWER } from './kopabook-knowledge.js';
+import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName, nameWelcome, WARM_CLARIFIERS, isBusinessDataQuestion, PUBLIC_LOCKDOWN_ANSWER, isBusinessActionCommand, isPlatformQuestion, isFrustrated, BUSINESS_ACTION_POINTER, PLATFORM_SUPPORT_SUGGESTION, SIGNED_OUT_ACTION_POINTER } from './kopabook-knowledge.js';
+import { getAuthContext } from '../_utils.js';
+import { runKopaAiChat } from '../ai/chat.js';
 import { handleOwnerCommand } from './bot-owner.js';
 import { handleFollowUp } from './bot-memory.js';
 import { getAIResponse, shouldUseAI } from './bot-ai.js';
-import { maybeAutoClearChat } from './_auto_clear.js';
+import { maybeAutoClearChat, clearExpiredMergedChat } from './_auto_clear.js';
 
 // D1-backed bot knowledge: the bot's BRAIN. Rows in `bot_knowledge` win over
 // the hardcoded fallback, so new features can be taught without a deploy.
@@ -87,9 +89,41 @@ async function getSiteMemory(env, siteId) {
   return { memory: { ...DEFAULT_MEMORY }, plan: 'free', botEnabled: true };
 }
 
-export async function onRequestPost({ request, env }) {
+// Handoff transcript snapshot. When a chat is escalated to a human, the full
+// transcript is copied into support_handoffs, a table the 24-hour chat
+// auto-clear never touches, so the support case keeps the whole story even
+// after the live chat window clears. Refreshed on every escalation.
+async function saveHandoffSnapshot(db, sessionId, siteId, visitorName) {
   try {
-    const { sessionId, sender, message, siteId, ownerCtx } = await request.json();
+    await db.prepare(`CREATE TABLE IF NOT EXISTS support_handoffs (
+      session_id TEXT PRIMARY KEY, site_id TEXT, visitor_name TEXT,
+      transcript TEXT, created_at INTEGER, updated_at INTEGER
+    )`).run();
+    let rows = [];
+    try {
+      const r = await db.prepare(
+        'SELECT sender, sender_name, message FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 500'
+      ).bind(sessionId).all();
+      rows = r.results || [];
+    } catch (e) {
+      const r = await db.prepare(
+        'SELECT sender, message FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 500'
+      ).bind(sessionId).all();
+      rows = r.results || [];
+    }
+    const lines = rows.map((m) => `${m.sender}${m.sender_name ? ' (' + m.sender_name + ')' : ''}: ${m.message}`);
+    const nowMs = Date.now();
+    await db.prepare(
+      `INSERT INTO support_handoffs (session_id, site_id, visitor_name, transcript, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET transcript = excluded.transcript, updated_at = excluded.updated_at`
+    ).bind(sessionId, siteId, visitorName || '', lines.join('\n'), nowMs, nowMs).run();
+  } catch (e) { /* snapshot is best effort; the escalation itself already saved */ }
+}
+
+export async function onRequestPost(context) {
+  const { request, env } = context;
+  try {
+    const { sessionId, sender, message, siteId, ownerCtx, mode } = await request.json();
     if (!sessionId || !message || !message.trim()) {
       return Response.json({ error: 'Missing fields' }, { status: 400 });
     }
@@ -110,6 +144,10 @@ export async function onRequestPost({ request, env }) {
 
     // Lazy auto-clear of old chat history (per-business setting, best effort).
     maybeAutoClearChat(env.KOPABOOK_DB, sid).catch(() => {});
+    // Merged in-app chat: rolling 24-hour window for this session's thread.
+    if (sid === 'kopabook') {
+      clearExpiredMergedChat(env.KOPABOOK_DB, sessionId).catch(() => {});
+    }
 
     // Track conversation count for plan limits
     if (sender === 'visitor') {
@@ -125,12 +163,35 @@ export async function onRequestPost({ request, env }) {
         return Response.json({ ok: true, at: now });
       }
 
-      // Check if agent is already handling (don't bot over human)
+      // Merged in-app chat: verify the claimed owner context against the
+      // signed-in session cookie. The widget's ownerCtx alone is NEVER
+      // trusted: the session must belong to the same user and its active
+      // business must be the claimed business. Unverified requests keep
+      // the public pipeline below, exactly as before.
+      let verifiedOwner = false;
+      let ownerAuth = null;
+      let activeMode = null;
+      if (sid === 'kopabook' && ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
+        try {
+          const auth = await getAuthContext(context);
+          if (auth && auth.user && auth.business &&
+              String(auth.user.id) === String(ownerCtx.userId) &&
+              String(auth.business.id) === String(ownerCtx.businessId)) {
+            verifiedOwner = true;
+            ownerAuth = auth;
+            activeMode = mode === 'ai' ? 'ai' : 'support';
+          }
+        } catch (e) { /* stay on the public pipeline */ }
+      }
+
+      // Check if agent is already handling (don't bot over human).
+      // The Ask Kopa AI side is fully automated, so a recent human reply on
+      // the support side never silences it.
       const recentAgent = await env.KOPABOOK_DB.prepare(
         'SELECT id FROM chat_messages WHERE session_id = ? AND sender = ? AND created_at > ? LIMIT 1'
       ).bind(sessionId, 'agent', now - 5 * 60 * 1000).first();
 
-      if (!recentAgent) {
+      if (!recentAgent || (verifiedOwner && activeMode === 'ai')) {
         let result = null;
 
         // Load recent conversation for context (bot memory)
@@ -151,8 +212,83 @@ export async function onRequestPost({ request, env }) {
           if (s && s.visitor_name) visitorName = s.visitor_name;
         } catch {}
 
+        // Merged in-app chat routing for a VERIFIED signed-in user.
+        // One thread, two doors. Ask Kopa AI runs on the real AI engine
+        // with this business's own data. Kopa Support answers platform
+        // questions from support knowledge and escalates to a human.
+        if (verifiedOwner) {
+          if (ownerAuth.user.fullName) visitorName = ownerAuth.user.fullName;
+          result = getEscalationResponse(clean, visitorName);
+          if (!result && isFrustrated(clean)) {
+            result = {
+              answer: 'I am sorry this has been frustrating. I have flagged this chat for a person on the FVA70K team, and they will join here. The full conversation goes with it, so you will not have to repeat yourself.',
+              quickReplies: [],
+              escalate: true,
+              confidence: 'high'
+            };
+          }
+          if (!result && activeMode === 'ai') {
+            if (isPlatformQuestion(clean)) {
+              result = {
+                answer: PLATFORM_SUPPORT_SUGGESTION,
+                quickReplies: [],
+                action: { type: 'switch', mode: 'support', label: 'Switch to Kopa Support' },
+                confidence: 'high'
+              };
+            } else {
+              try {
+                // Working memory: this thread's last 24 hours, shared with
+                // the support side, minus the message just stored.
+                let histRows = recentMessages;
+                try {
+                  const hr = await env.KOPABOOK_DB.prepare(
+                    'SELECT sender, message FROM chat_messages WHERE session_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 21'
+                  ).bind(sessionId, now - 24 * 3600000).all();
+                  histRows = (hr.results || []).reverse();
+                } catch (e) {}
+                const hist = [...histRows];
+                if (hist.length && hist[hist.length - 1].sender === 'visitor' && hist[hist.length - 1].message === clean) hist.pop();
+                const history = hist
+                  .filter((m) => m.sender === 'visitor' || m.sender === 'bot' || m.sender === 'agent')
+                  .map((m) => ({ role: m.sender === 'visitor' ? 'user' : 'assistant', content: String(m.message || '').slice(0, 1000) }))
+                  .slice(-20);
+                const aiRes = await runKopaAiChat(context, ownerAuth, { message: clean, history });
+                const b = aiRes.body || {};
+                const answer = b.reply || b.answer || b.message || 'Ask Kopa AI could not answer just now. Please try again.';
+                result = { answer, quickReplies: [], confidence: 'high' };
+              } catch (e) {
+                result = {
+                  answer: 'Ask Kopa AI is resting at the moment. Your records are safe. Please try again in a bit, or switch to Kopa Support if you need a person.',
+                  quickReplies: [],
+                  confidence: 'low'
+                };
+              }
+            }
+          }
+          if (!result && activeMode === 'support') {
+            if (isBusinessActionCommand(clean)) {
+              result = {
+                answer: BUSINESS_ACTION_POINTER,
+                quickReplies: [],
+                action: { type: 'switch', mode: 'ai', label: 'Switch to Ask Kopa AI' },
+                confidence: 'high'
+              };
+            } else {
+              result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
+              if (result && result.answer === PUBLIC_LOCKDOWN_ANSWER) {
+                result = {
+                  answer: BUSINESS_ACTION_POINTER,
+                  quickReplies: [],
+                  action: { type: 'switch', mode: 'ai', label: 'Switch to Ask Kopa AI' },
+                  confidence: 'high'
+                };
+              }
+            }
+          }
+        }
+
         // 1) Name capture: "my name is Ada"
-        const saidName = detectName(clean);
+        const saidName = verifiedOwner ? null : detectName(clean);
         if (saidName) {
           try {
             await env.KOPABOOK_DB.prepare(
@@ -168,11 +304,22 @@ export async function onRequestPost({ request, env }) {
           result = getEscalationResponse(clean, visitorName);
         }
 
+        // 2a) Signed-out shop commands get a clear pointer to Ask Kopa AI
+        // inside the app, never a generic deflection.
+        if (!result && sid === 'kopabook' && !verifiedOwner && isBusinessActionCommand(clean)) {
+          result = {
+            answer: SIGNED_OUT_ACTION_POINTER,
+            quickReplies: ['Pricing', 'Features', 'Talk to human'],
+            escalate: false,
+            confidence: 'high'
+          };
+        }
+
         // 2b) PUBLIC BOT LOCKDOWN: on the public marketing site (siteId
         // 'kopabook'), business-data questions get the lockdown answer
         // immediately, before AI or knowledge, so no path can leak a
         // store's private business info on the public site.
-        if (!result && sid === 'kopabook' && isBusinessDataQuestion(clean)) {
+        if (!result && sid === 'kopabook' && !verifiedOwner && isBusinessDataQuestion(clean)) {
           result = {
             answer: PUBLIC_LOCKDOWN_ANSWER,
             quickReplies: ['Pricing', 'Features', 'Talk to human'],
@@ -204,13 +351,13 @@ export async function onRequestPost({ request, env }) {
         }
 
         // Handle follow-ups ("yes", "no", "ok") using conversation context
-        if (!result) {
+        if (!result && !verifiedOwner) {
           result = handleFollowUp(clean, recentMessages, siteConfig);
           if (result) result.isFollowUp = true;
         }
 
         // Try AI brain for open conversation (thinks like Muse)
-        if (!result && shouldUseAI(clean, result)) {
+        if (!result && !verifiedOwner && shouldUseAI(clean, result)) {
           try {
             const aiResult = await getAIResponse(clean, {
               env, siteConfig, ownerCtx, history: recentMessages
@@ -220,10 +367,10 @@ export async function onRequestPost({ request, env }) {
         }
 
         // Try order flow first, then booking flow, then knowledge
-        result = result || handleOrderMessage(clean, memory, sessionId, plan);
-        if (!result) result = handleBookingMessage(clean, memory, sessionId, plan);
+        if (!verifiedOwner) result = result || handleOrderMessage(clean, memory, sessionId, plan);
+        if (!result && !verifiedOwner) result = handleBookingMessage(clean, memory, sessionId, plan);
         // KopaBook-specific knowledge (D1 brain + builtin fallback)
-        if (!result && siteConfig.isKopaBook) result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
+        if (!result && !verifiedOwner && siteConfig.isKopaBook) result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
         if (!result) {
           const botResult = getBotResponse(clean, siteConfig);
           result = {
@@ -242,6 +389,8 @@ export async function onRequestPost({ request, env }) {
           await env.KOPABOOK_DB.prepare(
             'UPDATE chat_sessions SET needs_human = 1 WHERE id = ?'
           ).bind(sessionId).run().catch(() => {});
+          // The transcript snapshot survives the 24-hour chat clear.
+          saveHandoffSnapshot(env.KOPABOOK_DB, sessionId, sid, visitorName).catch(() => {});
         }
 
         botReply = {

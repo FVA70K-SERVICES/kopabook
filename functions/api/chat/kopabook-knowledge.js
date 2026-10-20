@@ -205,3 +205,71 @@ export const KOPABOOK_MEMORY = {
   ordering: { enabled: false },
   booking: { enabled: false }
 };
+
+// ---------------------------------------------------------------------------
+// Merged in-app chat helpers (Ask Kopa AI + Kopa Support, one thread).
+// Used only for verified signed-in users on site 'kopabook'. The public
+// signed-out bot keeps the lockdown behaviour above.
+// ---------------------------------------------------------------------------
+
+// A shop command or business-data ask: recording and reading the shop's own
+// records. How-to questions ("how do I record a sale") are platform help,
+// not commands, and stay with Kopa Support.
+export function isBusinessActionCommand(message) {
+  const lower = String(message || '').toLowerCase().trim();
+  if (!lower) return false;
+  if (/^(how|where|can i|can you show|what is|why)\b/.test(lower) && /record|add|use|find|see/.test(lower) && !lower.includes('record it')) return false;
+  if (isBusinessDataQuestion(lower)) return true;
+  const patterns = [
+    /\bi sold\b/, /\bsold\b.+\bto\b/, /\brecord (it|this|that|a|the)/, /\brecord (a |the |my )?(sale|expense|payment)/,
+    /\b(add|log|enter|create|put)\b.+\b(sale|expense|product|stock|customer)\b/,
+    /\bspent\b.+\bon\b/, /\bexpense of\b/, /\brestock\b/, /\badd stock\b/,
+    /\bhow much did i (sell|make|spend)\b/, /\bhow many sales\b/, /\btoday'?s sales\b/, /\bsales today\b/,
+    /\bwho owes\b/, /\bwho is owing\b/, /\bowing me\b/, /\bdebtors?\b/, /\boutstanding balance\b/,
+    /\bmy (sales|expenses|profit|stock|products|customers|debts|records)\b/,
+    /\bstock (level|count|remaining)\b/, /\bwhat (do i|did i) (have|sell|sold)\b/,
+  ];
+  return patterns.some((re) => re.test(lower));
+}
+
+// A question about KopaBook the platform itself: plans, billing for the app,
+// login, bugs, features, how the app works.
+const PLATFORM_SIGNALS = [
+  'kopabook', 'pricing', 'price of the plan', 'plan', 'subscription', 'upgrade', 'downgrade',
+  'billing', 'paystack', 'login', 'log in', 'sign in', 'password', 'forgot',
+  'not working', 'bug', 'error message', 'app is', 'the app', 'feature', 'how do i use',
+  'how does kopabook', 'refund', 'cancel my', 'delete my account', 'support',
+];
+export function isPlatformQuestion(message) {
+  const lower = String(message || '').toLowerCase();
+  if (isBusinessActionCommand(lower) && !/kopabook|plan|subscription|upgrade|pricing/.test(lower)) return false;
+  return PLATFORM_SIGNALS.some((s) => lower.includes(s));
+}
+
+const FRUSTRATION_PATTERNS = [
+  'frustrated', 'frustrating', 'i am angry', "i'm angry", 'this is useless', 'you are useless',
+  'not helping', 'waste of time', 'stupid bot', 'rubbish', 'nonsense', 'fed up',
+  'you don\'t understand', 'you do not understand', 'for the third time', 'again and again',
+];
+export function isFrustrated(message) {
+  const lower = String(message || '').toLowerCase();
+  return FRUSTRATION_PATTERNS.some((p) => lower.includes(p));
+}
+
+// Support side answer when a shop command lands there: a clear pointer, with
+// a switch action the widget renders as a one-tap button. Never a deflection.
+export const BUSINESS_ACTION_POINTER = 'That is a job for Ask Kopa AI, not Kopa Support. Ask Kopa AI works with your shop records: it can record sales and expenses and answer from your own books. Kopa Support is only for questions about KopaBook itself and cannot see or change shop records. Tap Switch to Ask Kopa AI below and send your message there.';
+
+// AI side answer when a platform question lands there: a gentle suggestion,
+// never a silent switch.
+export const PLATFORM_SUPPORT_SUGGESTION = 'That sounds like a question about KopaBook itself, so Kopa Support is the right side for it. Kopa Support answers platform questions right away, and a person from the FVA70K team can join there when you need one. Tap Switch to Kopa Support below to continue there. Your conversation stays with you.';
+
+// Signed-out pointer: the public bot can never touch shop records.
+export const SIGNED_OUT_ACTION_POINTER = 'That is a job for Ask Kopa AI inside the app. Sign in to your KopaBook account, open Chat, and choose Ask Kopa AI: it works with your own shop records and can record sales and expenses for you. This public Kopa Support chat cannot see or change any shop\'s records.';
+
+export function ownerWelcome(fullName) {
+  const first = fullName ? String(fullName).split(' ')[0] : 'there';
+  return `Welcome back, ${first}. This is one chat with two clear doors. Ask Kopa AI works with your shop: it records sales and expenses and answers from your own records. Kopa Support is for questions about KopaBook itself, with a person from the FVA70K team when you need one. Pick a door below to start. This chat keeps the last 24 hours, shared across both doors.`;
+}
+
+export const SUPPORT_WELCOME = 'Welcome to Kopa Support. This side is for questions about KopaBook itself: pricing, features and problems. A person from the FVA70K team gives the human help here, by hand. Kopa Support cannot see or change your shop records. For sales, expenses and business questions, switch to Ask Kopa AI.';
