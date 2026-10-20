@@ -25,6 +25,10 @@
   --fv-chip-open-bg: #e3f4e5; --fv-chip-open-ink: #166534;
   --fv-chip-resolved-bg: #e0ecff; --fv-chip-resolved-ink: #1d4ed8;
   --fv-chip-closed-bg: #eceff1; --fv-chip-closed-ink: #546e7a;
+  --fv-chip-priority-bg: #fef3c7; --fv-chip-priority-ink: #92400e;
+  --fv-chip-urgent-bg: #fee2e2; --fv-chip-urgent-ink: #991b1b;
+  --fv-needs-bg: #b91c1c; --fv-needs-ink: #ffffff;
+  --fv-error-ink: #b91c1c;
   --fv-hover: #e5e7eb;
 }
 html[data-theme="dark"] #fva-chat-window,
@@ -49,6 +53,10 @@ html[data-theme="dark"] #fva-chat-invite {
   --fv-chip-open-bg: #14532d; --fv-chip-open-ink: #86efac;
   --fv-chip-resolved-bg: #1e3a8a; --fv-chip-resolved-ink: #bfdbfe;
   --fv-chip-closed-bg: #374151; --fv-chip-closed-ink: #d1d5db;
+  --fv-chip-priority-bg: #713f12; --fv-chip-priority-ink: #fde68a;
+  --fv-chip-urgent-bg: #7f1d1d; --fv-chip-urgent-ink: #fecaca;
+  --fv-needs-bg: #b91c1c; --fv-needs-ink: #ffffff;
+  --fv-error-ink: #fca5a5;
   --fv-hover: #243428;
 }
 #fva-chat-btn {
@@ -274,6 +282,63 @@ html[data-theme="dark"] #fva-chat-invite {
 }
 .fva-case-act.primary { background: var(--fv-brand); color: white; }
 .fva-case-open-note { font-size: 12.5px; color: var(--fv-muted); line-height: 1.45; }
+
+/* Kopa Support inbox (platform owner receiving view) */
+#fva-owner-inbox {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  overflow-y: auto; overflow-x: hidden; padding: 12px 14px;
+  background: var(--fv-history-bg); color: var(--fv-ink);
+}
+#fva-owner-inbox *, #fva-owner-inbox *::before, #fva-owner-inbox *::after { box-sizing: border-box; }
+.fva-inbox-head { justify-content: space-between; }
+.fva-inbox-head strong { font-size: 14.5px; color: var(--fv-ink); overflow-wrap: anywhere; min-width: 0; }
+#fva-inbox-refresh {
+  background: var(--fv-agent-bg); border: 1px solid var(--fv-card-line); border-radius: 999px;
+  min-height: 44px; padding: 10px 16px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  color: var(--fv-brand-text); font-family: inherit; flex-shrink: 0;
+}
+#fva-inbox-list, #fva-inbox-detail { min-width: 0; }
+.fva-inbox-item { box-sizing: border-box; }
+.fva-inbox-biz {
+  font-weight: 800; font-size: 14px; color: var(--fv-ink); min-width: 0;
+  overflow-wrap: anywhere; text-align: left;
+}
+.fva-inbox-badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 5px; }
+.fva-needs-badge {
+  display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.02em;
+  border-radius: 999px; padding: 2px 9px; text-transform: uppercase;
+  background: var(--fv-needs-bg); color: var(--fv-needs-ink);
+}
+.fva-case-chip.priority-high { background: var(--fv-chip-priority-bg); color: var(--fv-chip-priority-ink); }
+.fva-case-chip.priority-urgent { background: var(--fv-chip-urgent-bg); color: var(--fv-chip-urgent-ink); }
+.fva-inbox-count { display: block; font-size: 11.5px; color: var(--fv-faint); margin-top: 3px; }
+#fva-owner-inbox .fva-case-more { min-height: 44px; }
+#fva-owner-inbox .fva-case-backlist { min-height: 44px; padding: 10px 14px; }
+.fva-inbox-detail-head { flex-wrap: wrap; }
+.fva-inbox-detail-title { font-size: 15px; font-weight: 800; color: var(--fv-ink); min-width: 0; overflow-wrap: anywhere; }
+.fva-inbox-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fva-inbox-opened { display: block; margin: 0 0 10px; }
+#fva-owner-inbox .fva-msg.visitor .bot-label { color: rgba(255,255,255,0.88); }
+.fva-inbox-notes-note { font-size: 12px; color: var(--fv-muted); line-height: 1.45; margin-bottom: 6px; }
+.fva-inbox-note { font-size: 13px; color: var(--fv-ink); line-height: 1.5; overflow-wrap: anywhere; margin-bottom: 8px; }
+.fva-inbox-note strong { color: var(--fv-ink); }
+.fva-inbox-actions { min-height: 0; }
+.fva-inbox-actions:empty { display: none; margin-top: 0; }
+#fva-owner-inbox .fva-case-act { min-height: 44px; }
+.fva-inbox-reply { margin-top: 14px; border-top: 1px solid var(--fv-line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.fva-inbox-reply-label { font-size: 13px; font-weight: 800; color: var(--fv-ink); overflow-wrap: anywhere; }
+.fva-inbox-reply-text {
+  width: 100%; min-height: 76px; padding: 10px 12px;
+  border: 1px solid var(--fv-line); border-radius: 12px;
+  background: var(--fv-input-bg); color: var(--fv-ink);
+  font-family: inherit; font-size: 14px; line-height: 1.45; resize: vertical;
+}
+.fva-inbox-reply-text:focus { border-color: var(--fv-brand); outline: none; }
+.fva-inbox-reply-text:disabled { opacity: 0.6; }
+.fva-inbox-reply-error { font-size: 12.5px; color: var(--fv-error-ink); line-height: 1.45; overflow-wrap: anywhere; }
+.fva-inbox-reply-error:empty { display: none; }
+.fva-inbox-send { min-height: 44px; height: 44px; align-self: flex-start; }
+.fva-inbox-send:disabled { opacity: 0.55; cursor: default; }
 
 /* Confirmation proposal card: Ask Kopa AI write actions */
 .fva-proposal-card {
