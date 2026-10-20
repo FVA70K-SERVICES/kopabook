@@ -9,6 +9,7 @@ function MNav() {
     ["Features", "/features"],
     ["Hotels", "/hotels"],
     ["Pricing", "/pricing"],
+    ["Get the app", "/download"],
     ["About", "/about"],
     ["FAQ", "/faq"],
   ];
@@ -45,8 +46,8 @@ function MFooter() {
         </div>
         <div>
           <a href="/features">Features</a> · <a href="/pricing">Pricing</a> ·{" "}
-          <a href="/about">About</a> · <a href="/faq">FAQ</a> ·{" "}
-          <a href="/login">Sign in</a>
+          <a href="/download">Get the app</a> · <a href="/about">About</a> ·{" "}
+          <a href="/faq">FAQ</a> · <a href="/login">Sign in</a>
         </div>
         <div style={{ marginTop: 8 }}>
           <a href="/terms">Terms of Service</a> · <a href="/privacy">Privacy Policy</a> ·{" "}
@@ -577,6 +578,105 @@ function RealBook() {
 }
 
 
+// ---- Get the app: Android APK download + iPhone home-screen steps ----
+const DOWNLOAD_CSS = `
+.dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; align-items: start; }
+@media (max-width: 380px) { .dl-grid { grid-template-columns: 1fr; } }
+.dl-card h3 { font-size: 22px; }
+.dl-meta { font-size: 13.5px; font-weight: 600; color: var(--muted); text-align: center; margin-top: 10px; }
+.dl-steps { margin: 22px 0 0; }
+.dl-steps .step p { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+.dl-note { margin-top: 20px; padding: 12px 16px; border-radius: 10px; background: var(--brand-soft); color: var(--brand-dark); font-size: 14.5px; font-weight: 600; text-align: center; }
+`;
+
+const ANDROID_STEPS = [
+  ["Tap Download for Android.", "Use the green button above. The file is small, about 4.8 MB, so it will not eat your data."],
+  ["Open the downloaded file.", "Tap the finished download in your notifications, or open kopabook.apk from your Downloads folder."],
+  ["Allow the install if your phone asks.", "Some phones show an \u201CInstall unknown apps\u201D prompt. Allow it for your browser. This is the standard Android prompt, and this file is the official KopaBook app from kopabook.com."],
+  ["Tap Install.", "Wait a few seconds while the app installs."],
+  ["Open KopaBook.", "Find KopaBook on your home screen and tap it. It runs full-screen, just like a normal app."],
+];
+
+const IPHONE_STEPS = [
+  ["Open kopabook.com in Safari.", "Use the Safari browser that came with your iPhone."],
+  ["Tap the Share button.", "It is the square with an arrow pointing up, at the bottom of the screen."],
+  ["Tap \u201CAdd to Home Screen\u201D.", "Scroll the list a little if you do not see it at first."],
+  ["Tap Add.", "KopaBook now sits on your home screen. Tap it any time to open your shop."],
+];
+
+function DlSteps({ steps }) {
+  return (
+    <div className="steps dl-steps">
+      {steps.map(([title, body], i) => (
+        <div className="step" key={i}>
+          <div className="n">{i + 1}</div>
+          <div><strong>{title}</strong><p>{body}</p></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function DownloadPage() {
+  return (
+    <div className="page">
+      <MNav />
+      <section className="hero" style={{ paddingBottom: 20 }}>
+        <div className="wrap">
+          <span className="eyebrow">Get the app</span>
+          <h1>Get KopaBook on your phone</h1>
+          <p className="lead">Put KopaBook on your home screen and open your shop records in one tap. Pick your phone below and follow the short steps.</p>
+        </div>
+      </section>
+      <section className="section" style={{ paddingTop: 4 }}>
+        <div className="wrap">
+          <div className="dl-grid">
+            <div className="card dl-card">
+              <div className="icon">{"\uD83E\uDD16"}</div>
+              <h3>Android</h3>
+              <p>Download the official KopaBook app and install it in about a minute. It is the same KopaBook you know, in a proper app that opens full-screen.</p>
+              <div style={{ marginTop: 18 }}>
+                <a className="btn btn-primary btn-block" href="/downloads/kopabook.apk" download>Download for Android</a>
+                <div className="dl-meta">Version 1.0 · About 4.8 MB · Free</div>
+              </div>
+              <DlSteps steps={ANDROID_STEPS} />
+              <div className="dl-note">Coming soon to the Google Play Store.</div>
+            </div>
+            <div className="card dl-card">
+              <div className="icon">{"\uD83C\uDF4E"}</div>
+              <h3>iPhone</h3>
+              <p>There is no App Store app yet. For now, the way to get KopaBook on an iPhone is to add it to your home screen from Safari. It opens full-screen and works like an app.</p>
+              <DlSteps steps={IPHONE_STEPS} />
+              <div className="dl-note">Sign in once and KopaBook remembers you on that phone.</div>
+            </div>
+          </div>
+          <p style={{ textAlign: "center", color: "var(--muted)", marginTop: 28, fontSize: 15 }}>
+            No phone handy? KopaBook also works in any browser. Just <a href="/login">sign in</a> and start recording.
+          </p>
+        </div>
+      </section>
+      <style>{DOWNLOAD_CSS}</style>
+      <MFooter />
+    </div>
+  );
+}
+
+function GetAppBand() {
+  return (
+    <section className="section section-band" style={{ borderTop: "1px solid var(--line)", padding: "44px 0" }}>
+      <div className="wrap" style={{ textAlign: "center" }}>
+        <h2>KopaBook now has an Android app</h2>
+        <p className="sub">Download it free and keep your shop on your home screen. On iPhone, add KopaBook from Safari in under a minute.</p>
+        <div className="hero-cta">
+          <a href="/downloads/kopabook.apk" className="btn btn-primary" download>Download for Android</a>
+          <a href="/download" className="btn btn-secondary">See install steps</a>
+        </div>
+        <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14 }}>Version 1.0 · About 4.8 MB · Coming soon to the Google Play Store</p>
+      </div>
+    </section>
+  );
+}
+
 export function LandingPage() {
   useEffect(() => {
     var hero = document.getElementById("kb-hero");
@@ -701,6 +801,8 @@ export function LandingPage() {
         </div>
         <style>{HERO_CSS}</style>
       </section>
+
+      <GetAppBand />
 
             <section className="section" id="kb-book-section" style={{ overflow: "hidden" }}>
         <div className="wrap" style={{ textAlign: "center" }}>
