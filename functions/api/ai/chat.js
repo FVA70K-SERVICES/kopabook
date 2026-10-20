@@ -610,6 +610,28 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
   }
 
   if (opts && opts.dryRun) {
+    // Be sure before proposing: if the user's own words did not name the
+    // resolved product in full, and another product shares its first word
+    // (Rice 5kg vs Rice 10kg), the model may have guessed between siblings.
+    // Ask one targeted question instead of proposing the wrong item.
+    if (opts.userMessage) {
+      const msgLower = String(opts.userMessage).toLowerCase();
+      for (const l of lines) {
+        if (msgLower.includes(l.product.name.toLowerCase())) continue;
+        const firstToken = l.product.name.trim().split(/\s+/)[0].toLowerCase();
+        if (firstToken.length < 3) continue;
+        const all = await db.prepare(
+          `SELECT name FROM products WHERE business_id = ? AND is_active = 1 LIMIT 100`
+        ).bind(auth.business.id).all();
+        const siblings = (all.results || [])
+          .map((r) => String(r.name))
+          .filter((n) => n.toLowerCase() !== l.product.name.toLowerCase()
+            && n.trim().split(/\s+/)[0].toLowerCase() === firstToken);
+        if (siblings.length) {
+          return { ok: false, clarification: `I want to be sure before I record anything: did you mean ${l.product.name} or ${siblings.join(" or ")}?` };
+        }
+      }
+    }
     const proposalLines = lines.map((l) => `${l.qty} × ${l.product.name} at ${fmt(l.unitPrice, currency)} per ${l.product.unit} = ${fmt(l.lineTotal, currency)}`);
     proposalLines.push(`Total: ${fmt(subtotal, currency)}`);
     proposalLines.push(`Customer: ${customerName || "Walk-in"}`);
@@ -1442,7 +1464,20 @@ export async function runKopaAiChat(context, auth, body) {
         try {
           sess = await db.prepare(`SELECT needs_human, handled_by FROM chat_sessions WHERE id = ?`).bind(safeBody.sessionId).first();
         } catch (e) { sess = null; }
-        if (sess && (Number(sess.needs_human || 0) === 1 || sess.handled_by === "human")) {
+        // Block only when a person is genuinely on the chat: the session is
+        // human-handled, or a team member has actually posted in it. A bare
+        // needs_human flag is not enough (ordinary words on the AI side, like
+        // "Cancel" for a proposal, can set that flag with no human present).
+        let humanPresent = !!(sess && sess.handled_by === "human");
+        if (!humanPresent && sess) {
+          try {
+            const agentMsg = await db.prepare(
+              `SELECT id FROM chat_messages WHERE session_id = ? AND sender = 'agent' LIMIT 1`
+            ).bind(safeBody.sessionId).first();
+            humanPresent = !!agentMsg;
+          } catch (e) { /* if we cannot tell, allow the clear */ }
+        }
+        if (humanPresent) {
           const blockedReply = "I cannot clear this chat while a person from the KopaBook team is on it. End the support conversation first, or ask them to close it, and then I can clear it.";
           return { status: 200, body: { ok: true, reply: blockedReply, answer: blockedReply, actions_taken: [], fallback: false } };
         }
@@ -1675,7 +1710,7 @@ export async function runKopaAiChat(context, auth, body) {
         // and return an exact proposal, and nothing is recorded yet.
         // Debtor tools need the Workers AI handle and conversation history.
         result = isWriteTool
-          ? await exec(context, db, auth, action.params, currency, { dryRun: true })
+          ? await exec(context, db, auth, action.params, currency, { dryRun: true, userMessage: message })
           : action.tool === "draft_debtor_message"
             ? await exec(context.env, db, auth, action.params, currency)
             : action.tool === "send_debtor_message"
