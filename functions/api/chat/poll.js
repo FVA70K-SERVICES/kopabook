@@ -26,9 +26,18 @@ export async function onRequestGet({ request, env }) {
       await clearExpiredMergedChat(env.KOPABOOK_DB, sessionId);
     }
 
-    const msgs = await env.KOPABOOK_DB.prepare(
-      'SELECT id, sender, sender_name, message, created_at FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC LIMIT 50'
-    ).bind(sessionId, since).all();
+    let msgs;
+    try {
+      msgs = await env.KOPABOOK_DB.prepare(
+        'SELECT id, sender, sender_name, message, created_at FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC LIMIT 50'
+      ).bind(sessionId, since).all();
+    } catch (e) {
+      // Older deployments may not have sender_name yet. Poll must never fail
+      // because an optional display column is missing.
+      msgs = await env.KOPABOOK_DB.prepare(
+        'SELECT id, sender, message, created_at FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC LIMIT 50'
+      ).bind(sessionId, since).all();
+    }
 
     // Honest support state for the merged chat: who is handling this now,
     // and the name of the human when one has joined.
