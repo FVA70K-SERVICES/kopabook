@@ -27,6 +27,7 @@
   try { chatMode = localStorage.getItem('fva_chat_mode_kopabook') || ''; } catch (e) {}
   if (chatMode !== 'ai' && chatMode !== 'support') chatMode = '';
   let supportState = null;
+  let ownerInboxAuthFailed = false;
   let doorPickerShown = false;
   const renderedProposalIds = new Set();
 
@@ -382,7 +383,14 @@
     }
   }
 
+  function isPlatformOwnerMode() {
+    if (!IS_KOPABOOK) return false;
+    const ctx = getOwnerCtx();
+    return !!ctx && ctx.isPlatformAdmin === true;
+  }
+
   function supportStatusText() {
+    if (isPlatformOwnerMode() && !ownerInboxAuthFailed) return 'Support inbox: cases from business owners';
     if (!supportState) return 'Kopa Bot is answering';
     if (supportState.agentName && (supportState.handledBy === 'human' || supportState.assignedTo)) {
       return supportState.agentName + ' from the KopaBook team has joined';
@@ -411,8 +419,16 @@
       else st.style.display = 'none';
     }
     const tools = body.querySelector('#fva-support-tools');
-    if (tools) tools.style.display = chatMode === 'support' ? 'block' : 'none';
+    if (tools) {
+      if (chatMode === 'support' && isPlatformOwnerMode() && !ownerInboxAuthFailed) tools.style.display = 'none';
+      else tools.style.display = chatMode === 'support' ? 'block' : 'none';
+    }
     if (chatMode !== 'support') closeCaseHistory();
+    if (chatMode === 'support' && isPlatformOwnerMode() && !ownerInboxAuthFailed) openOwnerInbox();
+    else {
+      if (chatMode !== 'support') ownerInboxAuthFailed = false;
+      closeOwnerInbox();
+    }
     renderPaCards();
     updateVoiceControls();
   }
@@ -421,6 +437,10 @@
     const dp = body.querySelector('#fva-door-picker');
     if (!dp || doorPickerShown) return;
     doorPickerShown = true;
+    if (isPlatformOwnerMode()) {
+      const supportDesc = dp.querySelector('.fva-door-btn[data-mode="support"] span');
+      if (supportDesc) supportDesc.textContent = 'Your support inbox. Read and reply to cases from business owners.';
+    }
     dp.style.display = 'block';
     dp.querySelectorAll('.fva-door-btn').forEach(b => {
       b.addEventListener('click', () => {
@@ -436,6 +456,7 @@
 
   function showInitialQuickReplies() {
     if (!(IS_KOPABOOK && isOwnerMode()) || !chatMode) return;
+    if (chatMode === 'support' && isPlatformOwnerMode()) return;
     if (chatMode === 'ai') showQuickReplies(['Record a sale', 'Record an expense', "Today's sales", 'Who owes me']);
     else showQuickReplies(['Pricing', 'Features', 'How to start', 'Talk to human']);
   }
@@ -1016,6 +1037,319 @@
     }
   }
 
+  // ---- Kopa Support inbox (platform owner view) ----
+  // The platform owner receives cases here instead of contacting support.
+  // Every admin call is re-verified by the server; this flag only renders.
+  let inboxListCursor = null;
+  let inboxListLoading = false;
+  let ownerInboxOpen = false;
+  let inboxCurrentCase = null;
+  let inboxCurrentCaseId = null;
+  let inboxReplySending = false;
+
+  function inboxCaseName(c) {
+    return (c && (c.business_name || c.client_name)) || 'Business';
+  }
+  function inboxPriorityChip(c) {
+    if (!c || (c.priority !== 'high' && c.priority !== 'urgent')) return '';
+    const label = c.priority === 'urgent' ? 'Urgent' : 'High';
+    return '<span class="fva-case-chip priority-' + escapeHtml(c.priority) + '">' + label + '</span>';
+  }
+  function inboxChipsHtml(c) {
+    return '<span class="fva-case-chip ' + escapeHtml(c.status || 'open') + '">' + caseStatusLabel(c.status) + '</span>' + inboxPriorityChip(c);
+  }
+  function inboxEventText(e) {
+    const who = e.actor_name || (e.actor_type === 'client' || e.actor_type === 'visitor' ? 'Business owner' : 'Support team');
+    const detail = e.detail ? ': ' + String(e.detail) : '';
+    if (e.event === 'opened') return 'Case opened';
+    if (e.event === 'resolved') return 'Marked resolved by ' + who;
+    if (e.event === 'closed') return 'Closed by ' + who;
+    if (e.event === 'reopened') return 'Reopened by ' + who;
+    if (e.event === 'confirmed') return 'Resolution confirmed by ' + who;
+    if (e.event === 'assigned') return 'Assigned' + detail;
+    if (e.event === 'priority') return 'Priority changed' + detail;
+    if (e.event === 'category') return 'Category changed' + detail;
+    if (e.event === 'note') return 'Internal note added by ' + who;
+    if (e.event === 'replied' || e.event === 'reply') return 'Reply sent by ' + who;
+    return String(e.event || 'Case updated') + detail;
+  }
+  function inboxMsgHtml(m, c) {
+    const who = m.sender === 'visitor' ? 'visitor' : m.sender === 'agent' ? 'agent' : 'bot';
+    let label = '';
+    if (m.sender === 'visitor') label = (c && (c.client_name || c.business_name)) || 'Business owner';
+    else if (m.sender === 'agent') label = m.sender_name || 'Kopa Support team';
+    else label = 'Kopa Bot';
+    return '<div class="bot-label">' + escapeHtml(label) + '</div>' +
+      escapeHtml(m.message || '') +
+      '<div class="time">' + escapeHtml(fmtStamp(m.created_at)) + '</div>';
+  }
+
+  function openOwnerInbox() {
+    if (!isPlatformOwnerMode() || ownerInboxAuthFailed) return;
+    const view = body.querySelector('#fva-owner-inbox');
+    if (!view) return;
+    if (ownerInboxOpen && view.style.display !== 'none') {
+      setLiveVisible(false);
+      return;
+    }
+    ownerInboxOpen = true;
+    setLiveVisible(false);
+    const hist = body.querySelector('#fva-case-history');
+    if (hist) hist.style.display = 'none';
+    view.style.display = 'block';
+    const detail = body.querySelector('#fva-inbox-detail');
+    if (detail) detail.style.display = 'none';
+    const list = body.querySelector('#fva-inbox-list');
+    if (list) list.style.display = 'block';
+    inboxListCursor = null;
+    loadInboxList(true);
+  }
+
+  function closeOwnerInbox() {
+    const view = body.querySelector('#fva-owner-inbox');
+    if (!view || view.style.display === 'none') return;
+    ownerInboxOpen = false;
+    inboxCurrentCase = null;
+    inboxCurrentCaseId = null;
+    view.style.display = 'none';
+    setLiveVisible(true);
+  }
+
+  function handleInboxAuthFailure() {
+    if (ownerInboxAuthFailed) return;
+    ownerInboxAuthFailed = true;
+    ownerInboxOpen = false;
+    inboxCurrentCase = null;
+    inboxCurrentCaseId = null;
+    const view = body.querySelector('#fva-owner-inbox');
+    if (view) view.style.display = 'none';
+    setLiveVisible(true);
+    appendModeNote('The support inbox could not be verified for this session, so the standard support view is shown.');
+  }
+
+  async function loadInboxList(reset) {
+    const list = body.querySelector('#fva-inbox-list');
+    if (!list || inboxListLoading) return;
+    inboxListLoading = true;
+    if (reset) list.innerHTML = '<p class="fva-history-empty">Loading support cases...</p>';
+    try {
+      const url = API + '/admin/cases?limit=25' + (inboxListCursor ? '&cursor=' + encodeURIComponent(inboxListCursor) : '');
+      const res = await fetch(url);
+      if (res.status === 401) {
+        inboxListLoading = false;
+        handleInboxAuthFailure();
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error('load failed');
+      const cases = (data.cases || []).slice().sort((a, b) => {
+        const aw = a.awaiting_first_response ? 1 : 0;
+        const bw = b.awaiting_first_response ? 1 : 0;
+        if (aw !== bw) return bw - aw;
+        const at = new Date(a.last_activity || a.opened_at || 0).getTime() || 0;
+        const bt = new Date(b.last_activity || b.opened_at || 0).getTime() || 0;
+        return bt - at;
+      });
+      if (reset) list.innerHTML = '';
+      if (!cases.length && reset) {
+        list.innerHTML = '<p class="fva-history-empty">No support cases yet. When a business owner contacts Kopa Support, their case lands here.</p>';
+      }
+      cases.forEach(c => {
+        const item = document.createElement('button');
+        item.className = 'fva-case-item fva-inbox-item';
+        item.type = 'button';
+        const count = typeof c.message_count === 'number' ? c.message_count : null;
+        item.innerHTML =
+          '<span class="fva-case-top"><span class="fva-inbox-biz">' + escapeHtml(inboxCaseName(c)) + '</span>' +
+          '<span class="fva-case-date">' + escapeHtml(fmtStamp(c.last_activity || c.opened_at)) + '</span></span>' +
+          '<span class="fva-inbox-badges">' +
+          (c.awaiting_first_response ? '<span class="fva-needs-badge">Needs reply</span>' : '') +
+          '<span class="fva-case-chip ' + escapeHtml(c.status || 'open') + '">' + caseStatusLabel(c.status) + '</span>' +
+          inboxPriorityChip(c) +
+          '</span>' +
+          '<span class="fva-case-preview">' + escapeHtml(c.last_message || 'Support conversation') + '</span>' +
+          (count !== null ? '<span class="fva-inbox-count">' + count + (count === 1 ? ' message' : ' messages') + '</span>' : '');
+        item.addEventListener('click', () => openInboxDetail(c.id));
+        list.appendChild(item);
+      });
+      const oldMore = list.querySelector('.fva-case-more');
+      if (oldMore) oldMore.remove();
+      inboxListCursor = data.nextCursor || null;
+      if (inboxListCursor) {
+        const more = document.createElement('button');
+        more.className = 'fva-case-more';
+        more.type = 'button';
+        more.textContent = 'Show older cases';
+        more.addEventListener('click', () => loadInboxList(false));
+        list.appendChild(more);
+      }
+    } catch (e) {
+      if (reset) list.innerHTML = '<p class="fva-history-empty">Could not load the support inbox. Please try again.</p>';
+    }
+    inboxListLoading = false;
+  }
+
+  function refreshInboxDetailHead(detail, c) {
+    if (!detail || !c) return;
+    const chips = detail.querySelector('.fva-inbox-chips');
+    if (chips) chips.innerHTML = inboxChipsHtml(c);
+    const title = detail.querySelector('.fva-inbox-detail-title');
+    if (title) title.textContent = inboxCaseName(c);
+  }
+
+  function renderInboxActions(detail, c) {
+    const actions = detail.querySelector('.fva-inbox-actions');
+    if (!actions) return;
+    let html = '';
+    if (c.status === 'open') {
+      html += '<button class="fva-case-act primary fva-inbox-status-act" type="button" data-act="resolve">Resolve</button>';
+      html += '<button class="fva-case-act fva-inbox-status-act" type="button" data-act="close">Close</button>';
+    } else if (c.status === 'resolved' || c.status === 'closed') {
+      html += '<button class="fva-case-act fva-inbox-status-act" type="button" data-act="reopen">Reopen</button>';
+    }
+    actions.innerHTML = html;
+    actions.querySelectorAll('.fva-inbox-status-act').forEach(b => {
+      b.addEventListener('click', () => inboxStatusAction(c.id, b.getAttribute('data-act'), detail));
+    });
+  }
+
+  async function inboxStatusAction(caseId, action, detail) {
+    try {
+      const res = await fetch(API + '/admin/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseId, action }),
+      });
+      if (res.status === 401) { handleInboxAuthFailure(); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || (data && data.ok === false)) throw new Error('action failed');
+      if (data.case) {
+        inboxCurrentCase = data.case;
+        refreshInboxDetailHead(detail, data.case);
+        renderInboxActions(detail, data.case);
+      }
+    } catch (e) {
+      const err = detail.querySelector('.fva-inbox-reply-error');
+      if (err) { err.textContent = 'That action did not work. Please try again.'; err.style.display = 'block'; }
+    }
+  }
+
+  async function sendInboxReply(caseId, detail) {
+    if (inboxReplySending) return;
+    const textarea = detail.querySelector('.fva-inbox-reply-text');
+    const sendBtn = detail.querySelector('.fva-inbox-send');
+    const err = detail.querySelector('.fva-inbox-reply-error');
+    if (!textarea || !sendBtn) return;
+    const message = textarea.value.trim();
+    if (err) err.style.display = 'none';
+    if (!message) {
+      if (err) { err.textContent = 'Write a reply first.'; err.style.display = 'block'; }
+      return;
+    }
+    inboxReplySending = true;
+    sendBtn.disabled = true;
+    textarea.disabled = true;
+    try {
+      const res = await fetch(API + '/admin/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseId, action: 'reply', message }),
+      });
+      if (res.status === 401) {
+        inboxReplySending = false;
+        handleInboxAuthFailure();
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || (data && data.ok === false)) throw new Error('reply failed');
+      const returned = data.message || { sender: 'agent', sender_name: '', message, created_at: Date.now() };
+      const msgs = detail.querySelector('.fva-case-msgs');
+      if (msgs) {
+        const div = document.createElement('div');
+        div.className = 'fva-msg ' + (returned.sender === 'agent' ? 'agent' : returned.sender || 'agent');
+        div.innerHTML = inboxMsgHtml(returned, data.case || inboxCurrentCase);
+        msgs.appendChild(div);
+      }
+      textarea.value = '';
+      if (data.case) {
+        inboxCurrentCase = data.case;
+        refreshInboxDetailHead(detail, data.case);
+        renderInboxActions(detail, data.case);
+      }
+    } catch (e) {
+      if (err) { err.textContent = 'Could not send that reply. Please try again.'; err.style.display = 'block'; }
+    }
+    inboxReplySending = false;
+    sendBtn.disabled = false;
+    textarea.disabled = false;
+  }
+
+  async function openInboxDetail(caseId) {
+    const detail = body.querySelector('#fva-inbox-detail');
+    const list = body.querySelector('#fva-inbox-list');
+    if (!detail) return;
+    inboxCurrentCaseId = caseId;
+    if (list) list.style.display = 'none';
+    detail.style.display = 'block';
+    detail.innerHTML = '<p class="fva-history-empty">Loading...</p>';
+    try {
+      const res = await fetch(API + '/admin/cases?caseId=' + encodeURIComponent(caseId));
+      if (res.status === 401) { handleInboxAuthFailure(); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.case) {
+        detail.innerHTML = '<p class="fva-history-empty">That support case could not be loaded.</p>';
+        return;
+      }
+      const c = data.case;
+      inboxCurrentCase = c;
+      let html = '<button class="fva-case-backlist fva-inbox-backlist" type="button">All cases</button>';
+      html += '<div class="fva-case-detail-head fva-inbox-detail-head"><span class="fva-inbox-detail-title">' + escapeHtml(inboxCaseName(c)) + '</span>' +
+        '<span class="fva-inbox-chips">' + inboxChipsHtml(c) + '</span></div>';
+      html += '<div class="fva-case-date fva-inbox-opened">Opened ' + escapeHtml(fmtStamp(c.opened_at)) + '</div>';
+      html += '<div class="fva-case-msgs">';
+      (data.messages || []).forEach(m => {
+        const who = m.sender === 'visitor' ? 'visitor' : m.sender === 'agent' ? 'agent' : 'bot';
+        html += '<div class="fva-msg ' + who + '">' + inboxMsgHtml(m, c) + '</div>';
+      });
+      html += '</div>';
+      const notes = data.notes || [];
+      html += '<div class="fva-case-events fva-inbox-notes"><div class="fva-case-events-title">Internal notes</div>' +
+        '<div class="fva-inbox-notes-note">Only the FVA70K team can see these notes.</div>' +
+        (notes.length
+          ? notes.map(n => '<div class="fva-inbox-note"><strong>' + escapeHtml(n.author_name || 'Support team') + '</strong> <span class="fva-case-date">' + escapeHtml(fmtStamp(n.created_at)) + '</span><div>' + escapeHtml(n.note || '') + '</div></div>').join('')
+          : '<div class="fva-case-event">No internal notes yet.</div>') +
+        '</div>';
+      const events = data.events || [];
+      html += '<div class="fva-case-events fva-inbox-events"><div class="fva-case-events-title">Case history</div>' +
+        (events.length
+          ? events.map(e => '<div class="fva-case-event">' + escapeHtml(inboxEventText(e)) + ' · ' + escapeHtml(fmtStamp(e.created_at)) + '</div>').join('')
+          : '<div class="fva-case-event">No case events yet.</div>') +
+        '</div>';
+      html += '<div class="fva-case-actions fva-inbox-actions"></div>';
+      html += '<div class="fva-inbox-reply">' +
+        '<label class="fva-inbox-reply-label" for="fva-inbox-reply-text">Reply to ' + escapeHtml(inboxCaseName(c)) + '</label>' +
+        '<textarea id="fva-inbox-reply-text" class="fva-inbox-reply-text" rows="3" maxlength="2000" placeholder="Write a reply..."></textarea>' +
+        '<div class="fva-inbox-reply-error" style="display:none;"></div>' +
+        '<button class="fva-case-act primary fva-inbox-send" type="button">Send reply</button>' +
+        '</div>';
+      detail.innerHTML = html;
+      const backBtn = detail.querySelector('.fva-inbox-backlist');
+      if (backBtn) backBtn.addEventListener('click', () => {
+        detail.style.display = 'none';
+        if (list) list.style.display = 'block';
+        inboxCurrentCase = null;
+        inboxCurrentCaseId = null;
+        inboxListCursor = null;
+        loadInboxList(true);
+      });
+      renderInboxActions(detail, c);
+      const sendBtn = detail.querySelector('.fva-inbox-send');
+      if (sendBtn) sendBtn.addEventListener('click', () => sendInboxReply(caseId, detail));
+    } catch (e) {
+      detail.innerHTML = '<p class="fva-history-empty">Could not load that support case. Please try again.</p>';
+    }
+  }
+
   function closeChat() {
     stopVoiceMode();
     isOpen = false;
@@ -1092,6 +1426,15 @@
         '<div id="fva-history-list"></div>' +
         '<div id="fva-history-detail" style="display:none;"></div>' +
       '</div>' +
+      '<div id="fva-owner-inbox" style="display:none;">' +
+        '<div class="fva-history-head fva-inbox-head">' +
+          '<strong>Support inbox</strong>' +
+          '<button id="fva-inbox-refresh" type="button">Refresh</button>' +
+        '</div>' +
+        '<p class="fva-history-note">Cases from business owners land here. This is the same inbox the Chat Center shows.</p>' +
+        '<div id="fva-inbox-list"></div>' +
+        '<div id="fva-inbox-detail" style="display:none;"></div>' +
+      '</div>' +
       '<div id="fva-door-picker" style="display:none;">' +
         '<div class="fva-door-title">Who do you want to talk to?</div>' +
         '<button class="fva-door-btn" data-mode="ai"><strong>Ask Kopa AI</strong><span>Your shop assistant. Records sales and expenses, and answers from your own records.</span></button>' +
@@ -1150,6 +1493,17 @@
     if (histBtn) histBtn.addEventListener('click', openCaseHistory);
     const histBack = body.querySelector('#fva-history-back');
     if (histBack) histBack.addEventListener('click', closeCaseHistory);
+    const inboxRefresh = body.querySelector('#fva-inbox-refresh');
+    if (inboxRefresh) inboxRefresh.addEventListener('click', () => {
+      const detail = body.querySelector('#fva-inbox-detail');
+      if (detail) detail.style.display = 'none';
+      const list = body.querySelector('#fva-inbox-list');
+      if (list) list.style.display = 'block';
+      inboxCurrentCase = null;
+      inboxCurrentCaseId = null;
+      inboxListCursor = null;
+      loadInboxList(true);
+    });
     loadHistory();
     poll();
     afterOwnerUI();
