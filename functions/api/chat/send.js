@@ -275,10 +275,10 @@ export async function onRequestPost(context) {
                   .filter((m) => m.sender === 'visitor' || m.sender === 'bot' || m.sender === 'agent')
                   .map((m) => ({ role: m.sender === 'visitor' ? 'user' : 'assistant', content: String(m.message || '').slice(0, 1000) }))
                   .slice(-20);
-                const aiRes = await runKopaAiChat(context, ownerAuth, { message: clean, history });
+                const aiRes = await runKopaAiChat(context, ownerAuth, { message: clean, history, sessionId });
                 const b = aiRes.body || {};
                 const answer = b.reply || b.answer || b.message || 'Ask Kopa AI could not answer just now. Please try again.';
-                result = { answer, quickReplies: [], confidence: 'high' };
+                result = { answer, quickReplies: [], confidence: 'high', proposal: b.proposal || null, clearChat: b.clear_chat || false };
               } catch (e) {
                 result = {
                   answer: 'Ask Kopa AI is resting at the moment. Your records are safe. Please try again in a bit, or switch to Kopa Support if you need a person.',
@@ -403,6 +403,18 @@ export async function onRequestPost(context) {
           };
         }
 
+        // Clear chat (Ask Kopa AI): wipe this session's thread first, so it
+        // ends with only the confirmation line inserted below. Support case
+        // tables are separate and are never touched here; in ai mode
+        // supportCase is null, so nothing is mirrored from a cleared thread.
+        if (result.clearChat) {
+          try {
+            await env.KOPABOOK_DB.prepare(
+              'DELETE FROM chat_messages WHERE session_id = ?'
+            ).bind(sessionId).run();
+          } catch (e) { /* the confirmation line below still goes out */ }
+        }
+
         const botNow = Date.now();
         await env.KOPABOOK_DB.prepare(
           'INSERT INTO chat_messages (session_id, sender, message, created_at) VALUES (?, ?, ?, ?)'
@@ -430,6 +442,7 @@ export async function onRequestPost(context) {
           action: result.action || null,
           isOrderFlow: result.isOrderFlow || false,
           isBookingFlow: result.isBookingFlow || false,
+          proposal: result.proposal || null,
         };
       }
     }
