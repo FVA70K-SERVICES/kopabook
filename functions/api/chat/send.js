@@ -427,7 +427,11 @@ export async function onRequestPost(context) {
           } catch (e) { /* the live reply already saved */ }
         }
 
-        if (result.escalate || shouldEscalate(clean)) {
+        // The Ask Kopa AI side is fully automated: its messages never flag
+        // the session for a human (ordinary AI-side words like "Cancel" for
+        // a proposal must not raise a support alert). Escalation wording on
+        // the AI side is handled earlier, inside the verified-owner branch.
+        if ((result.escalate || shouldEscalate(clean)) && !(verifiedOwner && activeMode === 'ai')) {
           await env.KOPABOOK_DB.prepare(
             'UPDATE chat_sessions SET needs_human = 1 WHERE id = ?'
           ).bind(sessionId).run().catch(() => {});
