@@ -139,7 +139,7 @@ const MODULES = [
   { icon: "\uD83D\uDD14", name: "WhatsApp debt reminders", access: "paid", tiers: "Starter, Solo and Pro", desc: "Send polite debt reminders straight to WhatsApp, drafted from each customer's real balance.", bestFor: "Anyone tired of chasing payments." },
   { icon: "\uD83D\uDCC8", name: "Full reports", access: "paid", tiers: "Starter, Solo and Pro", desc: "Profit trend over time, best sellers, slow movers, payment breakdown and date-range summaries, with one-tap CSV export.", bestFor: "Owners making restock and pricing decisions." },
   { icon: "\uD83D\uDCE5", name: "CSV import", access: "paid", tiers: "Starter, Solo and Pro", desc: "Import marketplace sales reports from CSV files, so your Jumia and Konga sales land in your books automatically.", bestFor: "Sellers on online marketplaces." },
-  { icon: "\uD83D\uDCCB", name: "Projects", access: "paid", tiers: "Starter, Solo and Pro", desc: "Full accountability for any project. Record every income and expense, track milestones, then generate a complete report showing exactly where every naira went.", bestFor: "Anyone handling project money." },
+  { icon: "\uD83D\uDCCB", name: "Projects", access: "free", desc: "Full accountability for any project, on every plan including Free. Record every income and expense, track milestones, then generate a complete report showing exactly where every naira went.", bestFor: "Anyone handling project money." },
 ];
 
 function TierBadge(props) {
@@ -288,7 +288,7 @@ const BOOK_PAGES = [
   { icon: "\uD83D\uDCC8", name: "Reports", access: "paid", tiers: "Starter, Solo and Pro", visual: "reports", caption: "Profit trend, best sellers, slow movers." },
   { icon: "\uD83E\uDDFB", name: "Receipts", access: "free", visual: "receipt", caption: "Share on WhatsApp or save as an image." },
   { icon: "\uD83E\uDD16", name: "Ask Kopa AI", access: "tiered", visual: "ai", caption: "Ask about your business in plain words." },
-  { icon: "\uD83D\uDCCB", name: "Projects", access: "paid", tiers: "Starter, Solo and Pro", visual: "projects", caption: "Full accountability for any project." },
+  { icon: "\uD83D\uDCCB", name: "Projects", access: "free", visual: "projects", caption: "Full accountability for any project." },
   { icon: "\uD83D\uDE9A", name: "Shipments", access: "paid", tiers: "Solo and Pro", visual: "shipments", caption: "Track every delivery to your customer." },
   { icon: "\uD83C\uDFE8", name: "Hotel module", access: "paid", tiers: "Solo and Pro", visual: "hotel", caption: "Rooms, bookings and guest folios." },
   { icon: "\uD83D\uDCE3", name: "Messages", access: "free", visual: "messages", caption: "Promos to customers on WhatsApp." },
@@ -985,7 +985,7 @@ export function PricingPage() {
     ["WhatsApp debt reminders", 0, 1, 1, 1],
     ["Full reports with CSV export", 0, 1, 1, 1],
     ["CSV import", 0, 1, 1, 1],
-    ["Projects", 0, 1, 1, 1],
+    ["Projects", 1, 1, 1, 1],
     ["Ask Kopa AI", "5 questions a day, read-only", "20 a day, plus sale, expense and reminder actions (10 actions a day)", "50 a day, all tools", "100 a day, all tools"],
   ];
   return (
@@ -1007,7 +1007,8 @@ export function PricingPage() {
                 <li>1 staff account</li>
                 <li>Full records: sales, stock, customers, debts, expenses</li>
                 <li>Receipts, notebook and WhatsApp messages</li>
-                <li>Ask Kopa AI: 5 questions a day</li>
+                <li>Projects with full accountability reports</li>
+                <li>Ask Kopa AI: 5 questions a day, plus 5 project actions a day</li>
               </ul>
               <a href="/register" className="btn btn-primary btn-block">Get started</a>
             </div>
