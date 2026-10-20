@@ -129,7 +129,7 @@ export default function ProjectsPage({ session }) {
             const spent = t.totalExpense || 0;
             const pct = p.budget > 0 ? Math.min(100, Math.round((spent / p.budget) * 100)) : 0;
             return (
-              <div className="card" key={p.id} style={{ cursor: "pointer" }} onClick={() => setSelectedId(p.id)}>
+              <div className="card" key={p.id} style={{ cursor: "pointer" }} onClick={() => setSelected({ id: p.id })}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <h3 style={{ margin: 0 }}>{TYPE_ICONS[p.type] || "📁"} {p.name}</h3>
                   <span className={p.status === "completed" ? "pill pill-green" : "pill pill-gold"}>
@@ -535,6 +535,7 @@ function InviteModal({ project, onClose }) {
   const [error, setError] = useState("");
   const [created, setCreated] = useState(null);
   const [invites, setInvites] = useState([]);
+  const [members, setMembers] = useState([]);
   const [copied, setCopied] = useState("");
 
   async function loadInvites() {
@@ -544,7 +545,23 @@ function InviteModal({ project, onClose }) {
       setError("");
     } catch (e) { setError(e.message); }
   }
-  useEffect(() => { loadInvites(); }, [project.id]);
+
+  async function loadMembers() {
+    try {
+      const d = await api.get(`/api/projects/members?projectId=${project.id}`);
+      setMembers(d.members || []);
+    } catch { /* member list is best-effort inside this modal */ }
+  }
+  useEffect(() => { loadInvites(); loadMembers(); }, [project.id]);
+
+  async function removeMember(m) {
+    if (!window.confirm(`Remove ${m.full_name || m.email || "this person"} from the project? They lose access at once.`)) return;
+    try {
+      await api.del(`/api/projects/members?projectId=${project.id}&userId=${m.user_id}`);
+      loadMembers();
+      loadInvites();
+    } catch (err) { setError(err.message); }
+  }
 
   async function createInvite(e) {
     e.preventDefault();
@@ -624,6 +641,23 @@ function InviteModal({ project, onClose }) {
               </div>
             ))}
             {invites.filter((i) => i.status === "pending").length === 0 && <p className="empty">No pending invites.</p>}
+          </div>
+        )}
+
+        {members.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <h3>Members</h3>
+            {members.map((m) => (
+              <div key={m.user_id} className="card" style={{ marginBottom: 8, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 14 }}><strong>{m.full_name || m.email}</strong> · {m.role === "viewer" ? "Viewer" : "Contributor"}</div>
+                    <div className="hint" style={{ fontSize: 12 }}>{m.email} · joined {fmtDate(m.joined_at)}</div>
+                  </div>
+                  <button className="btn btn-secondary btn-sm" style={{ color: "var(--danger, #b91c1c)" }} onClick={() => removeMember(m)}>Remove</button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

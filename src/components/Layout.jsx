@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, nav } from "../lib/api";
-import { orgTypeFor, NAV_MODULES, NAV_GROUPS, MOBILE_PRIORITY, modulesForRole } from "../lib/businessTypes";
+import { modulesForType, NAV_MODULES, NAV_GROUPS, MOBILE_PRIORITY, modulesForRole } from "../lib/businessTypes";
 import BusinessSwitcher from "./BusinessSwitcher";
 import SyncStatus from "./SyncStatus.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
@@ -53,8 +53,10 @@ export default function Layout({ session, children }) {
   const path = window.location.pathname;
 
   // Each organization type only sees the service modules that fit it.
-  const org = orgTypeFor(session?.business?.business_type);
-  const LINKS = ALL_LINKS.filter((l) => org.modules.includes(NAV_MODULES[l.to]));
+  // Projects is the one universal module: modulesForType guarantees it
+  // for every business type (stores included).
+  const orgModules = modulesForType(session?.business?.business_type);
+  const LINKS = ALL_LINKS.filter((l) => orgModules.includes(NAV_MODULES[l.to]));
   // Staff see only their role's workspace; owners and partners see everything.
   const roleModules = modulesForRole(session.business?.role);
   const VISIBLE = roleModules ? LINKS.filter((l) => roleModules.includes(NAV_MODULES[l.to])) : LINKS;

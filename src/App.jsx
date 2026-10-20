@@ -31,8 +31,7 @@ import NotebookPage from "./pages/Notebook";
 import CalculatorPage from "./pages/Calculator";
 const AdminPage = lazy(() => import("./pages/Admin"));
 const ChatPage = lazy(() => import("./pages/Chat"));
-import { NAV_MODULES, modulesForRole, orgTypeFor } from "./lib/businessTypes";
-import { AppLockGate } from "./components/AppLock";
+import { NAV_MODULES, modulesForRole, modulesForType } from "./lib/businessTypes";
 
 function useSession() {
   const [state, setState] = useState({ loading: true, session: null });
@@ -100,19 +99,11 @@ function AppRoute({ session }) {
 
   if (path.startsWith("/app/receipt/sale/")) {
     if (!session) { nav("/login"); return null; }
-    return (
-      <AppLockGate session={session}>
-        <SaleReceiptPage saleId={path.split("/")[4]} />
-      </AppLockGate>
-    );
+    return <SaleReceiptPage saleId={path.split("/")[4]} />;
   }
   if (path.startsWith("/app/receipt/hotel/")) {
     if (!session) { nav("/login"); return null; }
-    return (
-      <AppLockGate session={session}>
-        <HotelReceiptPage bookingId={path.split("/")[4]} />
-      </AppLockGate>
-    );
+    return <HotelReceiptPage bookingId={path.split("/")[4]} />;
   }
 
   // Project invite join link: public page, works signed out too.
@@ -155,7 +146,8 @@ function AppRoute({ session }) {
     // Business types only see the modules that fit them, even by direct link
     // (e.g. Hotels never opens for a provision store).
     const roleModules = modulesForRole(session.business?.role);
-    const org = orgTypeFor(session.business?.business_type);
+    // Projects is universal (see modulesForType): never type-blocked.
+    const orgModules = modulesForType(session.business?.business_type);
     const mod = NAV_MODULES[Object.keys(NAV_MODULES).find((p) => path === p || path.startsWith(p + "/")) || ""];
     if (mod && roleModules && !roleModules.includes(mod)) {
       page = (
@@ -164,7 +156,7 @@ function AppRoute({ session }) {
           <p className="hint">Your role ({session.business?.role}) does not include this section. Ask the business owner if you need access.</p>
         </div>
       );
-    } else if (mod && !org.modules.includes(mod)) {
+    } else if (mod && !orgModules.includes(mod)) {
       page = (
         <div className="card">
           <h2>Not available for this business</h2>
@@ -173,14 +165,12 @@ function AppRoute({ session }) {
       );
     }
     return (
-      <AppLockGate session={session}>
-        <Layout session={session}>
-          <Suspense fallback={<div className="loading">Loading section...</div>}>
-            <div id="main">{page}</div>
-          </Suspense>
+      <Layout session={session}>
+        <Suspense fallback={<div className="loading">Loading section...</div>}>
+          <div id="main">{page}</div>
+        </Suspense>
 
-        </Layout>
-      </AppLockGate>
+      </Layout>
     );
   }
 

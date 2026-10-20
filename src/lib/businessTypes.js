@@ -77,6 +77,16 @@ export function orgTypeFor(key) {
   return ORG_TYPES.find((t) => t.key === key) || ORG_TYPES.find((t) => t.key === "other");
 }
 
+// Projects is universal: EVERY business type gets it, whatever the
+// per-type module list says, so a store owner can create projects and
+// project invites just like a hotel or a contractor. The sidebar and
+// the route guard both resolve modules through here so the guarantee
+// holds even if a type's list is edited later.
+export function modulesForType(key) {
+  const mods = orgTypeFor(key).modules;
+  return mods.includes("projects") ? mods : [...mods, "projects"];
+}
+
 // Sidebar grouping: section label -> module keys in display order.
 export const NAV_GROUPS = [
   { label: null, modules: ["dashboard"] },

@@ -1,7 +1,10 @@
 /* KopaBook service worker: offline-first app shell, network-first API reads.
    Non-GET API calls are never intercepted so queued mutations flow through. */
 
-const SHELL_CACHE = "kopabook-shell-v4";
+// Bump this version on shell-affecting releases: the activate handler
+// deletes every other cache, so installed apps drop the old shell and
+// pick up the current bundle (v5: Projects in every business's menu).
+const SHELL_CACHE = "kopabook-shell-v5";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 
