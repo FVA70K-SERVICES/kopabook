@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.fva70k.kopabook",
+      "sha256_cert_fingerprints": [
+        "D1:43:80:56:AE:8C:B6:06:B3:9F:36:82:7C:A1:9B:E9:0D:4E:3D:0C:41:BB:54:29:F4:03:BD:C3:C4:A2:70:7C"
+      ]
+    }
+  }
+]
