@@ -40,15 +40,15 @@
       }
     </script>
     <script type="module" src="/src/main.jsx"></script>
-    <!-- FVAChat: AI support chat by FVA70K Services -->
+    <!-- FVAChat: merged chat by FVA70K Services. Signed in: Ask Kopa AI + Kopa Support. Signed out: Kopa Support bot. -->
     <script>
-      // Owner context for Kopa Bot business copilot
+      // Owner context for the merged chat. The server verifies this against the signed-in session before trusting it.
       window.FVAChatOwner = null;
       window.setFVAChatOwner = function(ctx) { window.FVAChatOwner = ctx; };
     </script>
     <script src="/fvachat.js"
       data-site-id="kopabook"
-      data-business="KopaBook Support"
+      data-business="Kopa Support"
       data-bot-name="Kopa Bot"
       data-color="#15803d"></script>
   </body>

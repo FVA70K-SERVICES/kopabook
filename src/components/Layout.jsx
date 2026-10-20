@@ -66,6 +66,13 @@ export default function Layout({ session, children }) {
     api.get("/api/billing").then(setBilling).catch(() => {});
   }, []);
 
+  // Marks the signed-in app so the chat widget can sit clear of the
+  // mobile bottom bar.
+  useEffect(() => {
+    document.body.classList.add("kb-in-app");
+    return () => document.body.classList.remove("kb-in-app");
+  }, []);
+
   async function logout() {
     try { await api.logout(); } finally { nav("/login"); }
   }
@@ -122,6 +129,20 @@ export default function Layout({ session, children }) {
           </button>
         </div>
         <BusinessSwitcher session={session} collapsed={collapsed} />
+        <nav className="snav chat-entry-nav">
+          <div className="nav-group">
+            <div className="nav-group-label">Chat</div>
+            <a href="/app/chat/ai" className="ask-ai-entry" title="Ask Kopa AI">
+              <span className="nico">🤖</span><span className="lbl">Ask Kopa AI</span>
+            </a>
+            <a href="/app/chat/support" className={navCls("/app/chat/support")} title="Kopa Support">
+              <span className="nico">💬</span><span className="lbl">Kopa Support</span>
+            </a>
+            <a href="/app/chat" className={path === "/app/chat" ? "active" : ""} title="Chat home">
+              <span className="nico">🏠</span><span className="lbl">Chat home</span>
+            </a>
+          </div>
+        </nav>
         <nav className="snav">
           {groups.map((g, gi) => (
             <div key={gi} className="nav-group">

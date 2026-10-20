@@ -1,6 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import Layout from "./components/Layout";
-import AiAssistant from "./components/AiAssistant";
 import { api, nav, setCurrency } from "./lib/api";
 import {
   LandingPage, FeaturesPage, PricingPage, NotFoundPage,
@@ -31,6 +30,7 @@ import ActivityPage from "./pages/Activity";
 import NotebookPage from "./pages/Notebook";
 import CalculatorPage from "./pages/Calculator";
 const AdminPage = lazy(() => import("./pages/Admin"));
+const ChatPage = lazy(() => import("./pages/Chat"));
 import { NAV_MODULES, modulesForRole, orgTypeFor } from "./lib/businessTypes";
 
 function useSession() {
@@ -136,6 +136,9 @@ function AppRoute({ session }) {
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
     else if (path === "/app/notebook") page = <NotebookPage session={session} />;
     else if (path === "/app/calculator") page = <CalculatorPage />;
+    else if (path === "/app/chat") page = <ChatPage side="home" />;
+    else if (path === "/app/chat/ai") page = <ChatPage side="ai" />;
+    else if (path === "/app/chat/support") page = <ChatPage side="support" />;
     // Staff see only their role's workspace, even by direct link.
     // Business types only see the modules that fit them, even by direct link
     // (e.g. Hotels never opens for a provision store).
@@ -162,7 +165,7 @@ function AppRoute({ session }) {
         <Suspense fallback={<div className="loading">Loading section...</div>}>
           <div id="main">{page}</div>
         </Suspense>
-        {path !== "/app/admin" && <AiAssistant />}
+
       </Layout>
     );
   }
