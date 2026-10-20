@@ -76,9 +76,23 @@ export default function PlanCard() {
   const [proofBusy, setProofBusy] = useState(false);
   const [proofSubmitted, setProofSubmitted] = useState(false);
   const [copiedField, setCopiedField] = useState("");
+  const [promoBusy, setPromoBusy] = useState(false);
 
   async function load() {
     try { setPlan(await api.get("/api/billing")); } catch (e) {}
+  }
+
+  async function claimPromo() {
+    setPromoBusy(true);
+    setMsg("");
+    try {
+      const d = await api.post("/api/billing/promo/claim", {});
+      setMsg(d.message || "Your free Pro month is active.");
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+    setPromoBusy(false);
   }
 
   useEffect(() => {
@@ -232,6 +246,43 @@ export default function PlanCard() {
   const tierRank = TIER_RANK[plan.tier] ?? 0;
   const isUpgradeable = (tier) => (TIER_RANK[tier] ?? 0) > tierRank;
 
+  const promo = plan.promo || null;
+  const capTier = (t) => {
+    const s = String(t || "");
+    return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "";
+  };
+  let promoBlock = null;
+  if (promo && promo.claimed && promo.status === "active") {
+    const priorName = capTier(promo.prior_tier || plan.tier || "free");
+    promoBlock = (
+      <div className="alert alert-ok" style={{ marginBottom: 14, border: "1px solid var(--brand)" }}>
+        Your free Pro month is active. {promo.days_left} days left. When it ends, your plan returns to {priorName} unless you subscribe.
+      </div>
+    );
+  } else if (promo && promo.available) {
+    const priorLower = String(promo.prior_tier || plan.tier || "free").toLowerCase();
+    promoBlock = (
+      <div
+        className="card"
+        style={{ margin: "0 0 14px", padding: "12px 14px", border: "2px solid #b45309", background: "var(--bg-soft, #f8fafc)" }}
+      >
+        <h4 style={{ margin: "0 0 6px" }}>Pro free for one month</h4>
+        <p style={{ margin: "0 0 10px", fontSize: 14 }}>
+          One month of Pro, free. No card needed. When the month ends your plan returns to {priorLower} unless you subscribe.
+        </p>
+        <button type="button" className="btn btn-primary btn-sm" disabled={promoBusy} onClick={claimPromo}>
+          {promoBusy ? "Claiming..." : "Claim your free month"}
+        </button>
+      </div>
+    );
+  } else if (promo && promo.reason === "already_claimed") {
+    promoBlock = (
+      <p className="hint" style={{ marginTop: 0, marginBottom: 14 }}>
+        You have already used your free Pro month.
+      </p>
+    );
+  }
+
   function planButton(tier) {
     if (!isUpgradeable(tier)) return null;
     if (method === "card") {
@@ -288,6 +339,7 @@ export default function PlanCard() {
 
   return (
     <div className="card narrow" style={{ margin: "0 0 18px", border: "2px solid var(--brand)" }}>
+      {promoBlock}
       <h3 style={{ marginTop: 0 }}>Your plan: {plan.tierName}</h3>
       <p className="hint" style={{ marginTop: 0 }}>
         {plan.price}
