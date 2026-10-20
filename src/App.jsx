@@ -49,7 +49,8 @@ function useSession() {
                 businessId: d.business.id,
                 userId: d.user.id,
                 userName: d.user.name,
-                userRole: d.business.role || 'owner'
+                userRole: d.business.role || 'owner',
+                isPlatformAdmin: !!d.user.isPlatformAdmin
               });
             }
           } catch (e) {}
@@ -137,9 +138,10 @@ function AppRoute({ session }) {
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
     else if (path === "/app/notebook") page = <NotebookPage session={session} />;
     else if (path === "/app/calculator") page = <CalculatorPage />;
-    else if (path === "/app/chat") page = <ChatPage side="home" />;
-    else if (path === "/app/chat/ai") page = <ChatPage side="ai" />;
-    else if (path === "/app/chat/support") page = <ChatPage side="support" />;
+    else if (path === "/app/chat") page = <ChatPage side="home" session={session} />;
+    else if (path === "/app/chat/ai") page = <ChatPage side="ai" session={session} />;
+    else if (path === "/app/chat/support") page = <ChatPage side="support" session={session} />;
+    else if (path === "/app/chat/admin") page = <ChatPage side="admin" session={session} />;
     // Staff see only their role's workspace, even by direct link.
     // Business types only see the modules that fit them, even by direct link
     // (e.g. Hotels never opens for a provision store).
