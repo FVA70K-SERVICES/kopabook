@@ -31,7 +31,6 @@ export default function ProjectsPage({ session }) {
   const [shared, setShared] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [needsUpgrade, setNeedsUpgrade] = useState(false);
   const [selected, setSelected] = useState(null); // { id, sharedRole, businessName }
   const [showCreate, setShowCreate] = useState(false);
   const [inviteFor, setInviteFor] = useState(null);
@@ -46,12 +45,10 @@ export default function ProjectsPage({ session }) {
       setShared(sh);
       if (results[0].status === "fulfilled") {
         setProjects(results[0].value.projects || []);
-        setNeedsUpgrade(false);
         setError("");
       } else {
         const e = results[0].reason || new Error("Could not load projects.");
-        if (e.upgradeRequired) setNeedsUpgrade(true);
-        else if (sh.length === 0) setError(e.message);
+        if (sh.length === 0) setError(e.message);
         else setError("");
       }
       // Deep link from a fresh invite join: open the shared project at once.
@@ -102,7 +99,7 @@ export default function ProjectsPage({ session }) {
     <>
       <div className="page-head">
         <h1>Projects</h1>
-        {canManage && !needsUpgrade && (
+        {canManage && (
           <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>+ New project</button>
         )}
       </div>
@@ -112,13 +109,7 @@ export default function ProjectsPage({ session }) {
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      {needsUpgrade ? (
-        <div className="card">
-          <h2>Projects is a Starter feature</h2>
-          <p className="hint">Upgrade to Starter or higher to track full project accountability with printable reports.</p>
-          <a className="btn btn-primary" href="/app/settings">View plans</a>
-        </div>
-      ) : loading ? (
+      {loading ? (
         <div className="loading">Loading projects...</div>
       ) : projects.length === 0 ? (
         <div className="card"><p className="empty">No projects yet. {canManage ? "Create your first project to start tracking." : ""}</p></div>
@@ -160,7 +151,7 @@ export default function ProjectsPage({ session }) {
         </div>
       )}
 
-      {!loading && !needsUpgrade && shared.length > 0 && (
+      {!loading && shared.length > 0 && (
         <>
           <h2 style={{ marginTop: 22 }}>Shared with me</h2>
           <p className="hint" style={{ marginBottom: 12 }}>
