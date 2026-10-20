@@ -15,6 +15,19 @@
 import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "../_utils";
 import { getBusinessOwnerTier, LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
+import { PROJECT_TYPES, projectTotals } from "../projects/_lib.js";
+import { onRequestPost as createProjectEndpoint } from "../projects/index.js";
+import {
+  onRequestPost as addProjectMilestoneEndpoint,
+  onRequestPatch as updateProjectMilestoneEndpoint,
+} from "../projects/milestones.js";
+import { onRequestPost as recordProjectTransactionEndpoint } from "../projects/transactions.js";
+import { onRequestPost as createProjectInviteEndpoint } from "../projects/invites.js";
+import { onRequestGet as projectReportEndpoint } from "../projects/report.js";
+import {
+  onRequestPatch as updateProjectEndpoint,
+  onRequestDelete as deleteProjectEndpoint,
+} from "../projects/[id].js";
 
 const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const GEMINI_MODEL = "gemini-3.8-flash";
@@ -176,10 +189,30 @@ const AI_TIER_LIMITS = {
   solo:    { questionsPerDay: 50,  tools: "all", actionsPerDay: null },
   pro:     { questionsPerDay: 100, tools: "all", actionsPerDay: null },
 };
-const ALL_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "get_customer_balance", "draft_debtor_message", "send_debtor_message", "save_memory"];
+const BASE_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "get_customer_balance", "draft_debtor_message", "send_debtor_message", "save_memory"];
+const PROJECT_WRITE_TOOLS = [
+  "create_project_plan",
+  "project_add_milestone",
+  "project_complete_milestone",
+  "project_record_transaction",
+  "project_update",
+  "project_invite",
+];
+const PROJECT_TOOLS = [...PROJECT_WRITE_TOOLS, "project_report"];
+const ALL_TOOLS = [...BASE_TOOLS, ...PROJECT_TOOLS];
+const PROJECT_TIERS = ["starter", "solo", "pro"];
 const UPGRADE_NUDGE = "Upgrade to Starter for AI actions, or Solo/Pro for the full AI assistant.";
 
+function projectTierEligible(tier) {
+  return PROJECT_TIERS.includes(tier);
+}
+
 function tierAllowsTool(tier, tool) {
+  // A project report is read-only. The Projects endpoints make the final
+  // access decision, including the invited-member path, so do not hide that
+  // one read behind the active business's write entitlement.
+  if (tool === "project_report") return true;
+  if (PROJECT_TOOLS.includes(tool)) return projectTierEligible(tier);
   const cfg = AI_TIER_LIMITS[tier] || AI_TIER_LIMITS.free;
   if (cfg.tools === "all") return true;
   return cfg.tools.includes(tool);
@@ -187,13 +220,14 @@ function tierAllowsTool(tier, tool) {
 
 function allowedToolsForTier(tier) {
   const cfg = AI_TIER_LIMITS[tier] || AI_TIER_LIMITS.free;
-  return cfg.tools === "all" ? ALL_TOOLS : cfg.tools;
+  const base = cfg.tools === "all" ? BASE_TOOLS : [...cfg.tools];
+  return projectTierEligible(tier) ? [...new Set([...base, ...PROJECT_TOOLS])] : base;
 }
 
 // Roles that may use every AI tool. Everyone else (shop staff) may only
 // record sales and check customer balances.
 const PRIVILEGED_ROLES = ["owner", "partner", "admin"];
-const STAFF_TOOLS = ["record_sale", "get_customer_balance"];
+const STAFF_TOOLS = ["record_sale", "get_customer_balance", "project_report"];
 
 function fmt(n, currency) {
   const v = Number(n || 0);
@@ -330,6 +364,26 @@ async function buildSnapshot(db, auth) {
     return Number(r && r.n) || 0;
   }, 0);
 
+  snap.projects = await q(async () => {
+    const byId = new Map();
+    const own = await db.prepare(
+      `SELECT id, name, type, status, budget, 'business' AS access, NULL AS member_role
+       FROM projects WHERE business_id = ? ORDER BY id DESC LIMIT 20`
+    ).bind(businessId).all();
+    for (const p of own.results || []) byId.set(Number(p.id), p);
+    const invited = await db.prepare(
+      `SELECT p.id, p.name, p.type, p.status, p.budget, 'invited' AS access, pm.role AS member_role
+       FROM project_members pm JOIN projects p ON p.id = pm.project_id
+       WHERE pm.user_id = ? ORDER BY p.id DESC LIMIT 20`
+    ).bind(auth.user.id).all();
+    for (const p of invited.results || []) if (!byId.has(Number(p.id))) byId.set(Number(p.id), p);
+    const projects = [];
+    for (const p of [...byId.values()].slice(0, 20)) {
+      projects.push({ ...p, totals: await projectTotals(db, p.id) });
+    }
+    return projects;
+  }, []);
+
   return snap;
 }
 
@@ -360,6 +414,11 @@ function snapshotText(snap, currency) {
   if (snap.recentExpenses.length) {
     L.push("Last expenses: " + snap.recentExpenses.map((e) => `${e.description} ${fmt(e.amount, currency)} on ${e.date}`).join("; ") + ".");
   }
+  if (snap.projects && snap.projects.length) {
+    L.push("Projects visible to this user (id, name, type, status, budget, income, expenses, balance, milestones done/total, access): " + snap.projects.map((p) => `#${p.id} ${p.name} (${p.type}, ${p.status}, budget ${fmt(p.budget, currency)}, income ${fmt(p.totals.totalIncome, currency)}, expenses ${fmt(p.totals.totalExpense, currency)}, balance ${fmt(p.totals.balance, currency)}, milestones ${p.totals.milestonesDone}/${p.totals.milestonesTotal}, ${p.access}${p.member_role ? " " + p.member_role : ""})`).join("; ") + ".");
+  } else {
+    L.push("Projects visible to this user: none.");
+  }
   return L.join("\n");
 }
 
@@ -377,6 +436,13 @@ const TOOL_DOCS = {
   draft_debtor_message: `- draft_debtor_message: {"customer_name": "name", "tone": "polite|firm|final" (optional, default polite)}. Writes a professional payment reminder to a customer who owes money. I will show you the draft for review first.`,
   send_debtor_message: `- send_debtor_message: {"customer_name": "name", "message": "the EXACT draft text"}. Sends a debtor reminder ONLY after you have shown the user the draft and they said yes. The message param must match the draft you showed them word for word.`,
   save_memory: `- save_memory: {"key": "short label, e.g. supplier or price rule", "value": "the fact to remember"}. Saves something about this business to long-term memory so you remember it in future chats. To forget something, save the same key with an empty value.`,
+  create_project_plan: `- create_project_plan: {"name": "project name", "type": "construction|event|charity|business|custom", "goal": "what success means", "milestones": [{"title": "step", "description": "optional", "due_date": "YYYY-MM-DD optional"}], "budget_lines": [{"label": "cost item", "amount": number}], "budget": optional total, "start_date": "optional", "end_date": "optional"}. Use ONLY after the brief interview below has produced a name, a valid type and a goal. This is a proposal to create the project and all its milestones in one go.`,
+  project_add_milestone: `- project_add_milestone: {"project": "exact project name or id", "title": "milestone", "description": "optional", "due_date": "YYYY-MM-DD optional"}`,
+  project_complete_milestone: `- project_complete_milestone: {"project": "exact project name or id", "milestone": "exact milestone title or id"}`,
+  project_record_transaction: `- project_record_transaction: {"project": "exact project name or id", "kind": "income|expense", "amount": number, "description": "what the money was for", "category": "optional"}`,
+  project_update: `- project_update: {"project": "exact project name or id", "new_name": "optional replacement name", "status": "completed to close it, or active to reopen it"}. Use for renaming or closing/reopening a project only.`,
+  project_invite: `- project_invite: {"project": "exact project name or id", "email": "person@example.com", "role": "contributor|viewer optional"}. Contributor is the default unless the owner asks for viewer.`,
+  project_report: `- project_report: {"project": "exact project name or id"}. Use this for EVERY question about how a named project is doing; its figures come from the project record, never from memory.`,
 };
 
 function systemPrompt(snap, currency, tier, memorySection, assistant) {
@@ -401,6 +467,20 @@ MISSING DETAILS: if a write request is missing a detail that cannot be known fro
 
 Only output an ACTION line when the user clearly wants something done. For plain questions, just answer in natural text with no ACTION line.`
     : `ACTIONS: you are in read-only mode on this plan. You cannot record sales, add expenses, or take any other action. If the user asks you to DO something, answer warmly that actions need an upgrade: "${UPGRADE_NUDGE}"`;
+  const projectSection = projectTierEligible(tier)
+    ? `PROJECT INTERVIEW AND MANAGEMENT:
+- When the user wants a NEW project planned or created, interview briefly, ONE missing item at a time: first the project name, then its type (${PROJECT_TYPES.join(", ")}), then the goal. Do not invent the name, type or goal, and emit NO project ACTION while one is missing.
+- Once name, type and goal are known, draft an ordered milestone list and planned budget lines from the goal and anything the user gave you, then emit create_project_plan. If the user gave no budget information at all, ask ONE question for a rough total or the main cost lines before emitting it. Planned budget lines are a draft for confirmation, not recorded spending.
+- For an existing project, use the exact project name or id from the snapshot. If more than one visible project could match, ask which one; never guess.
+- Use project_report for every status question about a project. Use the project management tools only for the active business's projects, each as a separate proposal.
+
+`
+    : `PROJECTS ON THIS PLAN:
+Projects is a Starter feature. If the user asks you to plan, create or manage a project, or invite someone to one, do not emit a project write ACTION and do not pretend anything was done: explain that Projects is a Starter feature and they can upgrade to Starter, Solo or Pro.
+One read-only exception: for a project that was shared with this user by invitation, you may answer a status question with exactly this ACTION format:
+ACTION: {"tool": "project_report", "params": {"project": "exact project name or id"}}
+
+`;
   const managerSection = profile.paEnabled
     ? `MANAGER AND PA ROLE:
 You are also the owner's business manager and personal assistant. Be proactive about stock, debts and reminders: flag low stock, overdue debts and due reminders when they matter. Use what you remember about this business (see the memory section above) when you advise and plan. Draft messages for the owner's approval and never send anything silently.
@@ -415,7 +495,7 @@ Reply in ${ASSISTANT_LANGUAGES[profile.language] || "English"} for all conversat
     : "";
   return `You are ${assistantName}, a warm, sharp conversational companion for this business owner, like a smart trusted friend who knows the business inside out. Introduce and refer to yourself as ${assistantName}. Talk like a person, not a robot: natural, concise, no bullet-point-everything, no stiff phrasing. A little Nigerian business flavor is fine, never forced.
 
-${managerSection}${languageSection}How you handle questions:
+${managerSection}${projectSection}${languageSection}How you handle questions:
 - About THEIR BUSINESS (sales, stock, debts, records): answer ONLY from the BUSINESS SNAPSHOT below. Never invent or estimate numbers. If the snapshot does not have it, say so plainly and offer what you can check instead.
 - About BUSINESS ADVICE or PLANNING (growing sales, restocking, giving credit): give practical, grounded advice from general knowledge, and reference their snapshot data where it helps.
 - About ANYTHING ELSE (their day, general knowledge, casual chat): be genuinely helpful and conversational. Never say you can only answer business questions.
@@ -1005,6 +1085,512 @@ async function logAiAction(db, auth, params, tool, p, result) {
   } catch (e) { /* logging must never break the action */ }
 }
 
+// ---------------------------------------------------------------------------
+// Project powers. These executors are adapters around the existing Projects
+// endpoints: every read and write goes through those handlers, with the
+// caller's original session request, so project access, tier checks and
+// audit behaviour stay in exactly one place.
+// ---------------------------------------------------------------------------
+function projectParam(params, ...keys) {
+  for (const key of keys) {
+    if (params && params[key] !== undefined && params[key] !== null && String(params[key]).trim() !== "") return params[key];
+  }
+  return "";
+}
+
+function cleanProjectText(value, max) {
+  return String(value || "").trim().slice(0, max);
+}
+
+function roundProjectMoney(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+function validProjectDate(value) {
+  if (!value) return true;
+  const text = String(value).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) && !Number.isNaN(Date.parse(text + "T00:00:00Z"));
+}
+
+async function callProjectEndpoint(context, handler, options = {}) {
+  const headers = new Headers(context.request.headers);
+  headers.delete("content-length");
+  let body;
+  if (options.body !== undefined) {
+    headers.set("content-type", "application/json");
+    body = JSON.stringify(options.body);
+  }
+  const request = new Request(new URL(options.path || "/api/projects", context.request.url), {
+    method: options.method || "GET",
+    headers,
+    body,
+  });
+  const childContext = { ...context, request, params: options.params || {} };
+  const response = await handler(childContext);
+  let data = null;
+  try { data = await response.json(); } catch (e) { data = null; }
+  if (!response.ok || !data || data.ok !== true) {
+    return {
+      ok: false,
+      status: response.status,
+      message: (data && data.message) || `The project service returned ${response.status}.`,
+      data,
+    };
+  }
+  return { ok: true, status: response.status, data };
+}
+
+async function matchBusinessProjects(db, businessId, queryRaw) {
+  const query = String(queryRaw || "").trim();
+  if (!query) return [];
+  if (/^\d+$/.test(query)) {
+    const row = await db.prepare(`SELECT * FROM projects WHERE id = ? AND business_id = ? LIMIT 1`)
+      .bind(Number(query), businessId).first();
+    return row ? [row] : [];
+  }
+  const exact = await db.prepare(
+    `SELECT * FROM projects WHERE business_id = ? AND lower(name) = lower(?) ORDER BY id DESC`
+  ).bind(businessId, query).all();
+  if ((exact.results || []).length) return exact.results;
+  const partial = await db.prepare(
+    `SELECT * FROM projects WHERE business_id = ? AND instr(lower(name), lower(?)) > 0 ORDER BY id DESC LIMIT 10`
+  ).bind(businessId, query).all();
+  return partial.results || [];
+}
+
+async function resolveBusinessProject(db, auth, params) {
+  const query = projectParam(params, "project", "project_name", "projectName", "project_id", "projectId", "id");
+  if (!query) return { clarification: "Which project do you mean? Give me its exact name." };
+  const matches = await matchBusinessProjects(db, auth.business.id, query);
+  if (!matches.length) return { clarification: `I could not find a project called "${query}" in this business.` };
+  if (matches.length > 1) {
+    return { clarification: `"${query}" matches more than one project: ${matches.map((p) => `#${p.id} ${p.name}`).join(", ")}. Which one do you mean?` };
+  }
+  return { project: matches[0] };
+}
+
+async function matchProjectMilestones(db, projectId, queryRaw) {
+  const query = String(queryRaw || "").trim();
+  if (!query) return [];
+  if (/^\d+$/.test(query)) {
+    const row = await db.prepare(`SELECT * FROM project_milestones WHERE id = ? AND project_id = ? LIMIT 1`)
+      .bind(Number(query), projectId).first();
+    return row ? [row] : [];
+  }
+  const exact = await db.prepare(
+    `SELECT * FROM project_milestones WHERE project_id = ? AND lower(title) = lower(?) ORDER BY id ASC`
+  ).bind(projectId, query).all();
+  if ((exact.results || []).length) return exact.results;
+  const partial = await db.prepare(
+    `SELECT * FROM project_milestones WHERE project_id = ? AND instr(lower(title), lower(?)) > 0 ORDER BY id ASC LIMIT 10`
+  ).bind(projectId, query).all();
+  return partial.results || [];
+}
+
+async function resolveProjectMilestone(db, project, params) {
+  const query = projectParam(params, "milestone", "milestone_name", "milestoneName", "milestone_id", "milestoneId", "id");
+  if (!query) return { clarification: `Which milestone in ${project.name} should I update?` };
+  const matches = await matchProjectMilestones(db, project.id, query);
+  if (!matches.length) return { clarification: `I could not find a milestone called "${query}" in ${project.name}.` };
+  if (matches.length > 1) {
+    return { clarification: `"${query}" matches more than one milestone in ${project.name}: ${matches.map((m) => `#${m.id} ${m.title}`).join(", ")}. Which one do you mean?` };
+  }
+  return { milestone: matches[0] };
+}
+
+function requireProjectOwnerPartner(auth, action) {
+  if (["owner", "partner"].includes(auth.business && auth.business.role)) return null;
+  return `Only the project owner or a partner can ${action}.`;
+}
+
+function normalizeProjectMilestones(params) {
+  const raw = params && (params.milestones || params.steps);
+  if (!Array.isArray(raw) || !raw.length) {
+    return { error: "What milestones should the project plan include, in order?" };
+  }
+  if (raw.length > 50) return { error: "That project plan has too many milestones. Keep it to 50 or fewer." };
+  const milestones = [];
+  for (let i = 0; i < raw.length; i++) {
+    const item = typeof raw[i] === "string" ? { title: raw[i] } : (raw[i] || {});
+    const title = cleanProjectText(item.title || item.name, 200);
+    if (!title) return { error: `Milestone ${i + 1} needs a title.` };
+    const dueDate = item.due_date || item.dueDate || null;
+    if (!validProjectDate(dueDate)) return { error: `Milestone "${title}" has an invalid due date. Use YYYY-MM-DD.` };
+    milestones.push({
+      title,
+      description: cleanProjectText(item.description, 1000),
+      dueDate: dueDate ? String(dueDate).slice(0, 10) : null,
+    });
+  }
+  return { milestones };
+}
+
+function normalizeProjectBudgetLines(params) {
+  const raw = params && (params.budget_lines || params.budgetLines || params.planned_budget || params.plannedBudget);
+  const lines = [];
+  if (raw !== undefined && raw !== null && raw !== "") {
+    if (!Array.isArray(raw)) return { error: "Give the planned budget as a list of cost lines, each with a label and amount." };
+    if (raw.length > 50) return { error: "That project plan has too many budget lines. Keep it to 50 or fewer." };
+    for (let i = 0; i < raw.length; i++) {
+      const item = typeof raw[i] === "string" ? { label: raw[i] } : (raw[i] || {});
+      const label = cleanProjectText(item.label || item.category || item.name || item.description, 100);
+      const amount = Number(item.amount ?? item.value ?? item.cost);
+      if (!label) return { error: `Budget line ${i + 1} needs a label.` };
+      if (!Number.isFinite(amount) || amount < 0) return { error: `What amount should I plan for "${label}"?` };
+      lines.push({ label, amount: roundProjectMoney(amount) });
+    }
+  }
+  const linesTotal = roundProjectMoney(lines.reduce((sum, line) => sum + line.amount, 0));
+  const explicitRaw = params && (params.budget ?? params.total_budget ?? params.totalBudget);
+  let budget = linesTotal;
+  if (explicitRaw !== undefined && explicitRaw !== null && explicitRaw !== "") {
+    const explicit = Number(explicitRaw);
+    if (!Number.isFinite(explicit) || explicit < 0) return { error: "The project budget must be a valid non-negative amount." };
+    budget = roundProjectMoney(explicit);
+    if (lines.length && budget !== linesTotal) {
+      return { error: "The project budget total does not match the planned budget lines. Which total should I use?" };
+    }
+  }
+  return { lines, budget };
+}
+
+function plannedProjectDescription(goal, lines, currency) {
+  let description = String(goal || "").trim();
+  if (lines.length) {
+    description += "\n\nPlanned budget lines:\n" + lines.map((line) => `- ${line.label}: ${fmt(line.amount, currency)}`).join("\n");
+  }
+  return description;
+}
+
+async function execCreateProjectPlan(context, db, auth, params, currency, opts) {
+  const name = cleanProjectText(projectParam(params, "name", "project", "project_name", "projectName"), 200);
+  if (!name) return { ok: false, clarification: "What should we call the project?" };
+  const type = String(projectParam(params, "type", "project_type", "projectType") || "").trim().toLowerCase();
+  if (!PROJECT_TYPES.includes(type)) {
+    return { ok: false, clarification: `What type of project is "${name}"? Choose one: ${PROJECT_TYPES.join(", ")}.` };
+  }
+  const goal = cleanProjectText(projectParam(params, "goal", "description", "objective"), 2000);
+  if (!goal) return { ok: false, clarification: `What is the goal of "${name}"? Tell me what success should look like.` };
+
+  const milestoneResult = normalizeProjectMilestones(params || {});
+  if (milestoneResult.error) return { ok: false, clarification: milestoneResult.error };
+  const budgetResult = normalizeProjectBudgetLines(params || {});
+  if (budgetResult.error) return { ok: false, clarification: budgetResult.error };
+
+  const startDate = projectParam(params, "start_date", "startDate") || null;
+  const endDate = projectParam(params, "end_date", "endDate") || null;
+  if (!validProjectDate(startDate) || !validProjectDate(endDate)) {
+    return { ok: false, clarification: "Project dates must use YYYY-MM-DD." };
+  }
+  if (startDate && endDate && String(endDate).slice(0, 10) < String(startDate).slice(0, 10)) {
+    return { ok: false, clarification: "The project end date is before its start date. Which dates are correct?" };
+  }
+  const description = plannedProjectDescription(goal, budgetResult.lines, currency);
+  if (description.length > 2000) {
+    return { ok: false, clarification: "That project goal and budget plan are too long to store together. Shorten the goal or budget lines." };
+  }
+
+  if (opts && opts.dryRun) {
+    const lines = [
+      `Project: ${name}`,
+      `Type: ${type}`,
+      `Goal: ${goal}`,
+      `Planned budget: ${fmt(budgetResult.budget, currency)}`,
+    ];
+    for (const line of budgetResult.lines) lines.push(`Budget: ${line.label}: ${fmt(line.amount, currency)}`);
+    lines.push("Milestones, in order:");
+    milestoneResult.milestones.forEach((m, i) => {
+      lines.push(`${i + 1}. ${m.title}${m.dueDate ? ` (due ${m.dueDate})` : ""}${m.description ? `: ${m.description}` : ""}`);
+    });
+    if (startDate) lines.push(`Start date: ${String(startDate).slice(0, 10)}`);
+    if (endDate) lines.push(`End date: ${String(endDate).slice(0, 10)}`);
+    return {
+      ok: true,
+      proposal: {
+        summary: `Create project "${name}" (${type}) with ${milestoneResult.milestones.length} milestones and a planned budget of ${fmt(budgetResult.budget, currency)}.`,
+        lines,
+      },
+    };
+  }
+
+  const created = await callProjectEndpoint(context, createProjectEndpoint, {
+    method: "POST",
+    path: "/api/projects",
+    body: {
+      name,
+      type,
+      description,
+      budget: budgetResult.budget,
+      startDate: startDate ? String(startDate).slice(0, 10) : null,
+      endDate: endDate ? String(endDate).slice(0, 10) : null,
+    },
+  });
+  if (!created.ok) return { ok: false, clarification: created.message };
+  const projectId = created.data.id;
+
+  for (const milestone of milestoneResult.milestones) {
+    const added = await callProjectEndpoint(context, addProjectMilestoneEndpoint, {
+      method: "POST",
+      path: "/api/projects/milestones",
+      body: {
+        projectId,
+        title: milestone.title,
+        description: milestone.description,
+        dueDate: milestone.dueDate,
+      },
+    });
+    if (!added.ok) {
+      const rollback = await callProjectEndpoint(context, deleteProjectEndpoint, {
+        method: "DELETE",
+        path: `/api/projects/${projectId}`,
+        params: { id: String(projectId) },
+      }).catch(() => ({ ok: false }));
+      return {
+        ok: false,
+        clarification: rollback.ok
+          ? `I could not add the milestone "${milestone.title}", so I removed the incomplete project and changed nothing. ${added.message}`
+          : `I created ${name}, but could not add the milestone "${milestone.title}". The incomplete project could not be removed automatically, so please check Projects before trying again. ${added.message}`,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    summary: `Created project "${name}" (${type}) with ${milestoneResult.milestones.length} milestones in order and a planned budget of ${fmt(budgetResult.budget, currency)}. Project ID ${projectId}.`,
+  };
+}
+
+async function execProjectAddMilestone(context, db, auth, params, currency, opts) {
+  const resolved = await resolveBusinessProject(db, auth, params || {});
+  if (resolved.clarification) return { ok: false, clarification: resolved.clarification };
+  const project = resolved.project;
+  const title = cleanProjectText(projectParam(params, "title", "milestone", "milestone_name", "milestoneName"), 200);
+  if (!title) return { ok: false, clarification: `What milestone should I add to ${project.name}?` };
+  const description = cleanProjectText(params && params.description, 1000);
+  const dueDate = projectParam(params, "due_date", "dueDate") || null;
+  if (!validProjectDate(dueDate)) return { ok: false, clarification: "The milestone due date must use YYYY-MM-DD." };
+  if (opts && opts.dryRun) {
+    return {
+      ok: true,
+      proposal: {
+        summary: `Add milestone "${title}" to project "${project.name}".`,
+        lines: [
+          `Project: ${project.name} (#${project.id})`,
+          `Milestone: ${title}`,
+          ...(description ? [`Details: ${description}`] : []),
+          ...(dueDate ? [`Due date: ${String(dueDate).slice(0, 10)}`] : []),
+        ],
+      },
+    };
+  }
+  const added = await callProjectEndpoint(context, addProjectMilestoneEndpoint, {
+    method: "POST",
+    path: "/api/projects/milestones",
+    body: { projectId: project.id, title, description, dueDate: dueDate ? String(dueDate).slice(0, 10) : null },
+  });
+  if (!added.ok) return { ok: false, clarification: added.message };
+  return { ok: true, summary: `Added milestone "${title}" to project "${project.name}".` };
+}
+
+async function execProjectCompleteMilestone(context, db, auth, params, currency, opts) {
+  const resolved = await resolveBusinessProject(db, auth, params || {});
+  if (resolved.clarification) return { ok: false, clarification: resolved.clarification };
+  const found = await resolveProjectMilestone(db, resolved.project, params || {});
+  if (found.clarification) return { ok: false, clarification: found.clarification };
+  const milestone = found.milestone;
+  if (milestone.status === "done") {
+    return { ok: false, clarification: `"${milestone.title}" in ${resolved.project.name} is already marked done.` };
+  }
+  if (opts && opts.dryRun) {
+    return {
+      ok: true,
+      proposal: {
+        summary: `Mark milestone "${milestone.title}" as done in project "${resolved.project.name}".`,
+        lines: [
+          `Project: ${resolved.project.name} (#${resolved.project.id})`,
+          `Milestone: ${milestone.title} (#${milestone.id})`,
+          "New status: done",
+        ],
+      },
+    };
+  }
+  const updated = await callProjectEndpoint(context, updateProjectMilestoneEndpoint, {
+    method: "PATCH",
+    path: "/api/projects/milestones",
+    body: { id: milestone.id, status: "done" },
+  });
+  if (!updated.ok) return { ok: false, clarification: updated.message };
+  return { ok: true, summary: `Marked milestone "${milestone.title}" as done in project "${resolved.project.name}".` };
+}
+
+async function execProjectRecordTransaction(context, db, auth, params, currency, opts) {
+  const resolved = await resolveBusinessProject(db, auth, params || {});
+  if (resolved.clarification) return { ok: false, clarification: resolved.clarification };
+  const project = resolved.project;
+  const kind = String(projectParam(params, "kind", "transaction_type", "transactionType") || "").trim().toLowerCase();
+  if (!["income", "expense"].includes(kind)) {
+    return { ok: false, clarification: `Was that money coming in (income) or going out (expense) for ${project.name}?` };
+  }
+  const amount = Number(params && params.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, clarification: `How much was the project ${kind}? I need an amount greater than zero.` };
+  }
+  const description = cleanProjectText(params && params.description, 500);
+  if (!description) return { ok: false, clarification: `What was the project ${kind} for? Give me a short description.` };
+  const category = cleanProjectText(params && params.category, 100);
+  if (opts && opts.dryRun) {
+    return {
+      ok: true,
+      proposal: {
+        summary: `Record project ${kind} of ${fmt(amount, currency)} for "${project.name}": ${description}.`,
+        lines: [
+          `Project: ${project.name} (#${project.id})`,
+          `Type: ${kind}`,
+          `Amount: ${fmt(amount, currency)}`,
+          `Description: ${description}`,
+          ...(category ? [`Category: ${category}`] : []),
+        ],
+      },
+    };
+  }
+  const recorded = await callProjectEndpoint(context, recordProjectTransactionEndpoint, {
+    method: "POST",
+    path: "/api/projects/transactions",
+    body: { projectId: project.id, kind, amount: roundProjectMoney(amount), category, description },
+  });
+  if (!recorded.ok) return { ok: false, clarification: recorded.message };
+  return { ok: true, summary: `Recorded project ${kind} of ${fmt(amount, currency)} for "${project.name}": ${description}.` };
+}
+
+async function execProjectUpdate(context, db, auth, params, currency, opts) {
+  const ownerDenied = requireProjectOwnerPartner(auth, "rename or close a project");
+  if (ownerDenied) return { ok: false, clarification: ownerDenied };
+  const resolved = await resolveBusinessProject(db, auth, params || {});
+  if (resolved.clarification) return { ok: false, clarification: resolved.clarification };
+  const project = resolved.project;
+  const newName = cleanProjectText(projectParam(params, "new_name", "newName", "rename_to", "renameTo"), 200);
+  const statusText = String(projectParam(params, "status", "action") || "").trim().toLowerCase();
+  let status = null;
+  if (["completed", "complete", "closed", "close", "done"].includes(statusText)) status = "completed";
+  else if (["active", "reopen", "reopened"].includes(statusText)) status = "active";
+  else if (statusText) return { ok: false, clarification: "I can close a project by marking it completed, or reopen it as active. Which should I do?" };
+  if (!newName && !status) {
+    return { ok: false, clarification: `What should I change on ${project.name}: its name, or close it by marking it completed?` };
+  }
+  if (newName && newName === project.name && (!status || status === project.status)) {
+    return { ok: false, clarification: `${project.name} already has that name and status.` };
+  }
+  if (!newName && status && status === project.status) {
+    return { ok: false, clarification: `${project.name} is already ${status}.` };
+  }
+  const body = {};
+  if (newName) body.name = newName;
+  if (status) body.status = status;
+  if (opts && opts.dryRun) {
+    const changes = [];
+    if (newName) changes.push(`Name: ${project.name} -> ${newName}`);
+    if (status) changes.push(`Status: ${project.status} -> ${status}`);
+    return {
+      ok: true,
+      proposal: {
+        summary: `Update project "${project.name}": ${changes.join("; ")}.`,
+        lines: [`Project: ${project.name} (#${project.id})`, ...changes],
+      },
+    };
+  }
+  const updated = await callProjectEndpoint(context, updateProjectEndpoint, {
+    method: "PATCH",
+    path: `/api/projects/${project.id}`,
+    params: { id: String(project.id) },
+    body,
+  });
+  if (!updated.ok) return { ok: false, clarification: updated.message };
+  return { ok: true, summary: `Updated project "${project.name}"${newName ? ` to "${newName}"` : ""}${status ? ` and set its status to ${status}` : ""}.` };
+}
+
+async function execProjectInvite(context, db, auth, params, currency, opts) {
+  const ownerDenied = requireProjectOwnerPartner(auth, "invite people to a project");
+  if (ownerDenied) return { ok: false, clarification: ownerDenied };
+  const resolved = await resolveBusinessProject(db, auth, params || {});
+  if (resolved.clarification) return { ok: false, clarification: resolved.clarification };
+  const project = resolved.project;
+  const identifier = cleanProjectText(projectParam(params, "email", "identifier", "username"), 200);
+  if (!identifier) return { ok: false, clarification: `What email should I invite to ${project.name}?` };
+  const role = String(projectParam(params, "role") || "contributor").trim().toLowerCase() === "viewer" ? "viewer" : "contributor";
+  if (opts && opts.dryRun) {
+    return {
+      ok: true,
+      proposal: {
+        summary: `Create a ${role} invite for ${identifier} to project "${project.name}".`,
+        lines: [
+          `Project: ${project.name} (#${project.id})`,
+          `Invite: ${identifier}`,
+          `Role: ${role}`,
+        ],
+      },
+    };
+  }
+  const created = await callProjectEndpoint(context, createProjectInviteEndpoint, {
+    method: "POST",
+    path: "/api/projects/invites",
+    body: { projectId: project.id, identifier, role },
+  });
+  if (!created.ok) return { ok: false, clarification: created.message };
+  return {
+    ok: true,
+    summary: `Created a ${role} invite for ${identifier} to project "${project.name}". Share this join link with them: ${created.data.joinLink}`,
+  };
+}
+
+async function execProjectReport(context, db, auth, params, currency) {
+  const query = projectParam(params, "project", "project_name", "projectName", "project_id", "projectId", "id");
+  let projectId = null;
+  if (query && /^\d+$/.test(String(query))) {
+    projectId = Number(query);
+  } else if (query) {
+    const byId = new Map();
+    for (const p of await matchBusinessProjects(db, auth.business.id, query)) byId.set(Number(p.id), p);
+    const invited = await db.prepare(
+      `SELECT p.* FROM projects p JOIN project_members pm ON pm.project_id = p.id
+       WHERE pm.user_id = ? AND (lower(p.name) = lower(?) OR instr(lower(p.name), lower(?)) > 0)
+       ORDER BY CASE WHEN lower(p.name) = lower(?) THEN 0 ELSE 1 END, p.id DESC LIMIT 10`
+    ).bind(auth.user.id, query, query, query).all();
+    for (const p of invited.results || []) byId.set(Number(p.id), p);
+    const matches = [...byId.values()];
+    if (!matches.length) return { ok: false, clarification: `I could not find a project called "${query}" that you can access.` };
+    if (matches.length > 1) {
+      return { ok: false, clarification: `"${query}" matches more than one accessible project: ${matches.map((p) => `#${p.id} ${p.name}`).join(", ")}. Which one do you mean?` };
+    }
+    projectId = Number(matches[0].id);
+  } else {
+    const visible = (await buildVisibleProjectIds(db, auth));
+    if (visible.length === 1) projectId = visible[0];
+    else if (!visible.length) return { ok: false, clarification: "I could not find any project you can access." };
+    else return { ok: false, clarification: "Which project should I report on? Give me its exact name." };
+  }
+
+  const report = await callProjectEndpoint(context, projectReportEndpoint, {
+    method: "GET",
+    path: `/api/projects/report?projectId=${encodeURIComponent(projectId)}`,
+  });
+  if (!report.ok) return { ok: false, clarification: report.message };
+  const project = report.data.project || {};
+  const totals = report.data.totals || {};
+  return {
+    ok: true,
+    summary: `${project.name || "That project"} (${project.type || "custom"}, ${project.status || "active"}) has received ${fmt(totals.totalIncome, currency)} in income and recorded ${fmt(totals.totalExpense, currency)} in expenses, leaving a balance of ${fmt(totals.balance, currency)}. Milestones are ${Number(totals.milestonesDone) || 0} of ${Number(totals.milestonesTotal) || 0} done. Its planned budget is ${fmt(project.budget, currency)}.`,
+  };
+}
+
+async function buildVisibleProjectIds(db, auth) {
+  const ids = new Set();
+  const own = await db.prepare(`SELECT id FROM projects WHERE business_id = ?`).bind(auth.business.id).all();
+  for (const row of own.results || []) ids.add(Number(row.id));
+  const invited = await db.prepare(`SELECT project_id AS id FROM project_members WHERE user_id = ?`).bind(auth.user.id).all();
+  for (const row of invited.results || []) ids.add(Number(row.id));
+  return [...ids];
+}
+
 const TOOL_EXECUTORS = {
   record_sale: execRecordSale,
   add_expense: execAddExpense,
@@ -1015,14 +1601,21 @@ const TOOL_EXECUTORS = {
   draft_debtor_message: execDraftDebtorMessage,
   send_debtor_message: execSendDebtorMessage,
   save_memory: execSaveMemory,
+  create_project_plan: execCreateProjectPlan,
+  project_add_milestone: execProjectAddMilestone,
+  project_complete_milestone: execProjectCompleteMilestone,
+  project_record_transaction: execProjectRecordTransaction,
+  project_update: execProjectUpdate,
+  project_invite: execProjectInvite,
+  project_report: execProjectReport,
 };
 
 // ---------------------------------------------------------------------------
-// Confirm-before-write: pending proposals for the six write tools.
+// Confirm-before-write: pending proposals for the write tools.
 // A write is first dry-run into an exact proposal, stored here, and only
 // executed when the user confirms. Proposals expire after 10 minutes.
 // ---------------------------------------------------------------------------
-const WRITE_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "save_memory"];
+const WRITE_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "save_memory", ...PROJECT_WRITE_TOOLS];
 const PROPOSAL_TTL_MS = 10 * 60 * 1000;
 
 let pendingProposalsEnsured = false;
@@ -1691,9 +2284,11 @@ export async function runKopaAiChat(context, auth, body) {
       }
       // Tier check first: Free is read-only; Starter has a small tool set.
       if (!tierAllowsTool(tier, action.tool)) {
-        const tierMsg = tier === "free"
-          ? `I can answer questions about your business on your Free plan, but doing things like that needs an upgrade. ${UPGRADE_NUDGE}`
-          : `Your ${tier[0].toUpperCase() + tier.slice(1)} plan does not include "${action.tool}". Upgrade to Solo or Pro for the full AI assistant.`;
+        const tierMsg = PROJECT_WRITE_TOOLS.includes(action.tool)
+          ? "Projects is a Starter feature. Upgrade to Starter, Solo or Pro to let me plan, create and manage projects for this business. Nothing was created or changed."
+          : tier === "free"
+            ? `I can answer questions about your business on your Free plan, but doing things like that needs an upgrade. ${UPGRADE_NUDGE}`
+            : `Your ${tier[0].toUpperCase() + tier.slice(1)} plan does not include "${action.tool}". Upgrade to Solo or Pro for the full AI assistant.`;
         return { status: 200, body: { ok: true, reply: tierMsg, answer: tierMsg, actions_taken: [], fallback: false, usage: usageObj() } };
       }
       if (!toolAllowed(auth, action.tool)) {
@@ -1704,8 +2299,9 @@ export async function runKopaAiChat(context, auth, body) {
           actions_taken: [], fallback: false, usage: usageObj(),
         } };
       }
-      // Per-day action cap for capped tiers (Starter).
-      if (!isPlatformOwner && tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
+      // Per-day action cap for capped tiers (Starter). Read-only project
+      // reports do not consume an action.
+      if (action.tool !== "project_report" && !isPlatformOwner && tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
         const capMsg = `You have used today's AI action limit (${tierCfg.actionsPerDay} actions on Starter). It resets tomorrow. Upgrade to Solo or Pro for more.`;
         return { status: 200, body: { ok: true, reply: capMsg, answer: capMsg, actions_taken: [], fallback: false, capped: true, usage: usageObj() } };
       }
@@ -1730,6 +2326,14 @@ export async function runKopaAiChat(context, auth, body) {
         // Never execute on ambiguity. Ask the user, conversationally.
         return { status: 200, body: {
           ok: true, reply: result.clarification, answer: result.clarification,
+          actions_taken: [], fallback: false, usage: usageObj(),
+        } };
+      }
+      if (action.tool === "project_report") {
+        // A read-only report is returned exactly as the Projects endpoint
+        // calculated it. It is not an AI action, so actions are not bumped.
+        return { status: 200, body: {
+          ok: true, reply: result.summary, answer: result.summary,
           actions_taken: [], fallback: false, usage: usageObj(),
         } };
       }
