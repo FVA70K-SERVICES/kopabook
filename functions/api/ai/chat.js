@@ -138,7 +138,7 @@ const AI_PROVIDERS = {
   "openrouter": providerOpenRouter,
 };
 
-function aiProviderAvailable(env) {
+export function aiProviderAvailable(env) {
   return !!(env && (env.GEMINI_API_KEY || env.AI || env.GROQ_API_KEY || env.OPENROUTER_API_KEY));
 }
 
@@ -147,7 +147,7 @@ function aiProviderAvailable(env) {
 // "gemini,workers-ai". First success wins; every failure is logged; throws
 // only when all fail, and the caller then serves the graceful snapshot
 // fallback.
-async function generateText(env, messages, opts) {
+export async function generateText(env, messages, opts) {
   const order = String((env && env.AI_PROVIDER_ORDER) || "gemini,workers-ai")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   let lastErr = null;
@@ -1420,13 +1420,20 @@ export async function runKopaAiChat(context, auth, body) {
     const tier = AI_TIER_LIMITS[rawTier] ? rawTier : "free";
     const tierCfg = AI_TIER_LIMITS[tier];
 
+    // The platform owner (Fortune) has no AI limits anywhere in KopaBook:
+    // no hourly rate guard, no daily question cap, no daily action cap.
+    // Keyed to the server-verified is_platform_admin flag on the signed-in
+    // account, never to anything a client can claim. Every other account
+    // keeps its tier limits exactly as configured in AI_TIER_LIMITS.
+    const isPlatformOwner = !!(auth.user && auth.user.isPlatformAdmin);
+
     // Assistant identity: a Solo/Pro owner may have named the assistant;
     // everyone else talks to Kopa. Language is stored for every tier.
     const assistant = await getAssistantProfile(db, businessId, tier);
     const proposalText = PROPOSAL_TEXT[assistant.language] || PROPOSAL_TEXT.en;
 
-    // Abuse guard on top of the daily AI cap.
-    if (!(await checkRateLimit(db, `ai_${auth.user.id}`, 60, 3600000))) {
+    // Abuse guard on top of the daily AI cap. The platform owner is exempt.
+    if (!isPlatformOwner && !(await checkRateLimit(db, `ai_${auth.user.id}`, 60, 3600000))) {
       return { status: 429, body: { ok: false, message: "Too many questions at once. Slow down a little." } };
     }
 
@@ -1560,7 +1567,7 @@ export async function runKopaAiChat(context, auth, body) {
     }
     const usedToday = usage ? Number(usage.count) || 0 : 0;
     const actionsToday = usage && typeof usage.actions !== "undefined" ? Number(usage.actions) || 0 : 0;
-    if (usedToday >= tierCfg.questionsPerDay) {
+    if (!isPlatformOwner && usedToday >= tierCfg.questionsPerDay) {
       const capMsg = `You have used today's Kopa AI limit (${tierCfg.questionsPerDay} questions on your plan). It resets tomorrow, and your data is untouched.` + (tier === "free" ? ` ${UPGRADE_NUDGE}` : "");
       return { status: 200, body: {
         ok: true,
@@ -1698,7 +1705,7 @@ export async function runKopaAiChat(context, auth, body) {
         } };
       }
       // Per-day action cap for capped tiers (Starter).
-      if (tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
+      if (!isPlatformOwner && tierCfg.actionsPerDay !== null && tierCfg.actionsPerDay !== undefined && actionsToday >= tierCfg.actionsPerDay) {
         const capMsg = `You have used today's AI action limit (${tierCfg.actionsPerDay} actions on Starter). It resets tomorrow. Upgrade to Solo or Pro for more.`;
         return { status: 200, body: { ok: true, reply: capMsg, answer: capMsg, actions_taken: [], fallback: false, capped: true, usage: usageObj() } };
       }
