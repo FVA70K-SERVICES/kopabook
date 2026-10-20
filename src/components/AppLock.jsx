@@ -1,0 +1,354 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../lib/api";
+
+// 4-digit PIN app lock UI: the numeric pad, the two-step PIN entry used
+// by Settings and the dashboard invitation, the password reset panel,
+// and AppLockGate, which covers the app on cold open and after the app
+// has been in the background for 5 minutes or more. The PIN only gates
+// the screen; the session underneath is never touched.
+
+export const BACKGROUND_LOCK_MS = 5 * 60 * 1000;
+
+export function PinDots({ value, shakeKey }) {
+  return (
+    <div className="pin-dots" key={shakeKey || 0} aria-hidden="true">
+      {[0, 1, 2, 3].map((i) => (
+        <span key={i} className={value.length > i ? "filled" : ""} />
+      ))}
+    </div>
+  );
+}
+
+export function PinPad({ onDigit, onBackspace, disabled }) {
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "back"];
+  return (
+    <div className="pin-pad" role="group" aria-label="PIN pad">
+      {keys.map((k, i) => {
+        if (k === "") return <span key={"blank" + i} />;
+        if (k === "back") {
+          return (
+            <button key="back" type="button" className="pin-key pin-key-back"
+              onClick={onBackspace} disabled={disabled} aria-label="Delete last digit">⌫</button>
+          );
+        }
+        return (
+          <button key={k} type="button" className="pin-key"
+            onClick={() => onDigit(k)} disabled={disabled} aria-label={"Digit " + k}>{k}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Two-step (or one-step) PIN entry. Calls onComplete(pin) once a full
+// PIN is entered and, for two-step flows, confirmed identically.
+export function PinEntryPanel({ title, prompt, stageCount = 2, onComplete, onCancel, completeLabel }) {
+  const [stage, setStage] = useState(0);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [shakeKey, setShakeKey] = useState(0);
+  // Refs are the source of truth while digits arrive (fast taps and
+  // keyboard input must never outrun a render); state mirrors for paint.
+  const valueRef = useRef("");
+  const stageRef = useRef(0);
+  const firstRef = useRef("");
+  const busyRef = useRef(false);
+
+  const fail = useCallback((message) => {
+    valueRef.current = "";
+    setError(message);
+    setValue("");
+    setShakeKey((k) => k + 1);
+  }, []);
+
+  const append = useCallback(async (digit) => {
+    if (busyRef.current || valueRef.current.length >= 4) return;
+    const next = valueRef.current + digit;
+    valueRef.current = next;
+    setValue(next);
+    setError("");
+    if (next.length < 4) return;
+    if (stageCount === 2 && stageRef.current === 0) {
+      firstRef.current = next;
+      stageRef.current = 1;
+      valueRef.current = "";
+      setStage(1);
+      setValue("");
+      return;
+    }
+    if (stageCount === 2 && next !== firstRef.current) {
+      fail("The two PINs do not match. Try again.");
+      return;
+    }
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await onComplete(next);
+    } catch (e) {
+      busyRef.current = false;
+      setBusy(false);
+      if (stageCount === 2) { stageRef.current = 0; firstRef.current = ""; setStage(0); }
+      fail(e.message || "Something went wrong. Try again.");
+    }
+  }, [stageCount, onComplete, fail]);
+
+  const backspace = useCallback(() => {
+    if (busyRef.current) return;
+    valueRef.current = valueRef.current.slice(0, -1);
+    setValue(valueRef.current);
+    setError("");
+  }, []);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (e.target && e.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (/^\d$/.test(e.key)) { e.preventDefault(); append(e.key); }
+      else if (e.key === "Backspace") { e.preventDefault(); backspace(); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [append, backspace]);
+
+  const stagePrompt = stageCount === 2 && stage === 1 ? "Enter the same PIN again to confirm it." : prompt;
+
+  return (
+    <div className={shakeKey ? "pin-shake" : ""} key={"panel" + shakeKey}>
+      {title && <h3 style={{ marginTop: 0, textAlign: "center" }}>{title}</h3>}
+      <p className="hint" style={{ textAlign: "center" }}>{stagePrompt}</p>
+      <PinDots value={value} />
+      {error && <div className="alert alert-error" role="alert">{error}</div>}
+      <PinPad onDigit={append} onBackspace={backspace} disabled={busy} />
+      {busy && <p className="hint" style={{ textAlign: "center" }}>{completeLabel || "Working..."}</p>}
+      {onCancel && (
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Forgot-PIN recovery: account password first, then a fresh PIN.
+// onReset(password, pin) must return the server state or throw.
+export function PinResetPanel({ onReset, onCancel, title }) {
+  const [password, setPassword] = useState("");
+  const [step, setStep] = useState("password");
+  const [error, setError] = useState("");
+
+  if (step === "pin") {
+    return (
+      <PinEntryPanel
+        title={title || "Reset your PIN"}
+        prompt="Choose a new 4-digit PIN."
+        onComplete={(pin) => onReset(password, pin)}
+        onCancel={() => { setStep("password"); setPassword(""); }}
+        completeLabel="Resetting..."
+      />
+    );
+  }
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (password) { setError(""); setStep("pin"); } }}>
+      {title && <h3 style={{ marginTop: 0, textAlign: "center" }}>{title}</h3>}
+      <p className="hint" style={{ textAlign: "center" }}>Enter your account password, then choose a new PIN.</p>
+      {error && <div className="alert alert-error" role="alert">{error}</div>}
+      <div className="field">
+        <label>Account password</label>
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password" required autoFocus />
+      </div>
+      <button type="submit" className="btn btn-primary btn-block" disabled={!password}>Continue</button>
+      {onCancel && (
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel}>Back</button>
+        </div>
+      )}
+    </form>
+  );
+}
+
+function formatLockout(seconds) {
+  if (seconds >= 60) {
+    const m = Math.ceil(seconds / 60);
+    return `Try again in ${m} minute${m === 1 ? "" : "s"}.`;
+  }
+  return `Try again in ${seconds} second${seconds === 1 ? "" : "s"}.`;
+}
+
+// The lock screen itself: app name and a neutral prompt only. No
+// business name, no figures, nothing from the account's data.
+function LockScreen({ onUnlocked }) {
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [shakeKey, setShakeKey] = useState(0);
+  const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const [mode, setMode] = useState("pin");
+  const pinRef = useRef("");
+  pinRef.current = pin;
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    if (lockoutSeconds <= 0) return;
+    const t = setInterval(() => setLockoutSeconds((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [lockoutSeconds > 0]);
+
+  const submit = useCallback(async (candidate) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const d = await api.post("/api/auth/app-lock", { action: "verify", pin: candidate });
+      busyRef.current = false;
+      setBusy(false);
+      onUnlocked(d.appLock);
+    } catch (e) {
+      busyRef.current = false;
+      setBusy(false);
+      setPin("");
+      pinRef.current = "";
+      setShakeKey((k) => k + 1);
+      if (e && typeof e.retryAfterSeconds === "number") setLockoutSeconds(e.retryAfterSeconds);
+      setError(e.message || "Incorrect PIN.");
+    }
+  }, [onUnlocked]);
+
+  const append = useCallback((digit) => {
+    if (busyRef.current || lockoutSeconds > 0) return;
+    const next = (pinRef.current + digit).slice(0, 4);
+    pinRef.current = next;
+    setPin(next);
+    setError("");
+    if (next.length === 4) submit(next);
+  }, [lockoutSeconds, submit]);
+
+  const backspace = useCallback(() => {
+    if (busyRef.current) return;
+    const next = pinRef.current.slice(0, -1);
+    pinRef.current = next;
+    setPin(next);
+    setError("");
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "pin") return;
+    function onKey(e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (/^\d$/.test(e.key)) { e.preventDefault(); append(e.key); }
+      else if (e.key === "Backspace") { e.preventDefault(); backspace(); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode, append, backspace]);
+
+  async function resetPassword(password, newPin) {
+    const d = await api.post("/api/auth/app-lock", {
+      action: "reset", password, newPin, confirmPin: newPin,
+    });
+    onUnlocked(d.appLock);
+  }
+
+  return (
+    <div className="app-lock-screen" role="dialog" aria-modal="true" aria-label="App locked">
+      <div className="app-lock-card">
+        <div className="app-lock-mark" aria-hidden="true">🔒</div>
+        <div className="brand" style={{ textAlign: "center" }}>Kopa<span>Book</span></div>
+        {mode === "reset" ? (
+          <PinResetPanel
+            title="Forgot PIN"
+            onReset={resetPassword}
+            onCancel={() => setMode("pin")}
+          />
+        ) : (
+          <div className={shakeKey ? "pin-shake" : ""} key={"lock" + shakeKey}>
+            <p className="hint" style={{ textAlign: "center" }}>Enter your PIN to continue.</p>
+            <PinDots value={pin} />
+            {lockoutSeconds > 0
+              ? <div className="alert alert-error" role="alert">Too many wrong attempts. {formatLockout(lockoutSeconds)}</div>
+              : error && <div className="alert alert-error" role="alert">{error}</div>}
+            <PinPad onDigit={append} onBackspace={backspace} disabled={busy || lockoutSeconds > 0} />
+            {busy && <p className="hint" style={{ textAlign: "center" }}>Checking...</p>}
+            <div style={{ textAlign: "center", marginTop: 14 }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setMode("reset"); setError(""); }}>
+                Forgot PIN?
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Wraps the signed-in app. On cold open with the lock on, the app waits
+// behind the lock screen; when the app returns from 5+ minutes in the
+// background, the lock screen covers it again with every page and its
+// state exactly as it was left.
+export function AppLockGate({ session, children }) {
+  const [phase, setPhase] = useState("checking"); // checking | open | locked
+  const hiddenAtRef = useRef(null);
+  const engagedRef = useRef(false);
+
+  const engage = useCallback((source) => {
+    setPhase("locked");
+    if (!engagedRef.current) {
+      engagedRef.current = true;
+      api.post("/api/auth/app-lock", { action: "lock", source }).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    engagedRef.current = false;
+    api.get("/api/auth/app-lock")
+      .then((d) => {
+        if (!active) return;
+        if (d.appLock && d.appLock.enabled) engage("cold_open");
+        else setPhase("open");
+      })
+      .catch(() => { if (active) setPhase("open"); }); // never lock a user out over a failed state check
+    return () => { active = false; };
+  }, [session?.user?.id, engage]);
+
+  useEffect(() => {
+    function onVisibility() {
+      if (document.visibilityState === "hidden") {
+        hiddenAtRef.current = Date.now();
+      } else if (document.visibilityState === "visible") {
+        const hiddenAt = hiddenAtRef.current;
+        hiddenAtRef.current = null;
+        if (hiddenAt && Date.now() - hiddenAt >= BACKGROUND_LOCK_MS) {
+          api.get("/api/auth/app-lock")
+            .then((d) => { if (d.appLock && d.appLock.enabled) engage("background"); })
+            .catch(() => {});
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [engage]);
+
+  if (phase === "checking") {
+    return (
+      <div className="app-lock-screen" aria-label="Loading">
+        <div className="app-lock-card">
+          <div className="brand" style={{ textAlign: "center" }}>Kopa<span>Book</span></div>
+          <p className="hint" style={{ textAlign: "center" }}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {children}
+      {phase === "locked" && (
+        <LockScreen onUnlocked={() => { engagedRef.current = false; setPhase("open"); }} />
+      )}
+    </>
+  );
+}

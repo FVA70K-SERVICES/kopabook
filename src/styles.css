@@ -383,6 +383,57 @@ a:focus-visible, button:focus-visible {
   .desktop-only { display: none !important; }
 }
 
+/* ---------- PIN app lock ---------- */
+.app-lock-screen {
+  position: fixed; inset: 0; z-index: 3000;
+  background: var(--bg); color: var(--ink);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px 16px; overflow-y: auto;
+}
+.app-lock-card {
+  width: 100%; max-width: 400px; margin: auto;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 20px; padding: 28px 24px; box-shadow: var(--shadow);
+}
+.app-lock-mark { font-size: 34px; text-align: center; margin-bottom: 6px; }
+.pin-dots { display: flex; justify-content: center; gap: 14px; margin: 18px 0 20px; }
+.pin-dots span {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid var(--muted); background: transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.pin-dots span.filled { background: var(--brand); border-color: var(--brand); }
+.pin-pad {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  max-width: 272px; margin: 0 auto;
+}
+.pin-key {
+  height: 56px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font); font-size: 21px; font-weight: 600;
+  cursor: pointer; transition: transform 0.06s ease, background 0.15s ease;
+}
+.pin-key:hover { background: var(--brand-soft); }
+.pin-key:active { transform: scale(0.96); }
+.pin-key[disabled] { opacity: 0.55; cursor: not-allowed; }
+.pin-key-back { font-size: 18px; }
+@keyframes pin-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-9px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(4px); }
+}
+.pin-shake { animation: pin-shake 0.35s ease; }
+.pin-invite-back { z-index: 250; }
+.pin-invite-card { max-width: 440px; }
+@media (prefers-reduced-motion: reduce) {
+  .pin-shake { animation: none; }
+  .pin-key { transition: none; }
+  .pin-key:active { transform: none; }
+  .pin-dots span { transition: none; }
+}
+
 /* ---------- merged chat (Ask Kopa AI + Kopa Support) ---------- */
 .chat-entry-nav { flex: 0 0 auto; }
 .sidebar .ask-ai-entry {

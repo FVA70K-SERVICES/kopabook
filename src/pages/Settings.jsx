@@ -6,6 +6,7 @@ import PaymentModesEditor from "../components/PaymentModesEditor";
 import DeveloperApi from "../components/DeveloperApi";
 import PlanCard from "../components/PlanCard";
 import ChatbotControl from "../components/ChatbotControl";
+import AppLockSettings from "../components/AppLockSettings";
 
 export default function SettingsPage({ session }) {
   const [confirmClose, setConfirmClose] = useState(false);
@@ -277,6 +278,11 @@ export default function SettingsPage({ session }) {
           <DeveloperApi />
         </div>
       )}
+
+      <div className="card narrow" style={{ marginTop: 18 }}>
+        <h3 style={{ marginTop: 0 }}>App lock</h3>
+        <AppLockSettings />
+      </div>
 
       <div className="card narrow" style={{ marginTop: 18 }}>
         <h3 style={{ marginTop: 0 }}>Change password</h3>

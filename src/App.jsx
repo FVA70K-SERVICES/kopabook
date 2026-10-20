@@ -32,6 +32,7 @@ import CalculatorPage from "./pages/Calculator";
 const AdminPage = lazy(() => import("./pages/Admin"));
 const ChatPage = lazy(() => import("./pages/Chat"));
 import { NAV_MODULES, modulesForRole, orgTypeFor } from "./lib/businessTypes";
+import { AppLockGate } from "./components/AppLock";
 
 function useSession() {
   const [state, setState] = useState({ loading: true, session: null });
@@ -99,11 +100,19 @@ function AppRoute({ session }) {
 
   if (path.startsWith("/app/receipt/sale/")) {
     if (!session) { nav("/login"); return null; }
-    return <SaleReceiptPage saleId={path.split("/")[4]} />;
+    return (
+      <AppLockGate session={session}>
+        <SaleReceiptPage saleId={path.split("/")[4]} />
+      </AppLockGate>
+    );
   }
   if (path.startsWith("/app/receipt/hotel/")) {
     if (!session) { nav("/login"); return null; }
-    return <HotelReceiptPage bookingId={path.split("/")[4]} />;
+    return (
+      <AppLockGate session={session}>
+        <HotelReceiptPage bookingId={path.split("/")[4]} />
+      </AppLockGate>
+    );
   }
 
   // Project invite join link: public page, works signed out too.
@@ -164,12 +173,14 @@ function AppRoute({ session }) {
       );
     }
     return (
-      <Layout session={session}>
-        <Suspense fallback={<div className="loading">Loading section...</div>}>
-          <div id="main">{page}</div>
-        </Suspense>
+      <AppLockGate session={session}>
+        <Layout session={session}>
+          <Suspense fallback={<div className="loading">Loading section...</div>}>
+            <div id="main">{page}</div>
+          </Suspense>
 
-      </Layout>
+        </Layout>
+      </AppLockGate>
     );
   }
 

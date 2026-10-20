@@ -11,6 +11,7 @@ import {
   audit,
 } from "../_utils";
 import { verifyHumanToken } from "../_fvaverify";
+import { recordAppLockSignIn } from "./_app-lock";
 
 const DEFAULT_MODES = [
   ["Cash", 1],
@@ -83,6 +84,10 @@ export async function onRequestPost(context) {
       ).bind(fullName.trim(), cleanEmail, String(phone || "").slice(0, 20) || null, passwordHash, now).run();
     }
     const userId = userResult.meta.last_row_id;
+
+    // First session for the app-lock invitation: the PIN invite only
+    // appears from this account's second sign-in onward.
+    await recordAppLockSignIn(db, userId, 1);
 
     const bizResult = await db.prepare(
       `INSERT INTO businesses (owner_user_id, name, business_type, custom_type, state, city, country, currency, timezone, plan_tier)

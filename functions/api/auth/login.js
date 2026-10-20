@@ -6,6 +6,7 @@ import {
   toSqliteDate,
   sessionCookieHeader,
 } from "../_utils";
+import { recordAppLockSignIn } from "./_app-lock";
 
 export async function onRequestPost(context) {
   try {
@@ -24,13 +25,13 @@ export async function onRequestPost(context) {
     let user = null;
     try {
       user = await db.prepare(
-        `SELECT id, full_name, email, username, password_hash, role, status FROM users WHERE email = ? OR username = ? LIMIT 1`
+        `SELECT id, full_name, email, username, password_hash, role, status, last_login_at FROM users WHERE email = ? OR username = ? LIMIT 1`
       )
         .bind(idLower, idLower)
         .first();
     } catch (e) {
       user = await db.prepare(
-        `SELECT id, full_name, email, password_hash, role, status FROM users WHERE email = ? LIMIT 1`
+        `SELECT id, full_name, email, password_hash, role, status, last_login_at FROM users WHERE email = ? LIMIT 1`
       )
         .bind(idLower)
         .first();
@@ -44,6 +45,11 @@ export async function onRequestPost(context) {
     if (!valid) {
       return json({ ok: false, message: "Invalid login or password." }, 401);
     }
+
+    // App-lock invitation bookkeeping: a previous last_login_at means
+    // this is at least the account's second sign-in; without one it is
+    // the first. recordAppLockSignIn never throws.
+    await recordAppLockSignIn(db, user.id, user.last_login_at ? 2 : 1);
 
     const now = toSqliteDate();
     await db.prepare(

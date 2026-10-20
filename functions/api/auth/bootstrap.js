@@ -7,6 +7,7 @@ import {
   toSqliteDate,
   sessionCookieHeader,
 } from "../_utils";
+import { recordAppLockSignIn } from "./_app-lock";
 
 export async function onRequestPost(context) {
   try {
@@ -42,6 +43,9 @@ export async function onRequestPost(context) {
       .bind(fullName.trim(), String(email).trim().toLowerCase(), passwordHash, now)
       .run();
     const userId = userResult.meta.last_row_id;
+
+    // First session for the app-lock invitation (see register.js).
+    await recordAppLockSignIn(context.env.KOPABOOK_DB, userId, 1);
 
     const bizResult = await context.env.KOPABOOK_DB.prepare(
       `INSERT INTO businesses (owner_user_id, name, business_type, state, city, currency, plan_tier)

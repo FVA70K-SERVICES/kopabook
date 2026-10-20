@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmt } from "../lib/api";
+import PinInvite from "../components/PinInvite";
 
 export default function DashboardPage() {
   const [state, setState] = useState({ loading: true, metrics: null, recentSales: [], error: "" });
@@ -19,6 +20,7 @@ export default function DashboardPage() {
 
   return (
     <>
+      <PinInvite />
       <div className="page-head">
         <h1>Dashboard</h1>
         <a href="/app/sales" className="btn btn-primary btn-sm">+ New sale</a>

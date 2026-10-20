@@ -17,6 +17,8 @@ async function request(path, options = {}) {
     if (!res.ok || data.ok === false) {
       const err = new Error(data.message || `Request failed (${res.status})`);
       if (data.upgradeRequired) err.upgradeRequired = true;
+      if (typeof data.retryAfterSeconds === "number") err.retryAfterSeconds = data.retryAfterSeconds;
+      err.status = res.status;
       throw err;
     }
     return data;
