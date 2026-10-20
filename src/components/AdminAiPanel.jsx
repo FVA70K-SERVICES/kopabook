@@ -18,6 +18,25 @@ const VOICE_LABELS = {
   default: "Default",
 };
 const ASSISTANT_LANGUAGES = ["en", "pcm", "ha", "yo", "ig"];
+const LANGUAGE_LABELS = {
+  en: "English",
+  pcm: "Pidgin",
+  ha: "Hausa",
+  yo: "Yoruba",
+  ig: "Igbo",
+};
+
+const voiceSelectStyle = {
+  boxSizing: "border-box",
+  fontSize: 12.5,
+  fontWeight: 600,
+  color: "var(--ink)",
+  background: "var(--surface)",
+  border: "1px solid var(--line)",
+  borderRadius: 999,
+  padding: "6px 10px",
+  maxWidth: "100%",
+};
 
 let idCounter = 0;
 function nextId(prefix) {
@@ -407,6 +426,7 @@ export default function AdminAiPanel() {
     try {
       window.localStorage.setItem(AUTO_SPEAK_KEY, next ? "on" : "off");
     } catch (e) {}
+    saveVoiceSettings({ auto_speak: next ? 1 : 0 });
     if (!next) {
       pendingAutoSpeakRef.current = null;
       stopSpeaking();
@@ -421,29 +441,50 @@ export default function AdminAiPanel() {
     }
   }
 
-  // Read the stored voice preference for the active business. The write
-  // path stays in the Ask Kopa settings via set_assistant_voice, so this
-  // panel only reads GET /api/chat/control and never writes it.
-  async function loadVoicePreference() {
+  // Admin AI voice settings are the platform owner's OWN settings, stored
+  // against his account through /api/admin/ai/settings. They are fully
+  // separate from the per-business Ask Kopa assistant voice settings:
+  // this panel never reads or writes those, and changing the voice here
+  // never changes any business's Ask Kopa voice, or the other way round.
+  // The device's built-in speech engine is the only shared layer.
+  function applyVoiceSettings(settings) {
+    if (!settings) return;
+    const voice = String(settings.voice || "default");
+    if (VOICE_CHOICES.indexOf(voice) !== -1) {
+      setVoiceChoice(voice);
+      voiceChoiceRef.current = voice;
+    }
+    const language = String(settings.language || "en");
+    if (ASSISTANT_LANGUAGES.indexOf(language) !== -1) {
+      setAssistantLanguage(language);
+      assistantLanguageRef.current = language;
+    }
+    if (settings.auto_speak !== undefined && settings.auto_speak !== null) {
+      const on = Number(settings.auto_speak) === 1;
+      setAutoSpeak(on);
+      autoSpeakRef.current = on;
+      try {
+        window.localStorage.setItem(AUTO_SPEAK_KEY, on ? "on" : "off");
+      } catch (e) {}
+    }
+  }
+
+  async function loadVoiceSettings() {
     try {
-      const data = await api.get("/api/chat/control");
-      const settings = (data && data.settings) || {};
-      const voice = String(
-        (data && data.assistant_voice) || settings.assistant_voice || "default"
-      );
-      if (VOICE_CHOICES.indexOf(voice) !== -1) {
-        setVoiceChoice(voice);
-        voiceChoiceRef.current = voice;
-      }
-      const language = String(
-        (data && data.assistant_language) || settings.assistant_language || "en"
-      );
-      if (ASSISTANT_LANGUAGES.indexOf(language) !== -1) {
-        setAssistantLanguage(language);
-        assistantLanguageRef.current = language;
-      }
+      const data = await api.get("/api/admin/ai/settings");
+      applyVoiceSettings(data && data.settings);
     } catch (e) {
-      // Keep the default voice if the preference cannot be read.
+      // Keep the defaults if the settings cannot be read.
+    }
+  }
+
+  async function saveVoiceSettings(patch) {
+    try {
+      const data = await api.post("/api/admin/ai/settings", patch);
+      applyVoiceSettings(data && data.settings);
+    } catch (e) {
+      // A failed save leaves the on-screen choice in place for this
+      // session; the stored setting is unchanged.
     }
   }
 
@@ -497,7 +538,7 @@ export default function AdminAiPanel() {
 
   useEffect(() => {
     fetchBriefing(false);
-    loadVoicePreference();
+    loadVoiceSettings();
     setVoiceSupported(!!getSpeechRecognition());
     refreshCachedVoices();
     // Run once on mount only.
@@ -869,9 +910,42 @@ export default function AdminAiPanel() {
             minWidth: 0,
           }}
         >
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--muted)", overflowWrap: "anywhere" }}>
-            {"Voice: " + (VOICE_LABELS[voiceChoice] || VOICE_LABELS.default)}
-          </span>
+          <label style={{ fontSize: 12.5, fontWeight: 600, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Voice
+            <select
+              value={voiceChoice}
+              aria-label="Admin AI voice"
+              style={voiceSelectStyle}
+              onChange={(e) => {
+                const v = e.target.value;
+                setVoiceChoice(v);
+                voiceChoiceRef.current = v;
+                saveVoiceSettings({ voice: v });
+              }}
+            >
+              {VOICE_CHOICES.map((v) => (
+                <option key={v} value={v}>{VOICE_LABELS[v]}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ fontSize: 12.5, fontWeight: 600, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Language
+            <select
+              value={assistantLanguage}
+              aria-label="Admin AI language"
+              style={voiceSelectStyle}
+              onChange={(e) => {
+                const v = e.target.value;
+                setAssistantLanguage(v);
+                assistantLanguageRef.current = v;
+                saveVoiceSettings({ language: v });
+              }}
+            >
+              {ASSISTANT_LANGUAGES.map((v) => (
+                <option key={v} value={v}>{LANGUAGE_LABELS[v]}</option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             style={{ ...secondaryButtonStyle, padding: "6px 12px", fontSize: 12.5, borderRadius: 999 }}
