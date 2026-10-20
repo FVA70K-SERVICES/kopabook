@@ -8,20 +8,6 @@ export async function onRequestGet({ request, env }) {
     const since = parseInt(url.searchParams.get('since') || '0', 10);
     if (!sessionId) return Response.json({ error: 'Missing sessionId' }, { status: 400 });
 
-    // Merged in-app chat: enforce the rolling 24-hour window on read too.
-    {
-      const s0 = await env.KOPABOOK_DB.prepare(
-        'SELECT site_id FROM chat_sessions WHERE id = ?'
-      ).bind(sessionId).first().catch(() => null);
-      if (s0 && s0.site_id === 'kopabook') {
-        await clearExpiredMergedChat(env.KOPABOOK_DB, sessionId);
-      }
-    }
-
-    const msgs = await env.KOPABOOK_DB.prepare(
-      'SELECT id, sender, sender_name, message, created_at FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC LIMIT 50'
-    ).bind(sessionId, since).all();
-
     let session = null;
     try {
       session = await env.KOPABOOK_DB.prepare(
@@ -32,6 +18,17 @@ export async function onRequestGet({ request, env }) {
         'SELECT agent_typing, status, site_id FROM chat_sessions WHERE id = ?'
       ).bind(sessionId).first();
     }
+
+    // Merged in-app chat: enforce the rolling 24-hour window on read too.
+    // The sweep itself is throttled inside clearExpiredMergedChat, so this
+    // costs nothing on the normal poll path.
+    if (session && session.site_id === 'kopabook') {
+      await clearExpiredMergedChat(env.KOPABOOK_DB, sessionId);
+    }
+
+    const msgs = await env.KOPABOOK_DB.prepare(
+      'SELECT id, sender, sender_name, message, created_at FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC LIMIT 50'
+    ).bind(sessionId, since).all();
 
     // Honest support state for the merged chat: who is handling this now,
     // and the name of the human when one has joined.

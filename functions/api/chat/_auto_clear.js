@@ -48,9 +48,20 @@ export async function maybeAutoClearChat(db, siteId) {
 // scoped to this one session only, so no other user or business is touched.
 // Open human cases are exempt, and a transcript snapshot is saved at
 // handoff time (see send.js), so the support story survives the clear.
+// Sweep throttle: at most one sweep per session per 30 minutes, held in
+// isolate memory. This is best effort only: isolates come and go, and the
+// worst case is a sweep running a little more often. Correctness never
+// depends on it, and request handlers stay stateless.
+const LAST_SWEEP = new Map();
+const SWEEP_EVERY_MS = 30 * 60 * 1000;
+
 export async function clearExpiredMergedChat(db, sessionId) {
   try {
     if (!sessionId) return;
+    const nowMs = Date.now();
+    if (nowMs - (LAST_SWEEP.get(sessionId) || 0) < SWEEP_EVERY_MS) return;
+    if (LAST_SWEEP.size > 10000) LAST_SWEEP.clear();
+    LAST_SWEEP.set(sessionId, nowMs);
     const sess = await db
       .prepare('SELECT needs_human, handled_by FROM chat_sessions WHERE id = ?')
       .bind(sessionId)
