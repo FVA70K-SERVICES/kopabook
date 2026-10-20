@@ -13,10 +13,10 @@ function buildSystemPrompt(siteConfig, ownerCtx, history) {
     prompt += `KopaBook is the best free record book for Nigerian local businesses. It helps track sales, stock, debts, expenses, staff, and customers. It works offline.
 
 Plans:
-- Free: 2 businesses, 100 products, 2 staff (free forever)
+- Free: 1 business, 100 products, 1 staff (free forever)
 - Starter: NGN 1,000/month (5 businesses, 1,000 products, 5 staff)
 - Solo: NGN 5,000/month (1 business + AI worker: morning briefings, stock alerts, reminders, target tracking)
-- Pro: NGN 2,500/month (unlimited everything)
+- Pro: NGN 10,000/month (unlimited everything)
 
 Rules:
 - Be warm, helpful, and conversational like a friendly Nigerian support agent
