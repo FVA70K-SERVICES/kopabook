@@ -74,7 +74,7 @@ export const COUNTRY_TIERS = {
 // Nigeria home pricing in NGN kobo
 const NIGERIA_PRICES = {
   starter: { monthly: 100000, yearly: 1000000 },   // NGN 1,000 / 10,000
-  pro: { monthly: 250000, yearly: 2500000 },       // NGN 2,500 / 25,000
+  pro: { monthly: 1000000, yearly: 10000000 },     // NGN 10,000 / 100,000
   solo: { monthly: 500000, yearly: 5000000 },       // NGN 5,000 / 50,000
 };
 
