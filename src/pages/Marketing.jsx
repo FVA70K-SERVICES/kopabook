@@ -738,13 +738,13 @@ export function LandingPage() {
 <section id="how-it-works" className="section section-band" style={{ borderTop: "1px solid var(--line)" }}>
         <div className="wrap">
           <h2>See how KopaBook works for your shop</h2>
-          <p className="sub" style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 30px" }}>Watch the 5-minute tour below. If you can use WhatsApp, you can use KopaBook.</p>
+          <p className="sub" style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 30px" }}>Watch the 6-minute tour below. If you can use WhatsApp, you can use KopaBook.</p>
           <div style={{ maxWidth: 760, margin: "0 auto 40px" }}>
             <video
               controls
               preload="metadata"
               playsInline
-              src="https://pub-9febb8d034344470ae8c0f7493a261f9.r2.dev/kopabook-walkthrough-FINAL.mp4"
+              src="https://pub-9febb8d034344470ae8c0f7493a261f9.r2.dev/kopabook-final-video.mp4"
               style={{ width: "100%", display: "block", borderRadius: 12, aspectRatio: "16 / 9", background: "#000", border: "1px solid var(--line)" }}
             >
               Sorry, your browser cannot play this video. Watch it on YouTube: https://youtu.be/tII6wBaWhqE?is=CcsYga-K99LgyezC
