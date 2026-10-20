@@ -3,11 +3,32 @@ import { api } from "../lib/api";
 
 // 4-digit PIN app lock UI: the numeric pad, the two-step PIN entry used
 // by Settings and the dashboard invitation, the password reset panel,
-// and AppLockGate, which covers the app on cold open and after the app
-// has been in the background for 5 minutes or more. The PIN only gates
-// the screen; the session underneath is never touched.
+// and AppLockGate, which covers the app on cold open and when it comes
+// back from the background after the account's own re-lock time away.
+// The lock lives only at the door, like a bank app: while the app is in
+// the foreground being used it NEVER locks, and there is deliberately
+// no idle or inactivity timer anywhere in this file. The only two
+// triggers are the cold-open state check and a visibility return. The
+// PIN only gates the screen; the session underneath is never touched.
 
+// Fallback delay used only until the account's own setting loads.
 export const BACKGROUND_LOCK_MS = 5 * 60 * 1000;
+
+// Settings and the invitation dispatch this after any change, carrying
+// the fresh server state, so a new re-lock time applies to the very
+// next background return without a re-login or a reload.
+export const APP_LOCK_STATE_EVENT = "kopabook:app-lock-state";
+
+export function announceAppLockState(appLock) {
+  try {
+    if (appLock) window.dispatchEvent(new CustomEvent(APP_LOCK_STATE_EVENT, { detail: appLock }));
+  } catch { /* a missed announcement only delays the update to the next state load */ }
+}
+
+export function relockMsFromState(appLock) {
+  const minutes = Number(appLock && appLock.relockMinutes);
+  return [0, 1, 5, 15, 30].includes(minutes) ? minutes * 60 * 1000 : BACKGROUND_LOCK_MS;
+}
 
 export function PinDots({ value, shakeKey }) {
   return (
@@ -285,13 +306,23 @@ function LockScreen({ onUnlocked }) {
 }
 
 // Wraps the signed-in app. On cold open with the lock on, the app waits
-// behind the lock screen; when the app returns from 5+ minutes in the
-// background, the lock screen covers it again with every page and its
-// state exactly as it was left.
+// behind the lock screen; when the app returns from the background
+// after at least the account's chosen re-lock time away, the lock
+// screen covers it again with every page and its state exactly as it
+// was left. Shorter absences, and any amount of time spent using the
+// app in the foreground, never lock it.
 export function AppLockGate({ session, children }) {
   const [phase, setPhase] = useState("checking"); // checking | open | locked
   const hiddenAtRef = useRef(null);
   const engagedRef = useRef(false);
+  // The account's current re-lock delay. Starts at the default and is
+  // refreshed from every server state this gate sees, plus immediately
+  // whenever Settings announces a change.
+  const relockMsRef = useRef(BACKGROUND_LOCK_MS);
+
+  const applyState = useCallback((appLock) => {
+    if (appLock) relockMsRef.current = relockMsFromState(appLock);
+  }, []);
 
   const engage = useCallback((source) => {
     setPhase("locked");
@@ -304,15 +335,23 @@ export function AppLockGate({ session, children }) {
   useEffect(() => {
     let active = true;
     engagedRef.current = false;
+    relockMsRef.current = BACKGROUND_LOCK_MS;
     api.get("/api/auth/app-lock")
       .then((d) => {
         if (!active) return;
+        applyState(d.appLock);
         if (d.appLock && d.appLock.enabled) engage("cold_open");
         else setPhase("open");
       })
       .catch(() => { if (active) setPhase("open"); }); // never lock a user out over a failed state check
     return () => { active = false; };
-  }, [session?.user?.id, engage]);
+  }, [session?.user?.id, engage, applyState]);
+
+  useEffect(() => {
+    function onAnnounced(e) { applyState(e && e.detail); }
+    window.addEventListener(APP_LOCK_STATE_EVENT, onAnnounced);
+    return () => window.removeEventListener(APP_LOCK_STATE_EVENT, onAnnounced);
+  }, [applyState]);
 
   useEffect(() => {
     function onVisibility() {
@@ -321,16 +360,21 @@ export function AppLockGate({ session, children }) {
       } else if (document.visibilityState === "visible") {
         const hiddenAt = hiddenAtRef.current;
         hiddenAtRef.current = null;
-        if (hiddenAt && Date.now() - hiddenAt >= BACKGROUND_LOCK_MS) {
+        // The single background trigger: time away meets the account's
+        // own setting (0 = immediately, any backgrounding counts).
+        if (hiddenAt && Date.now() - hiddenAt >= relockMsRef.current) {
           api.get("/api/auth/app-lock")
-            .then((d) => { if (d.appLock && d.appLock.enabled) engage("background"); })
+            .then((d) => {
+              applyState(d.appLock);
+              if (d.appLock && d.appLock.enabled) engage("background");
+            })
             .catch(() => {});
         }
       }
     }
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [engage]);
+  }, [engage, applyState]);
 
   if (phase === "checking") {
     return (
@@ -347,7 +391,7 @@ export function AppLockGate({ session, children }) {
     <>
       {children}
       {phase === "locked" && (
-        <LockScreen onUnlocked={() => { engagedRef.current = false; setPhase("open"); }} />
+        <LockScreen onUnlocked={(appLock) => { applyState(appLock); engagedRef.current = false; setPhase("open"); }} />
       )}
     </>
   );

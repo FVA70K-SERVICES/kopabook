@@ -4,6 +4,16 @@
 // of the PIN is ever stored (same format as account passwords). The PIN
 // gates the screen only; it never replaces the session or the password.
 //
+// Re-lock timer policy (Fortune's bank-app model, 2026-10-20): the lock
+// lives only at the door. It asks on cold open and again after the app
+// has been away in the background for the time the ACCOUNT chose; it
+// never locks while the app is in the foreground being used, and there
+// is deliberately no idle or inactivity timer anywhere. The choice is
+// per account, stored here on the lock row, so it follows the account
+// across devices. 0 means "Immediately": any backgrounding counts.
+// Existing rows default to 5 minutes, which preserves the original
+// shipped behaviour until the owner picks something else.
+
 // Brute-force policy (also stated in the build report):
 //   - 5 consecutive wrong PIN attempts start a lockout.
 //   - Lockout durations escalate per episode: 1 minute, 5 minutes,
@@ -21,7 +31,9 @@ export const PIN_MAX_FAILED_ATTEMPTS = 5;
 export const PIN_LOCKOUT_SECONDS = [60, 300, 900];
 export const PIN_INVITE_SNOOZE_DAYS = 3;
 export const PIN_INVITE_DISMISSAL_LIMIT = 3;
-export const PIN_BACKGROUND_LOCK_MS = 5 * 60 * 1000;
+export const PIN_RELOCK_OPTIONS_MINUTES = [0, 1, 5, 15, 30];
+export const PIN_RELOCK_DEFAULT_MINUTES = 5;
+export const PIN_BACKGROUND_LOCK_MS = PIN_RELOCK_DEFAULT_MINUTES * 60 * 1000;
 
 // Accounts created at or before the feature was ordered count as
 // existing accounts if their state row has to be created lazily (the
@@ -40,10 +52,26 @@ export async function ensureAppLockTable(db) {
        invite_dismissal_count INTEGER NOT NULL DEFAULT 0,
        invite_snoozed_until TEXT,
        sign_in_count INTEGER NOT NULL DEFAULT 0,
+       relock_minutes INTEGER NOT NULL DEFAULT 5,
        created_at TEXT DEFAULT (datetime('now')),
        updated_at TEXT DEFAULT (datetime('now'))
      )`
   ).run();
+  // Self-heal for tables created before the re-lock timer existed (the
+  // 0056 shape): add the column with the default so every pre-existing
+  // account keeps the behaviour it already knows (5 minutes).
+  try {
+    await db.prepare(
+      `ALTER TABLE user_app_locks ADD COLUMN relock_minutes INTEGER NOT NULL DEFAULT 5`
+    ).run();
+  } catch { /* column already present */ }
+}
+
+// The account's chosen re-lock delay in minutes, validated against the
+// allowed set. Anything unexpected on the row reads as the default.
+export function relockMinutesForRow(row) {
+  const value = Number(row && row.relock_minutes);
+  return PIN_RELOCK_OPTIONS_MINUTES.includes(value) ? value : PIN_RELOCK_DEFAULT_MINUTES;
 }
 
 export async function getAppLockRow(db, userId) {
@@ -122,6 +150,7 @@ export function publicAppLockState(row, now = new Date()) {
   return {
     configured,
     enabled,
+    relockMinutes: relockMinutesForRow(row),
     failedAttempts: Number(row?.failed_attempts || 0),
     attemptsRemaining: lockoutSeconds > 0
       ? 0

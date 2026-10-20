@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { PinEntryPanel } from "./AppLock";
+import { PinEntryPanel, announceAppLockState } from "./AppLock";
 
 // Dashboard invitation to set up the PIN app lock. The server decides
 // who sees it (no PIN yet, second sign-in onward, not snoozed, fewer
@@ -35,7 +35,10 @@ export default function PinInvite() {
 
   async function setup(pin) {
     const d = await api.post("/api/auth/app-lock", { action: "setup", pin, confirmPin: pin });
-    if (d && d.appLock) setMode("done");
+    if (d && d.appLock) {
+      announceAppLockState(d.appLock);
+      setMode("done");
+    }
   }
 
   return (

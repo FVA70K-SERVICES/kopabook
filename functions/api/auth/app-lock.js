@@ -9,6 +9,10 @@
 //   change       { currentPin, newPin, confirmPin }
 //   reset        { password, newPin, confirmPin }  forgot-PIN recovery
 //   set_enabled  { enabled, currentPin? }       disabling requires the PIN
+//   set_timer    { relockMinutes }              owner's re-lock delay
+//                                               (0/1/5/15/30; no PIN needed:
+//                                               it weakens nothing by itself,
+//                                               turning the lock off still does)
 //   dismiss_invite {}                           snooze / retire the invite
 //   lock         {}                             audit that the screen locked
 //
@@ -32,6 +36,8 @@ import {
   clearPinFailures,
   auditAppLock,
   PIN_INVITE_SNOOZE_DAYS,
+  PIN_RELOCK_OPTIONS_MINUTES,
+  relockMinutesForRow,
 } from "./_app-lock.js";
 
 const PIN_RE = /^\d{4}$/;
@@ -114,6 +120,39 @@ export async function onRequestPost(context) {
         await auditAppLock(db, auth, "auth.app_lock.lock", { source: String(body.source || "app").slice(0, 24) });
       }
       return stateResponse(row);
+    }
+
+    if (action === "set_timer") {
+      // The owner's own re-lock delay. Strictly one of the offered
+      // choices; takes effect on the account at once, on every device,
+      // with no PIN and no re-login (it is a timing preference, and the
+      // lock itself stays exactly as on or off as it was).
+      // Only a real number (or its plain string form) may name a
+      // choice: Number(null) is 0, which would silently turn a missing
+      // value into "immediately".
+      const rawTimer = body.relockMinutes;
+      const minutes = typeof rawTimer === "number" || (typeof rawTimer === "string" && rawTimer.trim() !== "")
+        ? Number(rawTimer)
+        : NaN;
+      if (!PIN_RELOCK_OPTIONS_MINUTES.includes(minutes)) {
+        return json(
+          { ok: false, message: "Choose one of the offered times: immediately, 1, 5, 15 or 30 minutes." },
+          400
+        );
+      }
+      const from = relockMinutesForRow(row);
+      await db.prepare(
+        `UPDATE user_app_locks SET relock_minutes = ?, updated_at = ? WHERE user_id = ?`
+      ).bind(minutes, toSqliteDate(), auth.user.id).run();
+      if (minutes !== from) {
+        await auditAppLock(db, auth, "auth.app_lock.timer_change", { from, to: minutes });
+      }
+      const fresh = await getAppLockRow(db, auth.user.id);
+      return stateResponse(fresh, {
+        message: minutes === 0
+          ? "Re-lock set to immediately: the PIN will be asked whenever you return to the app."
+          : `Re-lock set to ${minutes} minute${minutes === 1 ? "" : "s"} away.`,
+      });
     }
 
     if (action === "dismiss_invite") {

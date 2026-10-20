@@ -3,8 +3,9 @@
 
 // Bump this version on shell-affecting releases: the activate handler
 // deletes every other cache, so installed apps drop the old shell and
-// pick up the current bundle (v5: Projects in every business's menu).
-const SHELL_CACHE = "kopabook-shell-v5";
+// pick up the current bundle (v6: PIN app lock gate restored in the
+// shell, with the owner's own re-lock timer).
+const SHELL_CACHE = "kopabook-shell-v6";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 
