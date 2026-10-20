@@ -5,7 +5,6 @@
 //   free included, no business needed). One account, one login: nobody
 //   creates a new account per project.
 import { json, getAuthContext } from "../_utils";
-import { getBusinessOwnerTier } from "../billing";
 
 export async function onRequestGet(context) {
   try {
@@ -57,15 +56,6 @@ export async function onRequestPost(context) {
       .first();
     if (!invite) {
       return json({ ok: false, message: "This invite link is invalid or has been revoked." }, 404);
-    }
-
-    // The project owner's business must be on a paid tier.
-    const { tier } = await getBusinessOwnerTier(db, invite.business_id);
-    if (!["pro", "solo", "starter"].includes(tier)) {
-      return json(
-        { ok: false, upgradeRequired: true, message: "The project owner's plan has lapsed. Ask them to renew." },
-        403
-      );
     }
 
     const existing = await db
