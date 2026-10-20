@@ -27,18 +27,34 @@
     <meta name="twitter:description" content="The free record book for businesses everywhere. Track sales, stock and debts from your phone." />
     <meta name="twitter:image" content="https://kopabook.com/icon-512.png" />
     <title>KopaBook - Free Sales, Stock and Debt Tracking for Businesses Everywhere</title>
+    <script>
+      // Theme pre-paint: resolve the saved mode (auto / light / dark) before
+      // first paint so there is no flash of the wrong theme. Auto follows
+      // the system setting. A pre-Auto saved choice ("kopabook-theme") is
+      // honoured as the mode.
+      (function () {
+        try {
+          var m = localStorage.getItem("kopabook-theme-mode");
+          if (m !== "auto" && m !== "light" && m !== "dark") {
+            var old = localStorage.getItem("kopabook-theme");
+            m = (old === "light" || old === "dark") ? old : "auto";
+          }
+          var t = m === "auto"
+            ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+            : m;
+          var d = document.documentElement;
+          d.setAttribute("data-theme", t);
+          d.setAttribute("data-theme-mode", m);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "light");
+          document.documentElement.setAttribute("data-theme-mode", "auto");
+        }
+      })();
+    </script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to main content</a>
     <div id="root"></div>
-    <script>
-      try {
-        var t = localStorage.getItem("kopabook-theme");
-        document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
-      } catch (e) {
-        document.documentElement.setAttribute("data-theme", "light");
-      }
-    </script>
     <script type="module" src="/src/main.jsx"></script>
     <!-- FVAChat: merged chat by FVA70K Services. Signed in: Ask Kopa AI + Kopa Support. Signed out: Kopa Support bot. -->
     <script>

@@ -38,6 +38,20 @@
 [data-theme="dark"] .section-band { background: #101a13 !important; }
 [data-theme="dark"] img { opacity: 0.96; }
 [data-theme="dark"] .receipt-screen { background: #070b08; }
+/* In dark mode --brand is a light accent green (for text on dark surfaces).
+   Filled brand surfaces with white text need the deeper green so the text
+   stays readable (white on #4ade80 is only ~1.9:1). */
+[data-theme="dark"] .btn-primary,
+[data-theme="dark"] .snav a.active,
+[data-theme="dark"] .mobilebar a.active,
+[data-theme="dark"] .step .n,
+[data-theme="dark"] .skip-link,
+[data-theme="dark"] .sidebar .ask-ai-entry { background: #15803d; }
+[data-theme="dark"] .btn-primary:hover,
+[data-theme="dark"] .sidebar .ask-ai-entry:hover { background: #166534; }
+/* Nav links set their own text colour, which would otherwise override the
+   primary button's white text (dark ink on green fails contrast). */
+.mnav-links a.btn-primary, .mnav-dropdown a.btn-primary { color: #fff; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }

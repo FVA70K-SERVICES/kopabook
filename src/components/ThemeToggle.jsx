@@ -1,22 +1,30 @@
-import { useState } from "react";
-import { getTheme, toggleTheme } from "../lib/theme";
+import { useEffect, useState } from "react";
+import { getThemeMode, cycleThemeMode, onThemeChange } from "../lib/theme";
+
+const META = {
+  auto: { icon: "🌗", label: "Auto", hint: "follows your device" },
+  light: { icon: "☀️", label: "Light", hint: "" },
+  dark: { icon: "🌙", label: "Dark", hint: "" },
+};
+const NEXT = { auto: "Light", light: "Dark", dark: "Auto" };
 
 export default function ThemeToggle() {
-  const [theme, setTheme] = useState(() => getTheme());
+  const [mode, setMode] = useState(() => getThemeMode());
 
-  function onClick() {
-    setTheme(toggleTheme());
-  }
+  useEffect(() => onThemeChange(({ mode: m }) => setMode(m)), []);
+
+  const meta = META[mode] || META.auto;
 
   return (
     <button
-      onClick={onClick}
+      onClick={() => setMode(cycleThemeMode())}
       className="btn btn-secondary btn-sm"
-      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-      title={theme === "dark" ? "Light mode" : "Dark mode"}
-      style={{ padding: "8px 10px" }}
+      aria-label={`Theme: ${meta.label}${meta.hint ? ` (${meta.hint})` : ""}. Switch to ${NEXT[mode]}.`}
+      title={`Theme: ${meta.label}${meta.hint ? ` (${meta.hint})` : ""}`}
+      style={{ padding: "8px 10px", gap: 6 }}
     >
-      {theme === "dark" ? "☀️" : "🌙"}
+      <span aria-hidden="true">{meta.icon}</span>
+      <span style={{ fontSize: 12.5, fontWeight: 700 }}>{meta.label}</span>
     </button>
   );
 }
