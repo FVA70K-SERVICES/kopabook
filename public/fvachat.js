@@ -469,7 +469,7 @@
       '<div id="fva-chat-name-prompt">' +
         '<div style="font-size:40px;">👋</div>' +
         '<h3 style="margin:8px 0;">Hi there!</h3>' +
-        '<p style="color:#666;font-size:14px;">What should we call you?</p>' +
+        '<p style="font-size:14px;">What should we call you?</p>' +
         '<input type="text" id="fva-name-input" placeholder="Your name" maxlength="60" value="' + escapeHtml(visitorName) + '">' +
         '<input type="email" id="fva-email-input" placeholder="Email (for transcript)" maxlength="120" value="' + escapeHtml(visitorEmail) + '" style="margin-top:8px;">' +
         '<button class="btn btn-primary" id="fva-name-go" style="width:100%;">Start Chat</button>' +

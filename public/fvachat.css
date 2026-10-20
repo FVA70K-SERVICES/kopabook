@@ -1,4 +1,56 @@
 /* FVA70K Live Chat widget styles */
+/* Widget palette: driven by the host page's <html data-theme> (the resolved
+   theme), so the widget follows light/dark and live Auto switching with the
+   rest of the product. Hosts without a data-theme (third-party embeds) get
+   the light palette. All widget surfaces use these variables, never raw
+   light colours, so text can never land on the wrong background. */
+#fva-chat-window, #fva-chat-invite {
+  --fv-bg: #ffffff;
+  --fv-panel: #f8faf9;
+  --fv-ink: #14231a;
+  --fv-muted: #5d6f63;
+  --fv-faint: #66796d;
+  --fv-line: #e5e7eb;
+  --fv-card-line: #dbe7dd;
+  --fv-agent-bg: #ffffff;
+  --fv-bot-bg: #f0f7ff;
+  --fv-bot-line: #bfdbfe;
+  --fv-bot-label: #1a2b49;
+  --fv-note-bg: #eef4ee;
+  --fv-note-ink: #475569;
+  --fv-input-bg: #ffffff;
+  --fv-brand: #15803d;
+  --fv-brand-text: #15803d;
+  --fv-history-bg: #fbfdfc;
+  --fv-chip-open-bg: #e3f4e5; --fv-chip-open-ink: #166534;
+  --fv-chip-resolved-bg: #e0ecff; --fv-chip-resolved-ink: #1d4ed8;
+  --fv-chip-closed-bg: #eceff1; --fv-chip-closed-ink: #546e7a;
+  --fv-hover: #e5e7eb;
+}
+html[data-theme="dark"] #fva-chat-window,
+html[data-theme="dark"] #fva-chat-invite {
+  --fv-bg: #152019;
+  --fv-panel: #101a13;
+  --fv-ink: #e9f1eb;
+  --fv-muted: #9db3a5;
+  --fv-faint: #7d9484;
+  --fv-line: #243428;
+  --fv-card-line: #243428;
+  --fv-agent-bg: #1b291f;
+  --fv-bot-bg: #12283d;
+  --fv-bot-line: #1e4460;
+  --fv-bot-label: #93c5fd;
+  --fv-note-bg: #1a2b1e;
+  --fv-note-ink: #a9bfae;
+  --fv-input-bg: #0f1a12;
+  --fv-brand: #15803d;
+  --fv-brand-text: #4ade80;
+  --fv-history-bg: #101a13;
+  --fv-chip-open-bg: #14532d; --fv-chip-open-ink: #86efac;
+  --fv-chip-resolved-bg: #1e3a8a; --fv-chip-resolved-ink: #bfdbfe;
+  --fv-chip-closed-bg: #374151; --fv-chip-closed-ink: #d1d5db;
+  --fv-hover: #243428;
+}
 #fva-chat-btn {
   position: fixed; bottom: 24px; right: 24px; z-index: 1000;
   width: 60px; height: 60px; border-radius: 50%;
@@ -19,7 +71,7 @@
 #fva-chat-window {
   position: fixed; bottom: 96px; right: 24px; z-index: 1000;
   width: 360px; max-width: calc(100vw - 32px); height: 520px; max-height: calc(100vh - 140px);
-  background: white; border-radius: 16px; overflow: hidden;
+  background: var(--fv-bg); color: var(--fv-ink); border-radius: 16px; overflow: hidden;
   box-shadow: 0 8px 40px rgba(0,0,0,0.2);
   display: none; flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -33,29 +85,30 @@
 #fva-chat-header .status { font-size: 12px; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
 #fva-chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; }
 #fva-chat-close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
-#fva-chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #f8faf9; }
+#fva-chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--fv-panel); }
 .fva-msg { max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.45; word-wrap: break-word; }
-.fva-msg.agent { background: white; border: 1px solid #e5e7eb; align-self: flex-start; border-bottom-left-radius: 4px; }
-.fva-msg.bot { background: #f0f7ff; border: 1px solid #bfdbfe; align-self: flex-start; border-bottom-left-radius: 4px; }
-.fva-msg.bot .bot-label { font-size: 11px; font-weight: 700; color: #1a2b49; margin-bottom: 4px; }
-.fva-msg.visitor { background: var(--brand, #1a6b3c); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+.fva-msg.agent { background: var(--fv-agent-bg); border: 1px solid var(--fv-line); align-self: flex-start; border-bottom-left-radius: 4px; }
+.fva-msg.bot { background: var(--fv-bot-bg); border: 1px solid var(--fv-bot-line); align-self: flex-start; border-bottom-left-radius: 4px; }
+.fva-msg.bot .bot-label { font-size: 11px; font-weight: 700; color: var(--fv-bot-label); margin-bottom: 4px; }
+.fva-msg.visitor { background: var(--fv-brand); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
 .fva-msg .time { font-size: 10px; opacity: 0.6; margin-top: 4px; }
 .fva-msg.typing { padding: 14px 18px; }
-.fva-msg.typing .tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; margin: 0 2px; animation: fva-bounce 1.2s infinite; }
+.fva-msg.typing .tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--fv-faint); margin: 0 2px; animation: fva-bounce 1.2s infinite; }
 .fva-msg.typing .tdot:nth-child(2) { animation-delay: 0.2s; }
 .fva-msg.typing .tdot:nth-child(3) { animation-delay: 0.4s; }
 @keyframes fva-bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
-#fva-typing { font-size: 13px; color: #666; font-style: italic; padding: 0 16px 8px; display: none; background: #f8faf9; }
+#fva-typing { font-size: 13px; color: var(--fv-muted); font-style: italic; padding: 0 16px 8px; display: none; background: var(--fv-panel); }
 #fva-typing.show { display: block; }
-#fva-chat-quick { display: flex; gap: 8px; padding: 10px 16px; flex-wrap: wrap; background: #f8faf9; }
-.fva-quick-btn { background: white; border: 1px solid var(--brand, #1a6b3c); color: var(--brand, #1a6b3c); border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
-.fva-quick-btn:hover { background: var(--brand, #1a6b3c); color: white; }
-#fva-chat-input-area { display: flex; padding: 12px 16px; border-top: 1px solid #e5e7eb; background: white; gap: 8px; }
-#fva-chat-input { flex: 1; border: 1px solid #e5e7eb; border-radius: 24px; padding: 10px 16px; font-size: 14px; outline: none; }
-#fva-chat-input:focus { border-color: var(--brand, #1a6b3c); }
-#fva-chat-send { background: var(--brand, #1a6b3c); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 18px; flex-shrink: 0; }
-#fva-chat-name-prompt { padding: 24px; text-align: center; }
-#fva-chat-name-prompt input { width: 100%; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 12px 0; font-size: 15px; }
+#fva-chat-quick { display: flex; gap: 8px; padding: 10px 16px; flex-wrap: wrap; background: var(--fv-panel); }
+.fva-quick-btn { background: var(--fv-agent-bg); border: 1px solid var(--fv-brand); color: var(--fv-brand-text); border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+.fva-quick-btn:hover { background: var(--fv-brand); color: white; }
+#fva-chat-input-area { display: flex; padding: 12px 16px; border-top: 1px solid var(--fv-line); background: var(--fv-bg); gap: 8px; }
+#fva-chat-input { flex: 1; border: 1px solid var(--fv-line); border-radius: 24px; padding: 10px 16px; font-size: 14px; outline: none; background: var(--fv-input-bg); color: var(--fv-ink); }
+#fva-chat-input:focus { border-color: var(--fv-brand); }
+#fva-chat-send { background: var(--fv-brand); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 18px; flex-shrink: 0; }
+#fva-chat-name-prompt { padding: 24px; text-align: center; color: var(--fv-ink); background: var(--fv-bg); }
+#fva-chat-name-prompt p { color: var(--fv-muted); }
+#fva-chat-name-prompt input { width: 100%; padding: 12px; border: 1px solid var(--fv-line); border-radius: 8px; margin: 12px 0; font-size: 15px; background: var(--fv-input-bg); color: var(--fv-ink); }
 @media (max-width: 480px) {
   #fva-chat-window { right: 16px; bottom: 88px; }
   #fva-chat-btn { right: 16px; bottom: 16px; }
@@ -64,23 +117,23 @@
 /* v2 features */
 #fva-chat-menu-dropdown {
   position: absolute; top: 60px; right: 12px; z-index: 1001;
-  background: white; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+  background: var(--fv-bg); color: var(--fv-ink); border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.15);
   overflow: hidden; min-width: 200px;
 }
 #fva-chat-menu-dropdown button {
   display: block; width: 100%; text-align: left; padding: 12px 16px;
-  border: none; background: white; cursor: pointer; font-size: 14px;
-  border-bottom: 1px solid #f0f0f0;
+  border: none; background: var(--fv-bg); color: var(--fv-ink); cursor: pointer; font-size: 14px;
+  border-bottom: 1px solid var(--fv-line);
 }
-#fva-chat-menu-dropdown button:hover { background: #f8faf9; }
+#fva-chat-menu-dropdown button:hover { background: var(--fv-panel); }
 #fva-chat-menu-dropdown button:last-child { border-bottom: none; }
 
 #fva-emoji-picker {
   display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 16px;
-  background: #f8faf9; border-top: 1px solid #e5e7eb; max-height: 120px; overflow-y: auto;
+  background: var(--fv-panel); border-top: 1px solid var(--fv-line); max-height: 120px; overflow-y: auto;
 }
 .fva-emoji { background: none; border: none; font-size: 22px; cursor: pointer; padding: 4px; border-radius: 8px; }
-.fva-emoji:hover { background: #e5e7eb; }
+.fva-emoji:hover { background: var(--fv-hover); }
 #fva-emoji-btn { background: none; border: none; font-size: 22px; cursor: pointer; flex-shrink: 0; }
 
 .read-receipt { font-size: 11px; margin-left: 4px; }
@@ -88,25 +141,25 @@
 .fva-msg.visitor .read-receipt { color: rgba(255,255,255,0.7); }
 .fva-msg.visitor .read-receipt.read { color: #a5d6a7; }
 
-#fva-chat-rating { padding: 16px; text-align: center; background: #f8faf9; border-top: 1px solid #e5e7eb; }
+#fva-chat-rating { padding: 16px; text-align: center; background: var(--fv-panel); border-top: 1px solid var(--fv-line); color: var(--fv-ink); }
 #fva-chat-rating p { margin: 0 0 8px; font-weight: 600; font-size: 14px; }
 .fva-star { background: none; border: none; font-size: 28px; cursor: pointer; padding: 4px; transition: transform 0.15s; }
 .fva-star:hover { transform: scale(1.2); }
 
 #fva-chat-invite {
   position: fixed; bottom: 96px; right: 24px; z-index: 999;
-  background: white; border-radius: 16px; padding: 16px 20px;
+  background: var(--fv-bg); color: var(--fv-ink); border-radius: 16px; padding: 16px 20px;
   box-shadow: 0 8px 30px rgba(0,0,0,0.2); max-width: 280px;
   animation: fva-slide-in 0.3s ease-out;
 }
 @keyframes fva-slide-in { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 #fva-invite-go {
-  background: var(--brand, #1a6b3c); color: white; border: none;
+  background: var(--fv-brand); color: white; border: none;
   border-radius: 20px; padding: 8px 20px; margin-top: 12px; cursor: pointer; font-weight: 600;
 }
 #fva-invite-no {
   position: absolute; top: 8px; right: 12px; background: none;
-  border: none; font-size: 18px; cursor: pointer; color: #999;
+  border: none; font-size: 18px; cursor: pointer; color: var(--fv-muted);
 }
 
 .fva-action-wrap { align-self: flex-start; margin: 4px 0; }
@@ -119,95 +172,95 @@
 
 /* Merged in-app chat: two doors (Ask Kopa AI / Kopa Support), one thread */
 #fva-mode-tabs {
-  display: flex; gap: 8px; padding: 10px 12px 0; background: #f8faf9;
+  display: flex; gap: 8px; padding: 10px 12px 0; background: var(--fv-panel);
 }
 #fva-mode-tabs button {
   flex: 1; padding: 9px 6px; border-radius: 999px; cursor: pointer;
-  border: 1px solid var(--brand, #1a6b3c); background: white;
-  color: var(--brand, #1a6b3c); font-size: 13px; font-weight: 700;
+  border: 1px solid var(--fv-brand); background: var(--fv-agent-bg);
+  color: var(--fv-brand-text); font-size: 13px; font-weight: 700;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#fva-mode-tabs button.active { background: var(--brand, #1a6b3c); color: white; }
+#fva-mode-tabs button.active { background: var(--fv-brand); color: white; }
 #fva-support-status {
-  padding: 8px 16px 0; background: #f8faf9;
-  font-size: 12.5px; font-weight: 600; color: #475569;
+  padding: 8px 16px 0; background: var(--fv-panel);
+  font-size: 12.5px; font-weight: 600; color: var(--fv-muted);
 }
-#fva-door-picker { padding: 14px 14px 4px; background: #f8faf9; }
-.fva-door-title { font-weight: 800; font-size: 15px; margin-bottom: 10px; color: #14231a; }
+#fva-door-picker { padding: 14px 14px 4px; background: var(--fv-panel); }
+.fva-door-title { font-weight: 800; font-size: 15px; margin-bottom: 10px; color: var(--fv-ink); }
 .fva-door-btn {
   display: block; width: 100%; text-align: left; cursor: pointer;
-  background: white; border: 1px solid #dbe7dd; border-radius: 12px;
+  background: var(--fv-agent-bg); border: 1px solid var(--fv-card-line); border-radius: 12px;
   padding: 12px 14px; margin-bottom: 10px; font-family: inherit;
 }
-.fva-door-btn strong { display: block; font-size: 14.5px; color: #14231a; margin-bottom: 2px; }
-.fva-door-btn span { display: block; font-size: 13px; line-height: 1.45; color: #5d6f63; }
-.fva-door-btn:hover { border-color: var(--brand, #1a6b3c); }
-.fva-door-note { font-size: 12px; color: #64748b; padding: 2px 2px 8px; line-height: 1.45; }
+.fva-door-btn strong { display: block; font-size: 14.5px; color: var(--fv-ink); margin-bottom: 2px; }
+.fva-door-btn span { display: block; font-size: 13px; line-height: 1.45; color: var(--fv-muted); }
+.fva-door-btn:hover { border-color: var(--fv-brand); }
+.fva-door-note { font-size: 12px; color: var(--fv-muted); padding: 2px 2px 8px; line-height: 1.45; }
 .fva-mode-note {
   align-self: center; text-align: center; max-width: 92%;
-  font-size: 12px; color: #475569; background: #eef4ee;
+  font-size: 12px; color: var(--fv-note-ink); background: var(--fv-note-bg);
   border-radius: 999px; padding: 6px 12px; line-height: 1.4;
 }
 .fva-msg.system {
-  align-self: center; background: #eef4ee; color: #475569;
+  align-self: center; background: var(--fv-note-bg); color: var(--fv-note-ink);
   font-size: 12.5px; text-align: center; border-radius: 999px;
 }
 .fva-switch-btn { border: none; cursor: pointer; font-family: inherit; }
 
 /* Kopa Support case history (kept record, client view) */
-#fva-support-tools { padding: 8px 12px 0; background: #f8faf9; }
+#fva-support-tools { padding: 8px 12px 0; background: var(--fv-panel); }
 #fva-history-btn {
   background: none; border: none; padding: 2px 0; cursor: pointer;
-  color: var(--brand, #1a6b3c); font-size: 12.5px; font-weight: 700; font-family: inherit;
+  color: var(--fv-brand-text); font-size: 12.5px; font-weight: 700; font-family: inherit;
 }
 #fva-history-btn:hover { text-decoration: underline; }
 #fva-case-history {
-  flex: 1; overflow-y: auto; padding: 12px 14px; background: #fbfdfc;
+  flex: 1; overflow-y: auto; padding: 12px 14px; background: var(--fv-history-bg); color: var(--fv-ink);
 }
 .fva-history-head {
   display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
 }
-.fva-history-head strong { font-size: 14.5px; color: #14231a; }
+.fva-history-head strong { font-size: 14.5px; color: var(--fv-ink); }
 #fva-history-back, .fva-case-backlist {
-  background: white; border: 1px solid #dbe7dd; border-radius: 999px;
+  background: var(--fv-agent-bg); border: 1px solid var(--fv-card-line); border-radius: 999px;
   padding: 5px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer;
-  color: var(--brand, #1a6b3c); font-family: inherit;
+  color: var(--fv-brand-text); font-family: inherit;
 }
-.fva-history-note { font-size: 12px; color: #64748b; line-height: 1.45; margin: 0 0 10px; }
-.fva-history-empty { font-size: 13px; color: #64748b; line-height: 1.5; padding: 10px 2px; }
+.fva-history-note { font-size: 12px; color: var(--fv-muted); line-height: 1.45; margin: 0 0 10px; }
+.fva-history-empty { font-size: 13px; color: var(--fv-muted); line-height: 1.5; padding: 10px 2px; }
 .fva-case-item {
   display: block; width: 100%; text-align: left; cursor: pointer; font-family: inherit;
-  background: white; border: 1px solid #e2eae3; border-radius: 12px;
+  background: var(--fv-agent-bg); border: 1px solid var(--fv-line); border-radius: 12px;
   padding: 10px 12px; margin-bottom: 8px;
 }
-.fva-case-item:hover { border-color: var(--brand, #1a6b3c); }
+.fva-case-item:hover { border-color: var(--fv-brand); }
 .fva-case-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .fva-case-chip {
   display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.02em;
   border-radius: 999px; padding: 2px 9px; text-transform: uppercase;
 }
-.fva-case-chip.open { background: #e3f4e5; color: #166534; }
-.fva-case-chip.resolved { background: #e0ecff; color: #1d4ed8; }
-.fva-case-chip.closed { background: #eceff1; color: #546e7a; }
-.fva-case-date { font-size: 11.5px; color: #84918a; }
+.fva-case-chip.open { background: var(--fv-chip-open-bg); color: var(--fv-chip-open-ink); }
+.fva-case-chip.resolved { background: var(--fv-chip-resolved-bg); color: var(--fv-chip-resolved-ink); }
+.fva-case-chip.closed { background: var(--fv-chip-closed-bg); color: var(--fv-chip-closed-ink); }
+.fva-case-date { font-size: 11.5px; color: var(--fv-faint); }
 .fva-case-preview {
-  display: block; font-size: 13px; color: #26332a; line-height: 1.4;
+  display: block; font-size: 13px; color: var(--fv-ink); line-height: 1.4;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.fva-case-confirmed { display: block; font-size: 11.5px; color: #1d4ed8; margin-top: 3px; }
+.fva-case-confirmed { display: block; font-size: 11.5px; color: var(--fv-chip-resolved-ink); margin-top: 3px; }
 .fva-case-more {
   display: block; width: 100%; background: none; border: none; cursor: pointer;
-  color: var(--brand, #1a6b3c); font-size: 13px; font-weight: 700; padding: 8px; font-family: inherit;
+  color: var(--fv-brand-text); font-size: 13px; font-weight: 700; padding: 8px; font-family: inherit;
 }
 .fva-case-detail-head { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
 .fva-case-msgs { display: flex; flex-direction: column; gap: 8px; }
-.fva-case-events { margin-top: 14px; border-top: 1px solid #e2eae3; padding-top: 10px; }
-.fva-case-events-title { font-size: 12px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-.fva-case-event { font-size: 12.5px; color: #5d6f63; line-height: 1.5; }
+.fva-case-events { margin-top: 14px; border-top: 1px solid var(--fv-line); padding-top: 10px; }
+.fva-case-events-title { font-size: 12px; font-weight: 800; color: var(--fv-note-ink); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.fva-case-event { font-size: 12.5px; color: var(--fv-muted); line-height: 1.5; }
 .fva-case-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .fva-case-act {
-  background: white; border: 1px solid var(--brand, #1a6b3c); color: var(--brand, #1a6b3c);
+  background: var(--fv-agent-bg); border: 1px solid var(--fv-brand); color: var(--fv-brand-text);
   border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;
 }
-.fva-case-act.primary { background: var(--brand, #1a6b3c); color: white; }
-.fva-case-open-note { font-size: 12.5px; color: #5d6f63; line-height: 1.45; }
+.fva-case-act.primary { background: var(--fv-brand); color: white; }
+.fva-case-open-note { font-size: 12.5px; color: var(--fv-muted); line-height: 1.45; }
