@@ -744,7 +744,7 @@ export function LandingPage() {
               controls
               preload="metadata"
               playsInline
-              src="https://pub-9febb8d034344470ae8c0f7493a261f9.r2.dev/kopabook-final-video.mp4"
+              src="/kopabook-final-video.mp4"
               style={{ width: "100%", display: "block", borderRadius: 12, aspectRatio: "16 / 9", background: "#000", border: "1px solid var(--line)" }}
             >
               Sorry, your browser cannot play this video. Watch it on YouTube: https://youtu.be/tII6wBaWhqE?is=CcsYga-K99LgyezC
