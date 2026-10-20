@@ -42,6 +42,14 @@ export default function Layout({ session, children }) {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("kopabook-sidebar") === "collapsed"; } catch { return false; }
   });
+  const [promoDismissed, setPromoDismissed] = useState(() => {
+    try { return !!localStorage.getItem("kb_promo_banner_dismissed_pro-free-month"); } catch { return false; }
+  });
+
+  function dismissPromo() {
+    setPromoDismissed(true);
+    try { localStorage.setItem("kb_promo_banner_dismissed_pro-free-month", "1"); } catch {}
+  }
   const path = window.location.pathname;
 
   // Each organization type only sees the service modules that fit it.
@@ -211,6 +219,49 @@ export default function Layout({ session, children }) {
             </button>
           </div>
         </div>
+        {billing && billing.promo && billing.promo.available && !promoDismissed && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              flexWrap: "wrap",
+              padding: "8px 12px",
+              marginBottom: 10,
+              border: "1px solid var(--brand)",
+              borderRadius: 8,
+              background: "var(--bg-soft, #f8fafc)",
+              fontSize: 13,
+            }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+              <span>Pro is free for one month. No card needed.</span>
+              <a href="/app/settings" style={{ color: "var(--brand)", fontWeight: 600 }}>Claim it in Settings</a>
+            </span>
+            <button
+              type="button"
+              onClick={dismissPromo}
+              aria-label="Dismiss promotion"
+              title="Dismiss promotion"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                width: 28,
+                height: 28,
+                padding: 0,
+                cursor: "pointer",
+                color: "inherit",
+                fontSize: 16,
+                lineHeight: 1,
+                flexShrink: 0,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {billing && (
           <UpgradeNudge
             tier={billing.tier}
