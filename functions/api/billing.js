@@ -2,6 +2,7 @@
 // Tiers are per account (one person), not per business. Usage figures are
 // informational only and are NEVER used to block recording a sale.
 import { json, getAuthContext, requireAuth, toSqliteDate } from "./_utils";
+import { getActivePromoClaim, promoStateForUser } from "./_promo.js";
 
 // null = unlimited
 export const LIMITS = {
@@ -27,12 +28,13 @@ export async function getAccountTier(db, userId) {
   // Expiry enforcement: a paid tier whose billing period has ended, or whose
   // subscription is past due or cancelled, is treated as free. This function
   // never writes to the database; it only changes the tier that is returned.
+  let result;
   if (tier !== "free") {
     const nowIso = toSqliteDate(); // "YYYY-MM-DD HH:MM:SS" UTC, comparable as a string
     const expired = !!periodEnd && String(periodEnd) < nowIso;
     const badStatus = !!row && (row.status === "past_due" || row.status === "cancelled");
     if (expired || badStatus) {
-      return {
+      result = {
         tier: "free",
         pendingTier: null,
         status: row ? row.status : "active",
@@ -41,13 +43,25 @@ export async function getAccountTier(db, userId) {
       };
     }
   }
-  return {
-    tier,
-    pendingTier: null,
-    status: row ? row.status : "active",
-    billingCycle: row ? row.billing_cycle : null,
-    periodEnd,
-  };
+  if (!result) {
+    result = {
+      tier,
+      pendingTier: null,
+      status: row ? row.status : "active",
+      billingCycle: row ? row.billing_cycle : null,
+      periodEnd,
+    };
+  }
+  // Promo overlay: an active Pro free month claim lifts the tier to pro
+  // at read time only. account_subscriptions is never written, so the
+  // underlying tier resumes automatically when the claim expires.
+  try {
+    const claim = await getActivePromoClaim(db, userId);
+    if (claim && result.tier !== "pro") {
+      return { ...result, tier: "pro", promoClaim: { expires_at: claim.expires_at, prior_tier: claim.prior_tier } };
+    }
+  } catch (e) {}
+  return result;
 }
 
 // Tier of the account that owns a business (staff act under the owner's plan).
@@ -79,6 +93,12 @@ export async function onRequestGet(context) {
     const db = context.env.KOPABOOK_DB;
     const { tier, pendingTier, status, billingCycle, periodEnd } = await getAccountTier(db, auth.user.id);
     const limits = LIMITS[tier];
+    let promo = null;
+    try {
+      promo = await promoStateForUser(db, auth.user.id);
+    } catch (e) {
+      promo = null;
+    }
     const businessId = auth.business.id;
 
     const weekStart = toSqliteDate(weekStartUtc());
@@ -114,6 +134,7 @@ export async function onRequestGet(context) {
         staff: staffRow ? staffRow.n : 0,
       },
       weekStart,
+      promo,
     });
   } catch (error) {
     return json(
