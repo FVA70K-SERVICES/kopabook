@@ -246,6 +246,103 @@ function Payments() {
   );
 }
 
+function Promotion() {
+  const [d, setD] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState("");
+
+  async function load() {
+    try {
+      const data = await api.get("/api/admin/promo");
+      setD(data);
+      setFailed(false);
+    } catch (e) { setFailed(true); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function toggle() {
+    if (!d || !d.promo) return;
+    const next = d.promo.is_active ? 0 : 1;
+    setBusy("toggle");
+    setMsg("");
+    try {
+      const res = await api.post("/api/admin/promo", { action: "toggle", is_active: next });
+      if (res && res.message) setMsg(res.message);
+      await load();
+    } catch (e) { setMsg(e.message); }
+    setBusy("");
+  }
+
+  async function revoke(claim) {
+    if (!window.confirm("Revoke this free Pro month claim? The account will return to its previous plan.")) return;
+    setBusy("revoke-" + claim.id);
+    setMsg("");
+    try {
+      const res = await api.post("/api/admin/promo", { action: "revoke", claim_id: claim.id });
+      if (res && res.message) setMsg(res.message);
+      await load();
+    } catch (e) { setMsg(e.message); }
+    setBusy("");
+  }
+
+  if (failed) return null;
+  if (!d) return <p className="hint">Loading...</p>;
+  if (!d.promo) return null;
+  const promo = d.promo;
+  const counts = d.counts || {};
+  const claims = d.claims || [];
+  const isActive = !!promo.is_active;
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Promotion</h3>
+      {msg && <div className="alert alert-ok">{msg}</div>}
+      <ul style={{ listStyle: "none", padding: 0, margin: "0 0 12px" }}>
+        <li style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+          <span>{promo.name}</span><strong>{isActive ? "On" : "Off"}</strong>
+        </li>
+        <li style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+          <span>Total claims</span><strong>{counts.total ?? 0}</strong>
+        </li>
+        <li style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+          <span>Active claims</span><strong>{counts.active ?? 0}</strong>
+        </li>
+      </ul>
+      <button type="button" className="btn btn-primary btn-sm" disabled={busy === "toggle"} onClick={toggle}>
+        {busy === "toggle" ? "Saving..." : isActive ? "Turn promotion off" : "Turn promotion on"}
+      </button>
+      {claims.length === 0 ? (
+        <p className="hint" style={{ marginBottom: 0, marginTop: 12 }}>No claims yet.</p>
+      ) : (
+        <div style={{ overflowX: "auto", marginTop: 12 }}>
+          <table>
+            <thead><tr><th>Email</th><th>Name</th><th>Claimed</th><th>Expires</th><th>Prior tier</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {claims.map((c) => (
+                <tr key={c.id}>
+                  <td><small>{c.email}</small></td>
+                  <td><small>{c.full_name || ""}</small></td>
+                  <td><small>{c.claimed_at ? String(c.claimed_at).slice(0, 10) : ""}</small></td>
+                  <td><small>{c.expires_at ? String(c.expires_at).slice(0, 10) : ""}</small></td>
+                  <td style={{ textTransform: "capitalize" }}>{c.prior_tier}</td>
+                  <td>{c.status}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {c.status === "active" && (
+                      <button type="button" className="btn btn-secondary btn-sm" disabled={busy === "revoke-" + c.id} onClick={() => revoke(c)}>
+                        {busy === "revoke-" + c.id ? "..." : "Revoke"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ApiKeys() {
   const [d, setD] = useState(null);
   const [error, setError] = useState("");
@@ -544,6 +641,7 @@ export default function AdminPage() {
         <Tab id="payments" label="Payments" active={tab} set={setTab} />
         <Tab id="crypto" label="Crypto" active={tab} set={setTab} />
         <Tab id="plans" label="Plans & fees" active={tab} set={setTab} />
+        <Tab id="promotion" label="Promotion" active={tab} set={setTab} />
         <Tab id="apikeys" label="API keys" active={tab} set={setTab} />
         <button
           type="button"
@@ -560,6 +658,7 @@ export default function AdminPage() {
       {tab === "payments" && <Payments />}
       {tab === "crypto" && <CryptoPayments />}
       {tab === "plans" && <Plans />}
+      {tab === "promotion" && <Promotion />}
       {tab === "apikeys" && <ApiKeys />}
       <FloatingChatCenter open={ccOpen} onClose={() => setCcOpen(false)} />
     </>
