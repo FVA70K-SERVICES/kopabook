@@ -269,7 +269,7 @@ export const SIGNED_OUT_ACTION_POINTER = 'That is a job for Ask Kopa AI inside t
 
 export function ownerWelcome(fullName) {
   const first = fullName ? String(fullName).split(' ')[0] : 'there';
-  return `Welcome back, ${first}. This is one chat with two clear doors. Ask Kopa AI works with your shop: it records sales and expenses and answers from your own records. Kopa Support is for questions about KopaBook itself, with a person from the FVA70K team when you need one. Pick a door below to start. This chat keeps the last 24 hours, shared across both doors.`;
+  return `Welcome back, ${first}. This is one chat with two clear doors. Ask Kopa AI works with your shop: it records sales and expenses and answers from your own records. Kopa Support is for questions about KopaBook itself, with a person from the FVA70K team when you need one. Pick a door below to start. Ask Kopa AI keeps the last 24 hours. Kopa Support conversations are kept as a record, so you and the FVA70K team can always look back at what was said.`;
 }
 
 export const SUPPORT_WELCOME = 'Welcome to Kopa Support. This side is for questions about KopaBook itself: pricing, features and problems. A person from the FVA70K team gives the human help here, by hand. Kopa Support cannot see or change your shop records. For sales, expenses and business questions, switch to Ask Kopa AI.';

@@ -10,6 +10,7 @@ import { handleOwnerCommand } from './bot-owner.js';
 import { handleFollowUp } from './bot-memory.js';
 import { getAIResponse, shouldUseAI } from './bot-ai.js';
 import { maybeAutoClearChat, clearExpiredMergedChat } from './_auto_clear.js';
+import { caseForSupportMessage, mirrorCaseMessage } from './_cases.js';
 
 // D1-backed bot knowledge: the bot's BRAIN. Rows in `bot_knowledge` win over
 // the hardcoded fallback, so new features can be taught without a deploy.
@@ -171,6 +172,7 @@ export async function onRequestPost(context) {
       let verifiedOwner = false;
       let ownerAuth = null;
       let activeMode = null;
+      let supportCase = null;
       if (sid === 'kopabook' && ownerCtx && ownerCtx.businessId && ownerCtx.userId) {
         try {
           const auth = await getAuthContext(context);
@@ -182,6 +184,27 @@ export async function onRequestPost(context) {
             activeMode = mode === 'ai' ? 'ai' : 'support';
           }
         } catch (e) { /* stay on the public pipeline */ }
+      }
+
+      // Kopa Support case record: for a verified owner on the support
+      // side, the exchange is kept as a case (see _cases.js). The case
+      // record is never touched by the 24-hour chat window sweep, so the
+      // support story survives for the client and the FVA70K team. Ask
+      // Kopa AI messages never create or touch a case. Best effort: a
+      // case failure must never break the chat.
+      if (verifiedOwner && activeMode === 'support') {
+        try {
+          const cr = await caseForSupportMessage(env.KOPABOOK_DB, {
+            sessionId,
+            businessId: ownerAuth.business.id,
+            businessName: ownerAuth.business.name,
+            userId: ownerAuth.user.id,
+            clientName: ownerAuth.user.fullName || ownerCtx.userName || '',
+            firstMessageText: clean,
+          });
+          supportCase = cr.kase;
+          await mirrorCaseMessage(env.KOPABOOK_DB, supportCase, { sender: 'visitor', message: clean, at: now });
+        } catch (e) { supportCase = null; }
       }
 
       // Check if agent is already handling (don't bot over human).
@@ -384,6 +407,13 @@ export async function onRequestPost(context) {
         await env.KOPABOOK_DB.prepare(
           'INSERT INTO chat_messages (session_id, sender, message, created_at) VALUES (?, ?, ?, ?)'
         ).bind(sessionId, 'bot', result.answer, botNow).run();
+
+        // Keep the support case record in step with the live thread.
+        if (supportCase) {
+          try {
+            await mirrorCaseMessage(env.KOPABOOK_DB, supportCase, { sender: 'bot', message: result.answer, at: botNow });
+          } catch (e) { /* the live reply already saved */ }
+        }
 
         if (result.escalate || shouldEscalate(clean)) {
           await env.KOPABOOK_DB.prepare(

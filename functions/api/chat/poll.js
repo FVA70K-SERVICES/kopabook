@@ -58,6 +58,14 @@ export async function onRequestGet({ request, env }) {
         agentName,
         status: session.status || 'active',
       };
+      // The current Kopa Support case for this thread, so the widget can
+      // show its lifecycle state (open / resolved / closed) honestly.
+      try {
+        const kc = await env.KOPABOOK_DB.prepare(
+          'SELECT id, status FROM support_cases WHERE session_id = ? ORDER BY created_at DESC LIMIT 1'
+        ).bind(sessionId).first();
+        if (kc) { supportState.caseId = kc.id; supportState.caseStatus = kc.status; }
+      } catch (e) { /* case tables not created yet: no case state */ }
     }
 
     // Lazy auto-clear of old chat history (per-business setting, best effort).

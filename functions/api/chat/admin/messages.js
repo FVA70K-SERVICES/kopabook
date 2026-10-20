@@ -7,6 +7,7 @@
 // Every session is verified to belong to the caller's business site.
 import { getAuthContext } from '../../_utils.js';
 import { canUseChatCenter, businessSiteId } from '../_access.js';
+import { mirrorAgentReply, closeCaseForSession } from '../_cases.js';
 
 async function authorize(request, env) {
   const url = new URL(request.url);
@@ -92,6 +93,13 @@ export async function onRequestPost({ request, env }) {
     await db.prepare(
       'UPDATE chat_sessions SET last_activity = ?, agent_typing = 0 WHERE id = ?'
     ).bind(now, sid).run();
+    // Kopa Support: the reply also lands in the kept case record, and it
+    // stamps the case's first human response. If the case was resolved or
+    // closed, a person replying reopens it, on the record. No-op for
+    // sessions that have no support case (for example biz site chats).
+    try {
+      await mirrorAgentReply(db, sid, { senderName, message: message.trim().slice(0, 2000), at: now });
+    } catch (e) { /* the reply itself already saved */ }
     return Response.json({ ok: true });
   } catch (e) {
     return Response.json({ error: 'Failed' }, { status: 500 });
@@ -112,6 +120,12 @@ export async function onRequestPut({ request, env }) {
     await db.prepare(
       "UPDATE chat_sessions SET status = 'closed' WHERE id = ?"
     ).bind(sid).run();
+    // Kopa Support: closing the chat from the centre also closes its
+    // support case, with the change on the case's audit trail.
+    const actorName = a.user ? (a.user.fullName || a.user.name || a.user.email || 'FVA70K team') : 'FVA70K team';
+    try {
+      await closeCaseForSession(db, sid, { type: 'team', name: actorName });
+    } catch (e) { /* the session close itself already saved */ }
     return Response.json({ ok: true });
   } catch (e) {
     return Response.json({ error: 'Failed' }, { status: 500 });
