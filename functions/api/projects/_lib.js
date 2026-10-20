@@ -1,9 +1,8 @@
 // Shared helpers for the Projects API.
-// Projects is a paid-tier feature (Starter and up), business-scoped.
-// Invited members reach a single project without joining the business:
-// they see ONLY that project, never the rest of the business.
+// Projects is open to every plan, Free included (Fortune, 2026-10-20),
+// business-scoped. Invited members reach a single project without joining
+// the business: they see ONLY that project, never the rest of the business.
 import { json, getAuthContext, requireAuth, audit } from "../_utils";
-import { getBusinessOwnerTier } from "../billing";
 
 // Re-exported so project route files can `import { json } from "./_lib"`.
 export { json };
@@ -20,15 +19,6 @@ export async function projectContext(context) {
   const auth = await getAuthContext(context);
   const denied = requireAuth(auth);
   if (denied) return { error: denied };
-  const { tier } = await getBusinessOwnerTier(context.env.KOPABOOK_DB, auth.business.id);
-  if (!["pro", "solo", "starter"].includes(tier)) {
-    return {
-      error: json(
-        { ok: false, upgradeRequired: true, message: "Projects is a Starter feature. Upgrade to track full project accountability." },
-        403
-      ),
-    };
-  }
   return { auth, db: context.env.KOPABOOK_DB };
 }
 
@@ -50,18 +40,6 @@ export async function projectAccessContext(context, projectId) {
     .bind(id)
     .first();
   if (!project) return { error: json({ ok: false, message: "Project not found." }, 404) };
-
-  // The project owner's business must be on a paid tier. Invitees join on
-  // any account, including free.
-  const { tier } = await getBusinessOwnerTier(db, project.business_id);
-  if (!["pro", "solo", "starter"].includes(tier)) {
-    return {
-      error: json(
-        { ok: false, upgradeRequired: true, message: "Projects is a Starter feature. The project owner's plan has lapsed." },
-        403
-      ),
-    };
-  }
 
   // Business path: the user belongs to the project's business. The active
   // business on the session may be a different one the user also owns, so
