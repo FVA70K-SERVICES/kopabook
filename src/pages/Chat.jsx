@@ -37,8 +37,10 @@ export default function ChatPage({ side }) {
         <h1>Chat</h1>
       </div>
       <p className="hint" style={{ maxWidth: 640 }}>
-        One chat, two clear doors. Both sides share the same conversation, and
-        this chat keeps the last 24 hours, so switching sides never loses the thread.
+        One chat, two clear doors, and switching sides never loses the thread.
+        Ask Kopa AI keeps the last 24 hours. Kopa Support conversations are
+        kept as a record, so you and the FVA70K team can always look back at
+        what was said.
       </p>
 
       <div className="chat-door-grid">
@@ -65,7 +67,8 @@ export default function ChatPage({ side }) {
             Chat with the FVA70K team about KopaBook itself: pricing, features
             and problems. Quick platform answers first, then a real person, by
             hand, when you need one. Kopa Support cannot see or change your
-            shop records.
+            shop records. Support conversations are kept as a record for both
+            sides, and you can read them back any time under Past support chats.
           </p>
           <span className="btn btn-secondary btn-sm" style={{ marginTop: 14 }}>Open Kopa Support</span>
         </a>
