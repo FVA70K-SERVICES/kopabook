@@ -85,25 +85,32 @@ html[data-theme="dark"] #fva-chat-invite {
 #fva-chat-header .status { font-size: 12px; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
 #fva-chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; }
 #fva-chat-close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
-#fva-chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--fv-panel); }
-.fva-msg { max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.45; word-wrap: break-word; }
-.fva-msg.agent { background: var(--fv-agent-bg); border: 1px solid var(--fv-line); align-self: flex-start; border-bottom-left-radius: 4px; }
-.fva-msg.bot { background: var(--fv-bot-bg); border: 1px solid var(--fv-bot-line); align-self: flex-start; border-bottom-left-radius: 4px; }
-.fva-msg.bot .bot-label { font-size: 11px; font-weight: 700; color: var(--fv-bot-label); margin-bottom: 4px; }
-.fva-msg.visitor { background: var(--fv-brand); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
-.fva-msg .time { font-size: 10px; opacity: 0.6; margin-top: 4px; }
-.fva-msg.typing { padding: 14px 18px; }
-.fva-msg.typing .tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--fv-faint); margin: 0 2px; animation: fva-bounce 1.2s infinite; }
+#fva-chat-body { min-height: 0; }
+#fva-chat-messages { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--fv-panel); }
+.fva-msg { box-sizing: border-box; max-width: min(85%, 100%); min-width: 0; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.45; word-wrap: break-word; overflow-wrap: anywhere; animation: fva-msg-in 0.22s ease-out; }
+.fva-msg.agent { background: var(--fv-agent-bg); color: var(--fv-ink); border: 1px solid var(--fv-line); align-self: flex-start; border-bottom-left-radius: 4px; }
+.fva-msg.bot { background: var(--fv-bot-bg); color: var(--fv-ink); border: 1px solid var(--fv-bot-line); align-self: flex-start; border-bottom-left-radius: 4px; }
+.fva-msg.bot .bot-label, .fva-msg.agent .bot-label { font-size: 11px; font-weight: 700; color: var(--fv-bot-label); margin-bottom: 4px; }
+.fva-msg.agent .bot-label { color: var(--fv-muted); }
+.fva-msg.visitor { background: var(--fv-brand); color: white; align-self: flex-end; border-bottom-left-radius: 16px; border-bottom-right-radius: 4px; }
+.fva-msg a { color: var(--fv-brand-text); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.fva-msg.bot a, .fva-msg.agent a { color: var(--fv-brand-text); }
+.fva-msg.visitor a { color: white; text-decoration: underline; }
+.fva-msg .time { font-size: 10px; line-height: 1.3; opacity: 0.6; margin-top: 4px; }
+@keyframes fva-msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.fva-msg.typing { display: flex; align-items: center; gap: 6px; padding: 12px 16px; min-height: 20px; }
+.fva-msg.typing .tdot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--fv-muted); margin: 0; animation: fva-bounce 1.2s infinite; }
 .fva-msg.typing .tdot:nth-child(2) { animation-delay: 0.2s; }
 .fva-msg.typing .tdot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes fva-bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+@keyframes fva-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.55; } 30% { transform: translateY(-6px); opacity: 1; } }
 #fva-typing { font-size: 13px; color: var(--fv-muted); font-style: italic; padding: 0 16px 8px; display: none; background: var(--fv-panel); }
 #fva-typing.show { display: block; }
 #fva-chat-quick { display: flex; gap: 8px; padding: 10px 16px; flex-wrap: wrap; background: var(--fv-panel); }
 .fva-quick-btn { background: var(--fv-agent-bg); border: 1px solid var(--fv-brand); color: var(--fv-brand-text); border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
 .fva-quick-btn:hover { background: var(--fv-brand); color: white; }
-#fva-chat-input-area { display: flex; padding: 12px 16px; border-top: 1px solid var(--fv-line); background: var(--fv-bg); gap: 8px; }
-#fva-chat-input { flex: 1; border: 1px solid var(--fv-line); border-radius: 24px; padding: 10px 16px; font-size: 14px; outline: none; background: var(--fv-input-bg); color: var(--fv-ink); }
+#fva-chat-input-area { display: flex; flex-shrink: 0; align-items: center; box-sizing: border-box; width: 100%; padding: 12px 16px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--fv-line); background: var(--fv-bg); gap: 8px; }
+#fva-chat-input { flex: 1; min-width: 0; box-sizing: border-box; border: 1px solid var(--fv-line); border-radius: 24px; padding: 10px 16px; font-size: 14px; outline: none; background: var(--fv-input-bg); color: var(--fv-ink); }
+#fva-chat-quick, #fva-typing, #fva-chat-rating, #fva-emoji-picker { flex-shrink: 0; }
 #fva-chat-input:focus { border-color: var(--fv-brand); }
 #fva-chat-send { background: var(--fv-brand); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 18px; flex-shrink: 0; }
 #fva-chat-name-prompt { padding: 24px; text-align: center; color: var(--fv-ink); background: var(--fv-bg); }
@@ -197,13 +204,16 @@ html[data-theme="dark"] #fva-chat-invite {
 .fva-door-btn:hover { border-color: var(--fv-brand); }
 .fva-door-note { font-size: 12px; color: var(--fv-muted); padding: 2px 2px 8px; line-height: 1.45; }
 .fva-mode-note {
-  align-self: center; text-align: center; max-width: 92%;
+  box-sizing: border-box; align-self: center; text-align: center; max-width: 92%;
   font-size: 12px; color: var(--fv-note-ink); background: var(--fv-note-bg);
+  border: 1px solid var(--fv-card-line);
   border-radius: 999px; padding: 6px 12px; line-height: 1.4;
+  overflow-wrap: anywhere; animation: fva-msg-in 0.22s ease-out;
 }
 .fva-msg.system {
-  align-self: center; background: var(--fv-note-bg); color: var(--fv-note-ink);
-  font-size: 12.5px; text-align: center; border-radius: 999px;
+  align-self: center; max-width: 92%; background: var(--fv-note-bg); color: var(--fv-note-ink);
+  border: 1px solid var(--fv-card-line);
+  font-size: 12.5px; text-align: center; border-radius: 999px; padding: 6px 12px;
 }
 .fva-switch-btn { border: none; cursor: pointer; font-family: inherit; }
 
@@ -264,3 +274,89 @@ html[data-theme="dark"] #fva-chat-invite {
 }
 .fva-case-act.primary { background: var(--fv-brand); color: white; }
 .fva-case-open-note { font-size: 12.5px; color: var(--fv-muted); line-height: 1.45; }
+
+/* Confirmation proposal card: Ask Kopa AI write actions */
+.fva-proposal-card {
+  box-sizing: border-box; align-self: flex-start;
+  width: min(85%, 340px); max-width: 85%; min-width: 0;
+  background: var(--fv-bot-bg); color: var(--fv-ink);
+  border: 1px solid var(--fv-bot-line); border-radius: 14px; border-bottom-left-radius: 4px;
+  padding: 12px 14px; font-size: 14px; line-height: 1.45;
+  word-wrap: break-word; overflow-wrap: anywhere;
+  animation: fva-msg-in 0.22s ease-out;
+}
+.fva-proposal-title { font-size: 12px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; color: var(--fv-bot-label); margin-bottom: 6px; }
+.fva-proposal-lines { display: flex; flex-direction: column; gap: 2px; }
+.fva-proposal-line { overflow-wrap: anywhere; }
+.fva-proposal-note { font-size: 12px; color: var(--fv-muted); margin-top: 8px; }
+.fva-proposal-actions { display: flex; gap: 8px; margin-top: 10px; }
+.fva-proposal-btn {
+  flex: 1 1 0; min-width: 0; min-height: 44px; height: 44px;
+  padding: 10px 12px; border-radius: 10px; cursor: pointer;
+  font-family: inherit; font-size: 14px; font-weight: 700; line-height: 1.2;
+}
+.fva-proposal-btn:focus-visible { outline: 2px solid var(--fv-brand); outline-offset: 2px; }
+.fva-proposal-confirm { background: var(--fv-brand); border: 1px solid var(--fv-brand); color: white; }
+.fva-proposal-cancel { background: var(--fv-panel); border: 1px solid var(--fv-line); color: var(--fv-ink); }
+.fva-proposal-btn:disabled { opacity: 0.55; cursor: default; }
+.fva-proposal-status { font-size: 12px; color: var(--fv-muted); margin-top: 8px; }
+.fva-proposal-status:empty { display: none; margin-top: 0; }
+
+/* PA cards in Ask Kopa AI: same visual family as the proposal card */
+.fva-pa-card {
+  position: relative; box-sizing: border-box; align-self: flex-start;
+  width: min(85%, 340px); max-width: 85%; min-width: 0;
+  background: var(--fv-bot-bg); color: var(--fv-ink);
+  border: 1px solid var(--fv-bot-line); border-radius: 14px; border-bottom-left-radius: 4px;
+  padding: 12px 14px; font-size: 14px; line-height: 1.45;
+  word-wrap: break-word; overflow-wrap: anywhere;
+  animation: fva-msg-in 0.22s ease-out;
+}
+.fva-pa-card-text { overflow-wrap: anywhere; }
+.fva-pa-card-actions { display: flex; gap: 8px; margin-top: 10px; }
+.fva-pa-btn {
+  flex: 1 1 0; min-width: 0; min-height: 44px;
+  padding: 10px 12px; border-radius: 10px; cursor: pointer;
+  font-family: inherit; font-size: 14px; font-weight: 700; line-height: 1.2;
+}
+.fva-pa-btn:focus-visible, #fva-voice-btn:focus-visible, .fva-pa-dismiss:focus-visible { outline: 2px solid var(--fv-brand); outline-offset: 2px; }
+.fva-pa-btn-primary { background: var(--fv-brand); border: 1px solid var(--fv-brand); color: white; }
+.fva-pa-btn:disabled { opacity: 0.55; cursor: default; }
+.fva-pa-card-error { font-size: 12px; color: var(--fv-note-ink); margin-top: 8px; line-height: 1.4; }
+.fva-pa-dismiss {
+  position: absolute; top: 4px; right: 6px;
+  background: none; border: none; color: var(--fv-muted);
+  font-size: 18px; line-height: 1; cursor: pointer; padding: 6px; min-width: 32px; min-height: 32px;
+}
+.fva-pa-card:has(.fva-pa-dismiss) .fva-pa-card-text { padding-right: 28px; }
+
+/* Live voice controls */
+#fva-voice-btn {
+  background: var(--fv-panel); color: var(--fv-ink);
+  border: 1px solid var(--fv-line); border-radius: 50%;
+  width: 40px; height: 40px; min-width: 40px; cursor: pointer;
+  font-size: 18px; flex-shrink: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#fva-voice-btn.active { background: var(--fv-brand); border-color: var(--fv-brand); color: white; }
+#fva-voice-btn.listening { animation: fva-voice-pulse 1.4s ease-in-out infinite; }
+@keyframes fva-voice-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.12); opacity: 0.78; }
+}
+#fva-voice-chip {
+  align-self: flex-start; box-sizing: border-box; max-width: calc(100% - 32px);
+  margin: 0 16px 8px; padding: 5px 12px; border-radius: 999px;
+  background: var(--fv-note-bg); color: var(--fv-note-ink);
+  border: 1px solid var(--fv-card-line);
+  font-size: 12px; font-weight: 700; line-height: 1.4;
+}
+
+/* Reduced motion: no entry animation, no dot bounce, no smooth scrolling, no mic pulse */
+@media (prefers-reduced-motion: reduce) {
+  .fva-msg, .fva-mode-note, .fva-proposal-card, .fva-pa-card, #fva-chat-invite { animation: none !important; }
+  .fva-msg.typing .tdot { animation: none !important; transform: none !important; opacity: 1 !important; }
+  #fva-voice-btn.listening { animation: none !important; transform: none !important; opacity: 1 !important; }
+  #fva-chat-messages { scroll-behavior: auto !important; }
+  #fva-chat-btn, .fva-star, .fva-quick-btn, .fva-proposal-btn, #fva-voice-btn { transition: none !important; }
+}
