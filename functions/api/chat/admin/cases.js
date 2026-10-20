@@ -4,7 +4,7 @@
 // GET  /api/chat/admin/cases?caseId=xxx      -> full case: transcript, status
 //        history (audit trail) and internal notes
 // POST /api/chat/admin/cases                 -> { caseId, action, ... }
-//        actions: resolve | close | reopen | assign | priority | category | note
+//        actions: resolve | close | reopen | assign | priority | category | note | reply
 //
 // Auth: the platform admin key (same key the Chat Center already uses), or
 // a signed-in platform admin user. Internal notes and assignment live only
@@ -13,7 +13,7 @@ import { getAuthContext } from '../../_utils.js';
 import {
   ensureCaseTables, listCases, getCaseDetail, getCaseById,
   setCaseStatus, assignCase, setCasePriority, setCaseCategory, addCaseNote,
-  teamCaseView, listAssignableStaff, CASE_PRIORITIES, CASE_CATEGORIES,
+  teamCaseView, listAssignableStaff, mirrorAgentReply, CASE_PRIORITIES, CASE_CATEGORIES,
 } from '../_cases.js';
 
 async function authorize(context) {
@@ -120,6 +120,28 @@ export async function onRequestPost(context) {
         return Response.json({ error: 'Empty note' }, { status: 400 });
       }
       note = await addCaseNote(db, kase, { authorName: actor.name, authorId: actor.id, note: String(body.note).trim() });
+    } else if (action === 'reply') {
+      const message = String(body.message || '').trim().slice(0, 2000);
+      if (!message) {
+        return Response.json({ error: 'Empty message' }, { status: 400 });
+      }
+      const now = Date.now();
+      await db.prepare(
+        'INSERT INTO chat_messages (session_id, sender, sender_name, message, created_at) VALUES (?, ?, ?, ?, ?)'
+      ).bind(kase.session_id, 'agent', actor.name, message, now).run();
+      try {
+        await db.prepare(
+          'UPDATE chat_sessions SET last_activity = ?, agent_typing = 0 WHERE id = ?'
+        ).bind(now, kase.session_id).run();
+      } catch (e) { /* a missing session row must not block the case reply */ }
+      await mirrorAgentReply(db, kase.session_id, { senderName: actor.name, message, at: now });
+      const reread = await getCaseById(db, caseId);
+      updated = reread || kase;
+      return Response.json({
+        ok: true,
+        case: teamCaseView(updated),
+        message: { sender: 'agent', sender_name: actor.name, message, created_at: now },
+      });
     } else {
       return Response.json({ error: 'Unknown action' }, { status: 400 });
     }
