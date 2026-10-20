@@ -22,6 +22,23 @@ export function supportCaseRetentionCutoff(now = Date.now()) {
   return null; // account_lifetime: no time-based cutoff
 }
 
+// chat_messages was defined by the original FVAChat migration (0030)
+// WITHOUT a sender_name column, but the team reply writers (the case desk
+// and the per-session team chat) insert the agent's display name there.
+// On any deployment whose chat_messages came from 0030 the column is
+// missing, and every team reply died on that insert with a 500. Lazy
+// self-heal, the same pattern the AI assistant settings use: attempt the
+// ADD COLUMN once per isolate and swallow the duplicate-column error.
+// Migration 0059 records the same change for console-applied databases.
+let senderNameReady = false;
+export async function ensureChatSenderName(db) {
+  if (senderNameReady) return;
+  senderNameReady = true;
+  try {
+    await db.prepare('ALTER TABLE chat_messages ADD COLUMN sender_name TEXT').run();
+  } catch (e) { /* column already exists on this deployment */ }
+}
+
 export const CASE_STATUSES = ['open', 'resolved', 'closed'];
 export const CASE_PRIORITIES = ['normal', 'high', 'urgent'];
 export const CASE_CATEGORIES = ['billing', 'account', 'technical', 'other'];

@@ -11,7 +11,7 @@
 // behind this endpoint; the client endpoint never returns them.
 import { getAuthContext } from '../../_utils.js';
 import {
-  ensureCaseTables, listCases, getCaseDetail, getCaseById,
+  ensureCaseTables, ensureChatSenderName, listCases, getCaseDetail, getCaseById,
   setCaseStatus, assignCase, setCasePriority, setCaseCategory, addCaseNote,
   teamCaseView, listAssignableStaff, mirrorAgentReply, CASE_PRIORITIES, CASE_CATEGORIES,
 } from '../_cases.js';
@@ -126,6 +126,7 @@ export async function onRequestPost(context) {
         return Response.json({ error: 'Empty message' }, { status: 400 });
       }
       const now = Date.now();
+      await ensureChatSenderName(db);
       await db.prepare(
         'INSERT INTO chat_messages (session_id, sender, sender_name, message, created_at) VALUES (?, ?, ?, ?, ?)'
       ).bind(kase.session_id, 'agent', actor.name, message, now).run();

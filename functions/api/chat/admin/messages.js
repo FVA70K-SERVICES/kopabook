@@ -7,7 +7,7 @@
 // Every session is verified to belong to the caller's business site.
 import { getAuthContext } from '../../_utils.js';
 import { canUseChatCenter, businessSiteId } from '../_access.js';
-import { mirrorAgentReply, closeCaseForSession } from '../_cases.js';
+import { mirrorAgentReply, closeCaseForSession, ensureChatSenderName } from '../_cases.js';
 
 async function authorize(request, env) {
   const url = new URL(request.url);
@@ -87,6 +87,7 @@ export async function onRequestPost({ request, env }) {
     }
     const now = Date.now();
     const senderName = a.user ? (a.user.name || a.user.email || 'Agent') : 'Agent';
+    await ensureChatSenderName(db);
     await db.prepare(
       'INSERT INTO chat_messages (session_id, sender, sender_name, message, created_at) VALUES (?, ?, ?, ?, ?)'
     ).bind(sid, 'agent', senderName, message.trim().slice(0, 2000), now).run();
