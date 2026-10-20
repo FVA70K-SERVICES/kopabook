@@ -1,10 +1,9 @@
 // GET /api/projects/shared — projects the signed-in user is invited to
 // as a member. Works on any account (free included, no business needed).
-// Only projects whose owner's business is on a paid tier are included.
+// Projects is open to every plan, so no owner-tier filter applies.
 // Members see ONLY these projects, never the rest of the business.
 import { json, getAuthContext } from "../_utils";
 import { projectTotals } from "./_lib";
-import { getBusinessOwnerTier } from "../billing";
 
 export async function onRequestGet(context) {
   try {
@@ -26,8 +25,6 @@ export async function onRequestGet(context) {
 
     const projects = [];
     for (const p of rows.results || []) {
-      const { tier } = await getBusinessOwnerTier(db, p.business_id);
-      if (!["pro", "solo", "starter"].includes(tier)) continue;
       projects.push({ ...p, totals: await projectTotals(db, p.id) });
     }
     return json({ ok: true, projects });
