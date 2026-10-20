@@ -604,6 +604,13 @@ const IPHONE_STEPS = [
   ["Tap Add.", "KopaBook now sits on your home screen. Tap it any time to open your shop."],
 ];
 
+const WINDOWS_STEPS = [
+  ["Tap Download for Windows.", "Use the green button above. The file is about 89 MB, so give it a little time on a slow connection."],
+  ["Open the downloaded file.", "Open KopaBook-Portable-1.0.exe from your Downloads folder."],
+  ["If Windows shows a blue warning, tap \u201CMore info\u201D.", "The warning says \u201CWindows protected your PC\u201D. Tap \u201CMore info\u201D, then \u201CRun anyway\u201D. The app is safe; this prompt appears because the app is new and not yet in the Microsoft Store."],
+  ["Sign in.", "KopaBook opens in its own window. Sign in and start recording, no browser needed."],
+];
+
 function DlSteps({ steps }) {
   return (
     <div className="steps dl-steps">
@@ -625,7 +632,7 @@ export function DownloadPage() {
         <div className="wrap">
           <span className="eyebrow">Get the app</span>
           <h1>Get KopaBook on your phone</h1>
-          <p className="lead">Put KopaBook on your home screen and open your shop records in one tap. Pick your phone below and follow the short steps.</p>
+          <p className="lead">Put KopaBook on your phone or computer and open your shop records in one tap. Pick your device below and follow the short steps.</p>
         </div>
       </section>
       <section className="section" style={{ paddingTop: 4 }}>
@@ -641,6 +648,17 @@ export function DownloadPage() {
               </div>
               <DlSteps steps={ANDROID_STEPS} />
               <div className="dl-note">Coming soon to the Google Play Store.</div>
+            </div>
+            <div className="card dl-card">
+              <div className="icon">{"\uD83E\uDE9F"}</div>
+              <h3>Windows (PC)</h3>
+              <p>KopaBook also runs on your Windows computer in its own window, no browser needed. The app is portable: download it, open it, and sign in. No installation.</p>
+              <div style={{ marginTop: 18 }}>
+                <a className="btn btn-primary btn-block" href="https://github.com/FVA70K-SERVICES/kopabook/releases/download/v1.0/KopaBook-Portable-1.0.exe">Download for Windows</a>
+                <div className="dl-meta">Version 1.0 · About 89 MB · Windows 10 and 11 · Free</div>
+              </div>
+              <DlSteps steps={WINDOWS_STEPS} />
+              <div className="dl-note">Coming later to the Microsoft Store.</div>
             </div>
             <div className="card dl-card">
               <div className="icon">{"\uD83C\uDF4E"}</div>
@@ -666,12 +684,12 @@ function GetAppBand() {
     <section className="section section-band" style={{ borderTop: "1px solid var(--line)", padding: "44px 0" }}>
       <div className="wrap" style={{ textAlign: "center" }}>
         <h2>KopaBook now has an Android app</h2>
-        <p className="sub">Download it free and keep your shop on your home screen. On iPhone, add KopaBook from Safari in under a minute.</p>
+        <p className="sub">Download it free and keep your shop on your home screen. On Windows, KopaBook runs in its own window. On iPhone, add KopaBook from Safari in under a minute.</p>
         <div className="hero-cta">
           <a href="/downloads/kopabook.apk" className="btn btn-primary" download>Download for Android</a>
           <a href="/download" className="btn btn-secondary">See install steps</a>
         </div>
-        <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14 }}>Version 1.0 · About 4.8 MB · Coming soon to the Google Play Store</p>
+        <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14 }}>Version 1.0 · About 4.8 MB · Coming soon to the Google Play Store · <a href="/download">Get the Windows app</a></p>
       </div>
     </section>
   );
