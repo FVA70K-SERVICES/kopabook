@@ -116,3 +116,40 @@
   font-weight: 700; font-size: 14px;
 }
 .fva-action-btn:hover { background: #1da851; }
+
+/* Merged in-app chat: two doors (Ask Kopa AI / Kopa Support), one thread */
+#fva-mode-tabs {
+  display: flex; gap: 8px; padding: 10px 12px 0; background: #f8faf9;
+}
+#fva-mode-tabs button {
+  flex: 1; padding: 9px 6px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--brand, #1a6b3c); background: white;
+  color: var(--brand, #1a6b3c); font-size: 13px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#fva-mode-tabs button.active { background: var(--brand, #1a6b3c); color: white; }
+#fva-support-status {
+  padding: 8px 16px 0; background: #f8faf9;
+  font-size: 12.5px; font-weight: 600; color: #475569;
+}
+#fva-door-picker { padding: 14px 14px 4px; background: #f8faf9; }
+.fva-door-title { font-weight: 800; font-size: 15px; margin-bottom: 10px; color: #14231a; }
+.fva-door-btn {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: white; border: 1px solid #dbe7dd; border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 10px; font-family: inherit;
+}
+.fva-door-btn strong { display: block; font-size: 14.5px; color: #14231a; margin-bottom: 2px; }
+.fva-door-btn span { display: block; font-size: 13px; line-height: 1.45; color: #5d6f63; }
+.fva-door-btn:hover { border-color: var(--brand, #1a6b3c); }
+.fva-door-note { font-size: 12px; color: #64748b; padding: 2px 2px 8px; line-height: 1.45; }
+.fva-mode-note {
+  align-self: center; text-align: center; max-width: 92%;
+  font-size: 12px; color: #475569; background: #eef4ee;
+  border-radius: 999px; padding: 6px 12px; line-height: 1.4;
+}
+.fva-msg.system {
+  align-self: center; background: #eef4ee; color: #475569;
+  font-size: 12.5px; text-align: center; border-radius: 999px;
+}
+.fva-switch-btn { border: none; cursor: pointer; font-family: inherit; }

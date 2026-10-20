@@ -19,6 +19,37 @@
   let rated = false;
   let proactiveShown = sessionStorage.getItem('fva_proactive_' + SITE_ID) === '1';
 
+  // Merged in-app chat (KopaBook only): one thread, two doors.
+  // 'ai' = Ask Kopa AI (the shop's AI assistant), 'support' = Kopa Support
+  // (platform help from the FVA70K team). Signed-out visitors never see this.
+  const IS_KOPABOOK = SITE_ID === 'kopabook';
+  let chatMode = '';
+  try { chatMode = localStorage.getItem('fva_chat_mode_kopabook') || ''; } catch (e) {}
+  if (chatMode !== 'ai' && chatMode !== 'support') chatMode = '';
+  let supportState = null;
+  let doorPickerShown = false;
+
+  function routeSide() {
+    const p = window.location.pathname;
+    if (p === '/app/chat/ai') return 'ai';
+    if (p === '/app/chat/support') return 'support';
+    if (p === '/app/chat') return 'home';
+    return null;
+  }
+  function chatRouteFor(mode) {
+    return mode === 'ai' ? '/app/chat/ai' : mode === 'support' ? '/app/chat/support' : '/app/chat';
+  }
+  function modeName(mode) { return mode === 'ai' ? 'Ask Kopa AI' : 'Kopa Support'; }
+  function botLabel() {
+    if (IS_KOPABOOK && isOwnerMode()) return chatMode === 'ai' ? 'Kopa AI' : 'Kopa Bot';
+    return BOT_NAME;
+  }
+  function navigateChatRoute(mode) {
+    const target = chatRouteFor(mode);
+    if (window.location.pathname !== target) { window.location.href = target; return true; }
+    return false;
+  }
+
   const EMOJIS = ['😀','😁','😂','🤣','😊','😍','👍','👏','🙏','❤️','🔥','✅','❌','👋','🎉','💯','🤔','😢','😮','👀'];
 
   // Inject CSS
@@ -54,7 +85,7 @@
   win.id = 'fva-chat-window';
   win.innerHTML =
     '<div id="fva-chat-header">' +
-      '<div><div class="title">' + escapeHtml(BUSINESS_NAME) + '</div>' +
+      '<div><div class="title" id="fva-chat-title">' + escapeHtml(BUSINESS_NAME) + '</div>' +
       '<div class="status"><span class="dot"></span><span id="fva-chat-status">Online</span></div></div>' +
       '<div style="display:flex;gap:8px;align-items:center;">' +
         '<button id="fva-chat-sound" aria-label="Toggle sound" title="Sound on/off" style="background:none;border:none;color:white;font-size:18px;cursor:pointer;">🔔</button>' +
@@ -78,7 +109,13 @@
   invite.style.display = 'none';
   document.body.appendChild(invite);
 
-  btn.addEventListener('click', () => { isOpen ? closeChat() : openChat(); });
+  btn.addEventListener('click', () => {
+    if (isOpen) { closeChat(); return; }
+    // In the signed-in app, the chat button routes to the merged chat home
+    // (the two doors) unless we are already on a chat route.
+    if (IS_KOPABOOK && isOwnerMode() && !routeSide()) { navigateChatRoute('home'); return; }
+    openChat();
+  });
   win.querySelector('#fva-chat-close').addEventListener('click', closeChat);
   win.querySelector('#fva-chat-sound').addEventListener('click', toggleSound);
   win.querySelector('#fva-chat-menu').addEventListener('click', toggleMenu);
@@ -108,14 +145,134 @@
     else if (action === 'whatsapp') window.open('https://wa.me/2348130244617', '_blank');
   }
 
-  function openChat() {
+  function openChat(requestedMode) {
+    if (IS_KOPABOOK && isOwnerMode()) {
+      const side = routeSide();
+      if (requestedMode === 'ai' || requestedMode === 'support') setChatMode(requestedMode, true);
+      else if (side === 'ai' || side === 'support') setChatMode(side, true);
+    }
     isOpen = true;
     win.classList.add('open');
     btn.innerHTML = '×<span id="fva-chat-badge">0</span>';
     unread = 0; updateBadge();
     invite.style.display = 'none';
-    if (!sessionId) { showNamePrompt(); }
+    if (!sessionId) {
+      // Signed-in owners never see the public name prompt: the server
+      // already knows who they are.
+      if (IS_KOPABOOK && isOwnerMode()) { startSession(); }
+      else { showNamePrompt(); }
+    }
     else { showChatUI(); startPolling(); }
+  }
+
+  function setChatMode(mode, silent) {
+    if (mode !== 'ai' && mode !== 'support') return;
+    chatMode = mode;
+    try { localStorage.setItem('fva_chat_mode_kopabook', mode); } catch (e) {}
+    updateHeaderPersona();
+    renderModeTabs();
+    if (!silent) {
+      appendModeNote('You are now talking to ' + modeName(mode) + '. Your conversation stays here.');
+      showInitialQuickReplies();
+    }
+  }
+
+  function switchMode(mode) {
+    if (!IS_KOPABOOK || !isOwnerMode()) return;
+    if (mode === chatMode) return;
+    setChatMode(mode, false);
+    // Keep the address bar on the clean route for the active side.
+    const target = chatRouteFor(mode);
+    if (routeSide() && window.location.pathname !== target) {
+      try { window.history.pushState({}, '', target); } catch (e) {}
+    }
+    const dp = body.querySelector('#fva-door-picker');
+    if (dp) dp.style.display = 'none';
+  }
+
+  function updateHeaderPersona() {
+    const title = win.querySelector('#fva-chat-title');
+    const status = win.querySelector('#fva-chat-status');
+    if (!title) return;
+    if (IS_KOPABOOK && isOwnerMode()) {
+      title.textContent = chatMode ? modeName(chatMode) : 'Chat';
+      if (status) {
+        status.textContent = chatMode === 'ai'
+          ? 'Your shop assistant, automated'
+          : chatMode === 'support' ? supportStatusText() : 'Choose a side to start';
+      }
+    } else {
+      title.textContent = BUSINESS_NAME;
+    }
+  }
+
+  function supportStatusText() {
+    if (!supportState) return 'Kopa Bot is answering';
+    if (supportState.agentName && (supportState.handledBy === 'human' || supportState.assignedTo)) {
+      return supportState.agentName + ' from the KopaBook team has joined';
+    }
+    if (supportState.handledBy === 'human' || supportState.assignedTo) {
+      return 'A person from the KopaBook team has joined';
+    }
+    if (supportState.needsHuman) return 'Waiting for a human from the KopaBook team';
+    if (supportState.status === 'closed') return 'Kopa Bot is answering';
+    return 'Kopa Bot is answering';
+  }
+
+  function renderModeTabs() {
+    const tabs = body.querySelector('#fva-mode-tabs');
+    if (!tabs) return;
+    if (!(IS_KOPABOOK && isOwnerMode())) { tabs.style.display = 'none'; return; }
+    tabs.style.display = 'flex';
+    tabs.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-mode') === chatMode);
+    });
+    const st = body.querySelector('#fva-support-status');
+    if (st) {
+      if (chatMode === 'support') { st.style.display = 'block'; st.textContent = supportStatusText(); }
+      else st.style.display = 'none';
+    }
+  }
+
+  function showDoorPicker() {
+    const dp = body.querySelector('#fva-door-picker');
+    if (!dp || doorPickerShown) return;
+    doorPickerShown = true;
+    dp.style.display = 'block';
+    dp.querySelectorAll('.fva-door-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        dp.style.display = 'none';
+        setChatMode(b.getAttribute('data-mode'), false);
+        const target = chatRouteFor(chatMode);
+        if (routeSide() && window.location.pathname !== target) {
+          try { window.history.pushState({}, '', target); } catch (e) {}
+        }
+      });
+    });
+  }
+
+  function showInitialQuickReplies() {
+    if (!(IS_KOPABOOK && isOwnerMode()) || !chatMode) return;
+    if (chatMode === 'ai') showQuickReplies(['Record a sale', 'Record an expense', "Today's sales", 'Who owes me']);
+    else showQuickReplies(['Pricing', 'Features', 'How to start', 'Talk to human']);
+  }
+
+  function afterOwnerUI() {
+    if (!(IS_KOPABOOK && isOwnerMode())) return;
+    updateHeaderPersona();
+    renderModeTabs();
+    if (!chatMode) showDoorPicker();
+    else showInitialQuickReplies();
+  }
+
+  function appendModeNote(text) {
+    const wrap = body.querySelector('#fva-chat-messages');
+    if (!wrap) return;
+    const div = document.createElement('div');
+    div.className = 'fva-mode-note';
+    div.textContent = text;
+    wrap.appendChild(div);
+    wrap.scrollTop = wrap.scrollHeight;
   }
 
   function closeChat() {
@@ -159,7 +316,8 @@
         body: JSON.stringify({
           name: visitorName, siteId: SITE_ID,
           page: window.location.href,
-          userAgent: navigator.userAgent.slice(0, 200)
+          userAgent: navigator.userAgent.slice(0, 200),
+          ownerCtx: getOwnerCtx() || undefined
         })
       });
       const data = await res.json();
@@ -175,6 +333,17 @@
 
   function showChatUI() {
     body.innerHTML =
+      '<div id="fva-mode-tabs" style="display:none;">' +
+        '<button data-mode="ai">Ask Kopa AI</button>' +
+        '<button data-mode="support">Kopa Support</button>' +
+      '</div>' +
+      '<div id="fva-support-status" style="display:none;"></div>' +
+      '<div id="fva-door-picker" style="display:none;">' +
+        '<div class="fva-door-title">Who do you want to talk to?</div>' +
+        '<button class="fva-door-btn" data-mode="ai"><strong>Ask Kopa AI</strong><span>Your shop assistant. Records sales and expenses, and answers from your own records.</span></button>' +
+        '<button class="fva-door-btn" data-mode="support"><strong>Kopa Support</strong><span>Chat with the FVA70K team about KopaBook itself. Quick platform answers first, a real person when you need one.</span></button>' +
+        '<div class="fva-door-note">One chat, one history. This chat keeps the last 24 hours, shared across both sides.</div>' +
+      '</div>' +
       '<div id="fva-chat-messages"></div>' +
       '<div id="fva-typing">Someone is typing...</div>' +
       '<div id="fva-chat-quick"></div>' +
@@ -217,8 +386,14 @@
       typingTimeout = setTimeout(() => sendTyping(false), 2000);
     });
 
+    doorPickerShown = false;
+    const tabsEl = body.querySelector('#fva-mode-tabs');
+    if (tabsEl) tabsEl.querySelectorAll('button').forEach(b => {
+      b.addEventListener('click', () => switchMode(b.getAttribute('data-mode')));
+    });
     loadHistory();
     poll();
+    afterOwnerUI();
   }
 
   // Load full chat history on open
@@ -230,7 +405,7 @@
       (data.messages || []).forEach(m => {
         if (m.id > lastMsgId) {
           lastMsgId = m.id;
-          appendMsg(m.sender, m.message, m.created_at, null, true);
+          appendMsg(m.sender, m.message, m.created_at, null, true, m.sender_name);
         }
       });
       // Scroll to bottom
@@ -247,6 +422,10 @@
 
   // Owner context: set by host page if user is logged in as owner/staff
   // window.FVAChatOwner = { businessId, userId, userName, userRole }
+  function isOwnerMode() {
+    return IS_KOPABOOK && !!getOwnerCtx();
+  }
+
   function getOwnerCtx() {
     try {
       if (window.FVAChatOwner && window.FVAChatOwner.businessId && window.FVAChatOwner.userId) {
@@ -257,6 +436,11 @@
   }
 
   async function sendMessage(text) {
+    if (IS_KOPABOOK && isOwnerMode() && !chatMode) {
+      showDoorPicker();
+      appendModeNote('Choose Ask Kopa AI or Kopa Support first, then send that again.');
+      return;
+    }
     const msgId = 'local_' + Date.now();
     appendMsg('visitor', text, Date.now(), msgId, false);
     showBotTyping();
@@ -264,6 +448,7 @@
       const payload = { sessionId, sender: 'visitor', message: text, siteId: SITE_ID };
       const ownerCtx = getOwnerCtx();
       if (ownerCtx) payload.ownerCtx = ownerCtx;
+      if (IS_KOPABOOK && ownerCtx) payload.mode = chatMode || 'support';
       const res = await fetch(API + '/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -275,6 +460,10 @@
       if (data.ok) markRead(msgId);
       if (data.botReply && data.botReply.quickReplies && data.botReply.quickReplies.length) {
         showQuickReplies(data.botReply.quickReplies);
+      }
+      if (data.botReply && data.botReply.escalate) {
+        supportState = Object.assign({}, supportState || {}, { needsHuman: true });
+        renderModeTabs(); updateHeaderPersona();
       }
       // Handle action buttons (e.g. WhatsApp order link)
       if (data.botReply && data.botReply.action) {
@@ -315,22 +504,40 @@
 
   function showActionButton(action) {
     const wrap = body.querySelector('#fva-chat-messages');
-    if (!wrap) return;
+    if (!wrap || !action) return;
     const div = document.createElement('div');
     div.className = 'fva-action-wrap';
-    div.innerHTML = '<a href="' + escapeHtml(action.url) + '" target="_blank" class="fva-action-btn">' + escapeHtml(action.label) + '</a>';
+    if (action.type === 'switch' && (action.mode === 'ai' || action.mode === 'support')) {
+      // Cross-door suggestion: one tap to the other side, same thread.
+      const btn = document.createElement('button');
+      btn.className = 'fva-action-btn fva-switch-btn';
+      btn.textContent = action.label || ('Switch to ' + modeName(action.mode));
+      btn.addEventListener('click', () => {
+        if (routeSide()) switchMode(action.mode);
+        else navigateChatRoute(action.mode);
+      });
+      div.appendChild(btn);
+    } else if (action.url) {
+      div.innerHTML = '<a href="' + escapeHtml(action.url) + '" target="_blank" class="fva-action-btn">' + escapeHtml(action.label) + '</a>';
+    } else {
+      return;
+    }
     wrap.appendChild(div);
     wrap.scrollTop = wrap.scrollHeight;
   }
 
-  function appendMsg(sender, text, at, localId, isRead) {
+  function appendMsg(sender, text, at, localId, isRead, senderName) {
     const wrap = body.querySelector('#fva-chat-messages');
     if (!wrap) return;
     const div = document.createElement('div');
     div.className = 'fva-msg ' + sender;
     if (localId) div.setAttribute('data-local-id', localId);
     const time = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    let html = escapeHtml(text) + '<div class="time">' + time;
+    let html = '';
+    if (sender === 'agent' && senderName) {
+      html += '<div class="bot-label">👤 ' + escapeHtml(senderName) + '</div>';
+    }
+    html += escapeHtml(text) + '<div class="time">' + time;
     if (sender === 'visitor') {
       html += ' <span class="read-receipt' + (isRead ? ' read' : '') + '">' + (isRead ? '✓✓' : '✓') + '</span>';
     }
@@ -346,7 +553,7 @@
     const div = document.createElement('div');
     div.className = 'fva-msg bot';
     const time = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    div.innerHTML = '<div class="bot-label">🤖 ' + escapeHtml(BOT_NAME) + '</div>' + formatMsg(text) + '<div class="time">' + time + '</div>';
+    div.innerHTML = '<div class="bot-label">🤖 ' + escapeHtml(botLabel()) + '</div>' + formatMsg(text) + '<div class="time">' + time + '</div>';
     wrap.appendChild(div);
     wrap.scrollTop = wrap.scrollHeight;
   }
@@ -378,6 +585,12 @@
         statusEl.textContent = data.agentsOnline ? 'Online' : 'Away - ' + BOT_NAME + ' will help';
       }
 
+      // Merged chat: keep the honest support state current.
+      if (data.supportState) {
+        supportState = data.supportState;
+        if (IS_KOPABOOK && isOwnerMode()) { renderModeTabs(); updateHeaderPersona(); }
+      }
+
       (data.messages || []).forEach(m => {
         if (m.id > lastMsgId) {
           lastMsgId = m.id;
@@ -393,7 +606,8 @@
             }
           }
           if (m.sender === 'bot') appendBotMsg(m.message, m.created_at);
-          else appendMsg(m.sender, m.message, m.created_at, null, m.sender === 'visitor' ? !!m.read_by_agent : false);
+          else if (m.sender === 'system') appendModeNote(m.message);
+          else appendMsg(m.sender, m.message, m.created_at, null, m.sender === 'visitor' ? !!m.read_by_agent : false, m.sender_name);
 
           if ((m.sender === 'agent' || m.sender === 'bot') && m.sender !== 'visitor') {
             playSound();
@@ -470,6 +684,7 @@
   // Proactive invite: show after 30s if visitor hasn't chatted
   if (!proactiveShown && !sessionId) {
     setTimeout(() => {
+      if (IS_KOPABOOK && isOwnerMode()) return;
       if (!isOpen && !sessionId) {
         invite.style.display = 'block';
         sessionStorage.setItem('fva_proactive_' + SITE_ID, '1');
@@ -483,5 +698,26 @@
     open: openChat,
     close: closeChat,
     send: sendMessage,
+    setMode: switchMode,
+    getMode: () => chatMode,
   };
+
+  // Clean routes: /app/chat/ai and /app/chat/support land on their side.
+  // The owner context arrives a moment after the app session loads, so
+  // wait briefly for it before opening.
+  (function autoOpenFromRoute() {
+    const side = routeSide();
+    if (!IS_KOPABOOK || (side !== 'ai' && side !== 'support')) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      tries++;
+      if (isOwnerMode()) {
+        clearInterval(t);
+        setChatMode(side, true);
+        openChat(side);
+      } else if (tries > 30) {
+        clearInterval(t);
+      }
+    }, 200);
+  })();
 })();
