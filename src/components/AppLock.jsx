@@ -305,14 +305,90 @@ function LockScreen({ onUnlocked }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Session memory for the gate.
+//
+// Navigation in this app is a full page load per screen, so a gate that
+// only remembers "unlocked" in component state asks for the PIN on every
+// single page. The bank model is: pass the door ONCE per browser
+// session, then ask again only after a genuine background absence at
+// least as long as the account's chosen minutes. sessionStorage is
+// exactly that lifetime: it survives page loads and dies with the
+// browser session, so a true cold open always asks.
+//
+// The passed flag is keyed to the account id, so a different account
+// signing in inside the same browser session never inherits it. The
+// hidden-at stamp records when the page last went into the background;
+// when the browser kills and reloads the page while the user is away,
+// the stamp is how the fresh page knows how long the absence really
+// was, instead of treating every reload as a cold open.
+const SESSION_PASSED_USER_KEY = "kopabook:app-lock-passed-user";
+const SESSION_HIDDEN_AT_KEY = "kopabook:app-lock-hidden-at";
+
+// No background absence shorter than this ever re-locks, whatever the
+// account's setting says (even "Immediately"): an app-switcher peek,
+// the notification shade, a system dialog or an incoming call is not
+// leaving the app. "Immediately" therefore means "the first genuine
+// absence", never "any flicker".
+export const MIN_BACKGROUND_AWAY_MS = 30 * 1000;
+
+export function effectiveRelockMs(relockMs) {
+  return Math.max(relockMs, MIN_BACKGROUND_AWAY_MS);
+}
+
+function sessionPassedFor(userId) {
+  if (userId == null) return false;
+  try {
+    return window.sessionStorage.getItem(SESSION_PASSED_USER_KEY) === String(userId);
+  } catch (e) {
+    return false;
+  }
+}
+
+function setSessionPassed(userId, passed) {
+  if (userId == null) return;
+  try {
+    if (passed) window.sessionStorage.setItem(SESSION_PASSED_USER_KEY, String(userId));
+    else window.sessionStorage.removeItem(SESSION_PASSED_USER_KEY);
+  } catch (e) {}
+}
+
+function readHiddenAt() {
+  try {
+    const n = Number(window.sessionStorage.getItem(SESSION_HIDDEN_AT_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeHiddenAt(ts) {
+  try {
+    if (ts) window.sessionStorage.setItem(SESSION_HIDDEN_AT_KEY, String(ts));
+    else window.sessionStorage.removeItem(SESSION_HIDDEN_AT_KEY);
+  } catch (e) {}
+}
+
 // Wraps the signed-in app. On cold open with the lock on, the app waits
-// behind the lock screen; when the app returns from the background
-// after at least the account's chosen re-lock time away, the lock
-// screen covers it again with every page and its state exactly as it
-// was left. Shorter absences, and any amount of time spent using the
-// app in the foreground, never lock it.
+// behind the lock screen; once the PIN is entered it holds for the
+// whole session, across every page navigation, until the app returns
+// from a genuine background absence at least as long as the account's
+// chosen re-lock time (and never for an absence under 30 seconds).
+// Then the lock screen covers the app again with every page and its
+// state exactly as it was left. Any amount of time spent using the app
+// in the foreground never locks it.
 export function AppLockGate({ session, children }) {
-  const [phase, setPhase] = useState("checking"); // checking | open | locked
+  const userId = session?.user?.id;
+  const [phase, setPhase] = useState(() => {
+    // A session that already passed the door starts open with no
+    // loading flash; the mount effect still re-checks the case where
+    // the stamped absence since then has grown long enough to lock.
+    const hiddenAt = readHiddenAt();
+    if (sessionPassedFor(userId) && !(hiddenAt && Date.now() - hiddenAt >= MIN_BACKGROUND_AWAY_MS)) {
+      return "open";
+    }
+    return "checking";
+  }); // checking | open | locked
   const hiddenAtRef = useRef(null);
   const engagedRef = useRef(false);
   // The account's current re-lock delay. Starts at the default and is
@@ -325,44 +401,101 @@ export function AppLockGate({ session, children }) {
   }, []);
 
   const engage = useCallback((source) => {
+    // Engaging always ends the session's free pass: the next opening
+    // must come through the PIN screen (or a settings announce).
+    setSessionPassed(userId, false);
     setPhase("locked");
     if (!engagedRef.current) {
       engagedRef.current = true;
       api.post("/api/auth/app-lock", { action: "lock", source }).catch(() => {});
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     let active = true;
     engagedRef.current = false;
     relockMsRef.current = BACKGROUND_LOCK_MS;
+    const hiddenAt = readHiddenAt();
+    writeHiddenAt(null);
+
+    if (sessionPassedFor(userId)) {
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      if (hiddenAt && away >= MIN_BACKGROUND_AWAY_MS) {
+        // The page was reloaded after a real absence (the browser may
+        // have killed it in the background). The absence counts only
+        // if it also meets the account's own minutes, read fresh.
+        api.get("/api/auth/app-lock")
+          .then((d) => {
+            if (!active) return;
+            applyState(d.appLock);
+            if (d.appLock && d.appLock.enabled && away >= effectiveRelockMs(relockMsRef.current)) {
+              engage("background");
+            } else {
+              setPhase("open");
+            }
+          })
+          .catch(() => { if (active) setPhase("open"); }); // a failed check never locks anyone out
+      } else {
+        // Same session, door already passed: this load is in-app
+        // navigation. Open at once; refresh the timer quietly so the
+        // background trigger stays current.
+        setPhase("open");
+        api.get("/api/auth/app-lock")
+          .then((d) => { if (active) applyState(d.appLock); })
+          .catch(() => {});
+      }
+      return () => { active = false; };
+    }
+
     api.get("/api/auth/app-lock")
       .then((d) => {
         if (!active) return;
         applyState(d.appLock);
         if (d.appLock && d.appLock.enabled) engage("cold_open");
-        else setPhase("open");
+        else {
+          // Nothing to prove (no PIN, or lock off): this session is in.
+          setSessionPassed(userId, true);
+          setPhase("open");
+        }
       })
       .catch(() => { if (active) setPhase("open"); }); // never lock a user out over a failed state check
     return () => { active = false; };
-  }, [session?.user?.id, engage, applyState]);
+  }, [userId, engage, applyState]);
 
   useEffect(() => {
-    function onAnnounced(e) { applyState(e && e.detail); }
+    function onAnnounced(e) {
+      applyState(e && e.detail);
+      // Announced states come from in-session PIN flows (setup, timer
+      // change, turn on/off) that only run inside the unlocked app, so
+      // the session counts as passed.
+      if (e && e.detail) setSessionPassed(userId, true);
+    }
     window.addEventListener(APP_LOCK_STATE_EVENT, onAnnounced);
     return () => window.removeEventListener(APP_LOCK_STATE_EVENT, onAnnounced);
-  }, [applyState]);
+  }, [applyState, userId]);
 
   useEffect(() => {
+    function stampHidden() {
+      // Only the first stamp counts: it marks when the user actually
+      // left. A pagehide arriving while the page is already hidden
+      // (the browser discarding it in the background) must not restart
+      // the absence clock.
+      if (hiddenAtRef.current != null) return;
+      const now = Date.now();
+      hiddenAtRef.current = now;
+      writeHiddenAt(now);
+    }
     function onVisibility() {
       if (document.visibilityState === "hidden") {
-        hiddenAtRef.current = Date.now();
+        stampHidden();
       } else if (document.visibilityState === "visible") {
-        const hiddenAt = hiddenAtRef.current;
+        const hiddenAt = hiddenAtRef.current != null ? hiddenAtRef.current : readHiddenAt();
         hiddenAtRef.current = null;
-        // The single background trigger: time away meets the account's
-        // own setting (0 = immediately, any backgrounding counts).
-        if (hiddenAt && Date.now() - hiddenAt >= relockMsRef.current) {
+        writeHiddenAt(null);
+        // The single background trigger: a genuine absence that meets
+        // the account's own setting, floored at 30 seconds so brief
+        // peeks and flickers never count, whatever the setting says.
+        if (hiddenAt && Date.now() - hiddenAt >= effectiveRelockMs(relockMsRef.current)) {
           api.get("/api/auth/app-lock")
             .then((d) => {
               applyState(d.appLock);
@@ -373,7 +506,14 @@ export function AppLockGate({ session, children }) {
       }
     }
     document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    // A page being unloaded (navigation, or the browser closing the
+    // tab in the background) also stamps the absence, so a later
+    // reload can tell a real absence from a plain navigation.
+    window.addEventListener("pagehide", stampHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", stampHidden);
+    };
   }, [engage, applyState]);
 
   if (phase === "checking") {
@@ -391,7 +531,7 @@ export function AppLockGate({ session, children }) {
     <>
       {children}
       {phase === "locked" && (
-        <LockScreen onUnlocked={(appLock) => { applyState(appLock); engagedRef.current = false; setPhase("open"); }} />
+        <LockScreen onUnlocked={(appLock) => { applyState(appLock); setSessionPassed(userId, true); writeHiddenAt(null); engagedRef.current = false; setPhase("open"); }} />
       )}
     </>
   );

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import AdminAiPanel from "../components/AdminAiPanel";
 
 // The merged chat home. One chat, two clear doors for every store, plus a
 // third door that only the platform owner ever sees:
@@ -130,7 +131,13 @@ export default function ChatPage({ side, session }) {
       )}
 
       {active === "admin" && (
-        <div id="admin-ai-root" data-platform-owner="true"></div>
+        <div id="admin-ai-root" data-platform-owner="true">
+          {/* The Admin AI panel itself. This mount follows the shell
+              contract: it renders only for the platform owner, and the
+              panel still re-verifies with the server on mount (a 403
+              shows a notice), so the client flag is never the gate. */}
+          <AdminAiPanel />
+        </div>
       )}
     </div>
   );
