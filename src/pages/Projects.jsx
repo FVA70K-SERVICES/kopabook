@@ -336,7 +336,11 @@ function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack })
           body.printing-project-report .app .main > div:first-child,
           body.printing-project-report .no-print { display: none !important; }
           body.printing-project-report .app .main { margin: 0; padding: 0; }
-          #kb-project-report { display: block !important; color: #000; }
+          body.printing-project-report { background: #fff !important; }
+          body.printing-project-report #fva-chat-btn,
+          body.printing-project-report #fva-chat-window,
+          body.printing-project-report #fva-chat-invite { display: none !important; }
+          #kb-project-report { display: block !important; color: #000; background: #fff; }
         }
         #kb-project-report { display: none; font-family: Georgia, serif; max-width: 720px; margin: 0 auto; }
         #kb-project-report h1 { font-size: 22px; margin-bottom: 2px; }

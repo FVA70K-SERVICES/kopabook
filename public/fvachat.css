@@ -417,6 +417,15 @@ html[data-theme="dark"] #fva-chat-invite {
   font-size: 12px; font-weight: 700; line-height: 1.4;
 }
 
+/* Print: the chat widget is screen-only UI. The launcher button (with its
+   unread badge), the chat window and the invite popup must never appear in
+   printed pages or exported PDFs (e.g. the Project Accountability Report),
+   on any page that prints. Every other widget element lives inside one of
+   these three roots, so hiding the roots hides the whole widget. */
+@media print {
+  #fva-chat-btn, #fva-chat-window, #fva-chat-invite { display: none !important; }
+}
+
 /* Reduced motion: no entry animation, no dot bounce, no smooth scrolling, no mic pulse */
 @media (prefers-reduced-motion: reduce) {
   .fva-msg, .fva-mode-note, .fva-proposal-card, .fva-pa-card, #fva-chat-invite { animation: none !important; }
