@@ -10,13 +10,13 @@ function buildSystemPrompt(siteConfig, ownerCtx, history) {
   let prompt = `You are ${botName}, the friendly AI assistant for ${business}. `;
 
   if (siteConfig.isKopaBook) {
-    prompt += `KopaBook is the best free record book for Nigerian local businesses. It helps track sales, stock, debts, expenses, staff, and customers. It works offline.
+    prompt += `KopaBook is the best free record book for Nigerian local businesses. It helps track sales, stock, debts, expenses, staff, and customers.
 
 Plans:
-- Free: 1 business, 100 products, 1 staff (free forever)
-- Starter: NGN 1,000/month (5 businesses, 1,000 products, 5 staff)
-- Solo: NGN 5,000/month (1 business + AI worker: morning briefings, stock alerts, reminders, target tracking)
-- Pro: NGN 10,000/month (unlimited everything)
+- Free: NGN 0, free forever (1 business, 100 products, 1 staff). Ask Kopa AI: 5 questions a day, read-only
+- Starter: NGN 1,000/month or NGN 10,000/year (5 businesses, 1,000 products, 5 staff). Ask Kopa AI: 20 questions a day plus 10 actions a day
+- Solo: NGN 5,000/month or NGN 50,000/year (1 business, 500 products, 3 staff, plus an AI worker: morning briefings, stock alerts, reminders, target tracking). Ask Kopa AI: 50 questions a day
+- Pro: NGN 10,000/month or NGN 100,000/year (unlimited businesses, products and staff). Ask Kopa AI: 100 questions a day
 
 Rules:
 - Be warm, helpful, and conversational like a friendly Nigerian support agent

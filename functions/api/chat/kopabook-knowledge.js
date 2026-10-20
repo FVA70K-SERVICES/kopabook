@@ -91,17 +91,17 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['price', 'cost', 'how much', 'pricing', 'fee', 'subscription', 'plan'],
-    answer: 'KopaBook is free to start! Here are the plans:\n\n- Free: 1 business, 100 products, 1 staff (free forever)\n- Starter: NGN 1,000/month (5 businesses, 1,000 products, 5 staff)\n- Solo: NGN 5,000/month (1 business plus an AI worker)\n- Pro: NGN 10,000/month (unlimited everything)\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want help picking one?',
+    answer: 'KopaBook is free to start! Here are the plans:\n\n- Free: NGN 0, free forever (1 business, 100 products, 1 staff). Ask Kopa AI: 5 questions a day, read-only\n- Starter: NGN 1,000/month or NGN 10,000/year (5 businesses, 1,000 products, 5 staff). Ask Kopa AI: 20 questions a day plus actions\n- Solo: NGN 5,000/month or NGN 50,000/year (1 business, 500 products, 3 staff, plus an AI worker). Ask Kopa AI: 50 questions a day\n- Pro: NGN 10,000/month or NGN 100,000/year (unlimited businesses, products and staff). Ask Kopa AI: 100 questions a day\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want help picking one?',
     quickReplies: ['Start free', 'What is Solo?', 'Talk to human']
   },
   {
     patterns: ['what is solo', 'solo plan', 'solo tier', 'ai worker'],
-    answer: 'Solo is for single-shop owners who want an AI assistant. For NGN 5,000/month, Kopa Bot becomes your worker: it briefs you every morning, alerts you when stock runs low, reminds you of tasks, and tracks your targets. Like having staff without the salary!',
+    answer: 'Solo is for single-shop owners who want an AI assistant. For NGN 5,000/month or NGN 50,000/year, Kopa Bot becomes your worker: it briefs you every morning, alerts you when stock runs low, reminds you of tasks, and tracks your targets. Like having staff without the salary!',
     quickReplies: ['Pricing', 'Start free', 'Talk to human']
   },
   {
     patterns: ['what is kopabook', 'about kopabook', 'what does', 'features'],
-    answer: 'KopaBook is the best free record book for Nigerian local businesses. Track sales, stock, debts, expenses, staff, and customers, all in one app. It works offline, so no network wahala! What would you like to know more about?',
+    answer: 'KopaBook is the best free record book for Nigerian local businesses. Track sales, stock, debts, expenses, staff, and customers, all in one app. What would you like to know more about?',
     quickReplies: ['Pricing', 'How to start', 'Talk to human']
   },
   {
@@ -141,7 +141,7 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['offline', 'no network', 'internet'],
-    answer: 'Yes! KopaBook works offline. Record your sales even without network, and everything syncs when you are back online. Perfect for shops with unstable network.',
+    answer: 'KopaBook is an online app, so you need an internet connection to record sales and see your latest figures. The good news: the app is light and fast, even on a small data connection.',
     quickReplies: ['Features', 'Pricing']
   },
   {
@@ -151,7 +151,7 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['staff', 'employee', 'role'],
-    answer: 'KopaBook has best-in-class staff roles. Add your staff and control what each person can see and do. Free plan: 1 staff, Starter: 5 staff, Pro: unlimited.',
+    answer: 'KopaBook has best-in-class staff roles. Add your staff and control what each person can see and do. Free plan: 1 staff, Starter: 5 staff, Solo: 3 staff, Pro: unlimited.',
     quickReplies: ['Pricing', 'Features']
   },
   {
@@ -161,7 +161,7 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['stock', 'inventory'],
-    answer: 'KopaBook tracks your stock levels automatically. When you make a sale, stock reduces. You get alerts before items run out. Free plan handles 100 products and services, Starter 1,000, Pro unlimited.',
+    answer: 'KopaBook tracks your stock levels automatically. When you make a sale, stock reduces. You get alerts before items run out. Free plan handles 100 products and services, Starter 1,000, Solo 500, Pro unlimited.',
     quickReplies: ['Pricing', 'Start free']
   },
   {
@@ -199,8 +199,8 @@ export const KOPABOOK_MEMORY = {
   services: [],
   faqs: [
     { q: 'Is KopaBook really free?', a: 'Yes! The free plan is free forever. 1 business, 100 products, 1 staff. No card required.' },
-    { q: 'Does it work offline?', a: 'Yes, KopaBook works offline and syncs when you are back online.' },
-    { q: 'Can I use it for multiple businesses?', a: 'Free: 1 business. Starter: 5. Pro: unlimited.' },
+    { q: 'Does it work offline?', a: 'KopaBook is an online app and needs an internet connection to save your records. It is light and fast, even on a small data connection.' },
+    { q: 'Can I use it for multiple businesses?', a: 'Free: 1 business. Starter: 5. Solo: 1. Pro: unlimited.' },
   ],
   ordering: { enabled: false },
   booking: { enabled: false }
