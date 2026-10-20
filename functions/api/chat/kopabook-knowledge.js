@@ -91,7 +91,7 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['price', 'cost', 'how much', 'pricing', 'fee', 'subscription', 'plan'],
-    answer: 'KopaBook is free to start! Here are the plans:\n\n- Free: 2 businesses, 100 products, 2 staff (free forever)\n- Starter: NGN 1,000/month (5 businesses, 1,000 products, 5 staff)\n- Solo: NGN 5,000/month (1 business plus an AI worker)\n- Pro: NGN 2,500/month (unlimited everything)\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want help picking one?',
+    answer: 'KopaBook is free to start! Here are the plans:\n\n- Free: 1 business, 100 products, 1 staff (free forever)\n- Starter: NGN 1,000/month (5 businesses, 1,000 products, 5 staff)\n- Solo: NGN 5,000/month (1 business plus an AI worker)\n- Pro: NGN 10,000/month (unlimited everything)\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want help picking one?',
     quickReplies: ['Start free', 'What is Solo?', 'Talk to human']
   },
   {
@@ -151,7 +151,7 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['staff', 'employee', 'role'],
-    answer: 'KopaBook has best-in-class staff roles. Add your staff and control what each person can see and do. Free plan: 2 staff, Starter: 5 staff, Pro: unlimited.',
+    answer: 'KopaBook has best-in-class staff roles. Add your staff and control what each person can see and do. Free plan: 1 staff, Starter: 5 staff, Pro: unlimited.',
     quickReplies: ['Pricing', 'Features']
   },
   {
@@ -198,9 +198,9 @@ export const KOPABOOK_MEMORY = {
   products: [],
   services: [],
   faqs: [
-    { q: 'Is KopaBook really free?', a: 'Yes! The free plan is free forever. 2 businesses, 100 products, 2 staff. No card required.' },
+    { q: 'Is KopaBook really free?', a: 'Yes! The free plan is free forever. 1 business, 100 products, 1 staff. No card required.' },
     { q: 'Does it work offline?', a: 'Yes, KopaBook works offline and syncs when you are back online.' },
-    { q: 'Can I use it for multiple businesses?', a: 'Free: 2 businesses. Starter: 5. Pro: unlimited.' },
+    { q: 'Can I use it for multiple businesses?', a: 'Free: 1 business. Starter: 5. Pro: unlimited.' },
   ],
   ordering: { enabled: false },
   booking: { enabled: false }
