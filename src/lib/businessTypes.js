@@ -88,8 +88,12 @@ export function modulesForType(key) {
 }
 
 // Sidebar grouping: section label -> module keys in display order.
+// Projects sits in the primary (top) group right under Dashboard so it
+// is visible in the main sidebar without scrolling, AND stays in Tools
+// where long-time users look for it. The group builder resolves each
+// group independently, so one module can appear in both places.
 export const NAV_GROUPS = [
-  { label: null, modules: ["dashboard"] },
+  { label: null, modules: ["dashboard", "projects"] },
   { label: "Sales", modules: ["sales", "products", "services"] },
   { label: "Customers", modules: ["customers", "debts"] },
   { label: "Stock", modules: ["suppliers", "import", "expenses"] },
