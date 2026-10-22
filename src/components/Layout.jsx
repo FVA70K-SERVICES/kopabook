@@ -165,6 +165,14 @@ export default function Layout({ session, children }) {
             </div>
           ))}
         </nav>
+        <nav className="snav">
+          <div className="nav-group">
+            <div className="nav-group-label">FVA70K</div>
+            <a href="https://office.fva70k.com" target="_blank" rel="noopener" title="Open FVA 365 Office (opens in a new tab)">
+              <span className="nico">🏢</span><span className="lbl">FVA 365 Office ↗</span>
+            </a>
+          </div>
+        </nav>
         {session.user?.isPlatformAdmin && (
           <nav className="snav">
             <div className="nav-group">
