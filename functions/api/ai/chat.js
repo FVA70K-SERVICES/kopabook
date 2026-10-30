@@ -6,8 +6,10 @@
 // one filtered by business_id from the authenticated session).
 //
 // On Solo/Pro the assistant is also agentic: when the user asks it to DO
-// something, the model emits an ACTION line, the backend validates and
+// something, the model emits an ACTION line, the backend validates it
+// into an exact proposal, and only a Confirm tap on the proposal card
 // executes it against the real tables, then confirms with real numbers.
+// Chat words alone never execute anything.
 //
 // Tiered AI for every plan. Free: 5 questions/day, read-only for general
 // actions, PLUS project writes in their own bucket of 5 executed project
@@ -292,7 +294,19 @@ const UPGRADE_NUDGE = "Upgrade to Starter for AI actions, or Solo/Pro for the fu
 const FREE_PROJECT_ACTIONS_PER_DAY = 5;
 const FREE_PROJECT_CAP_MSG = "You have used today's 5 free AI project actions for this business. Project actions resume tomorrow, or upgrade to Starter, Solo or Pro for more AI actions. Nothing was created or changed.";
 
-function tierAllowsTool(tier, tool) {
+// Pure helpers, exported for local tests. They carry no business data.
+export function debtorDraftMatches(lastAssistantContent, message) {
+  const draft = typeof lastAssistantContent === "string" ? lastAssistantContent : "";
+  const text = typeof message === "string" ? message.trim() : "";
+  return !!text && draft.includes(text);
+}
+export function firstMissingProjectField(name, type, goal) {
+  if (!name) return "name";
+  if (!PROJECT_TYPES.includes(String(type || "").trim().toLowerCase())) return "type";
+  if (!goal) return "goal";
+  return null;
+}
+export function tierAllowsTool(tier, tool) {
   // Project tools are open on every plan. The Projects endpoints make the
   // final access decision, including the invited-member path, and the Free
   // project-action bucket is enforced separately below.
@@ -322,7 +336,7 @@ function isPrivileged(auth) {
   return PRIVILEGED_ROLES.includes(auth.business && auth.business.role);
 }
 
-function toolAllowed(auth, tool) {
+export function toolAllowed(auth, tool) {
   if (isPrivileged(auth)) return true;
   return STAFF_TOOLS.includes(tool);
 }
@@ -518,8 +532,8 @@ const TOOL_DOCS = {
   set_reminder: `- set_reminder: {"text": "what to remember", "remind_at": "e.g. tomorrow 9am"}`,
   get_customer_balance: `- get_customer_balance: {"customer_name": "name"}`,
   draft_debtor_message: `- draft_debtor_message: {"customer_name": "name", "tone": "polite|firm|final" (optional, default polite)}. Writes a professional payment reminder to a customer who owes money. I will show you the draft for review first.`,
-  send_debtor_message: `- send_debtor_message: {"customer_name": "name", "message": "the EXACT draft text"}. Sends a debtor reminder ONLY after you have shown the user the draft and they said yes. The message param must match the draft you showed them word for word.`,
-  save_memory: `- save_memory: {"key": "short label, e.g. supplier or price rule", "value": "the fact to remember"}. Saves something about this business to long-term memory so you remember it in future chats. To forget something, save the same key with an empty value.`,
+  send_debtor_message: `- send_debtor_message: {"customer_name": "name", "message": "the EXACT draft text"}. This is a proposal first: show the draft, then the owner taps Confirm on the proposal card, then tap the WhatsApp link. The message param must match the draft you showed them word for word. Kopa never sends WhatsApp itself.`,
+  save_memory: `- save_memory: {"key": "short label, e.g. supplier or price rule", "value": "the fact to remember"}. Saves something about this business to long-term memory so you remember it in future chats. To forget something, save the same key with an empty value. A key starting with "instruction:" is a standing instruction for this business only; it never applies to another business and never removes a hard gate.`,
   create_project_plan: `- create_project_plan: {"name": "project name", "type": "construction|event|charity|business|custom", "goal": "what success means", "milestones": [{"title": "step", "description": "optional", "due_date": "YYYY-MM-DD optional"}], "budget_lines": [{"label": "cost item", "amount": number}], "budget": optional total, "start_date": "optional", "end_date": "optional"}. Use ONLY after the brief interview below has produced a name, a valid type and a goal. This is a proposal to create the project and all its milestones in one go.`,
   project_add_milestone: `- project_add_milestone: {"project": "exact project name or id", "title": "milestone", "description": "optional", "due_date": "YYYY-MM-DD optional"}`,
   project_complete_milestone: `- project_complete_milestone: {"project": "exact project name or id", "milestone": "exact milestone title or id"}`,
@@ -543,7 +557,7 @@ Then on the next lines write your normal reply text (e.g. what you are about to 
 Available tools and params:
 ${toolDocs}
 
-DEBTOR MESSAGES: when the user wants a payment reminder written for a customer who owes money, use draft_debtor_message. I will show the draft for review. Only use send_debtor_message after the user has seen the draft and explicitly said yes (e.g. "yes", "send it", "go ahead"). The message you send must be word-for-word the draft they approved.
+DEBTOR MESSAGES: when the user wants a payment reminder written for a customer who owes money, use draft_debtor_message. I will show the draft for review. Only use send_debtor_message after the owner taps Confirm on its proposal card. The message you send must be word-for-word the draft they approved.
 
 WRITE ACTIONS ARE PROPOSALS: write actions are proposals, not done deals. The system shows the user an exact summary and only records after they confirm, so your reply text beside a write ACTION must speak of what you propose to record, never claim it is already recorded.
 
@@ -555,7 +569,7 @@ Only output an ACTION line when the user clearly wants something done. For plain
 - When the user wants a NEW project planned or created, interview briefly, ONE missing item at a time: first the project name, then its type (${PROJECT_TYPES.join(", ")}), then the goal. Do not invent the name, type or goal, and emit NO project ACTION while one is missing.
 - Once name, type and goal are known, draft an ordered milestone list and planned budget lines from the goal and anything the user gave you, then emit create_project_plan. If the user gave no budget information at all, ask ONE question for a rough total or the main cost lines before emitting it. Planned budget lines are a draft for confirmation, not recorded spending.
 - For an existing project, use the exact project name or id from the snapshot. If more than one visible project could match, ask which one; never guess.
-- Use project_report for every status question about a project. Use the project management tools only for the active business's projects, each as a separate proposal.
+- Use project_report for every status question about a project. Use the project management tools only for the active business's own projects, each as a separate proposal. Invited projects are report-only here: you may report on them, but you may not change them through this chat; their changes belong to their own business.
 
 ${tier === "free" ? `PROJECT ACTIONS ON THE FREE PLAN:
 Projects itself is open on this plan, in the app and through you. You may plan, create and manage projects with the project tools, always as proposals the user confirms first. Free includes ${FREE_PROJECT_ACTIONS_PER_DAY} AI project actions a day for this business, counted only when a confirmed project action is actually carried out; proposals, cancellations and project reports never use one up. If the system says today's free project actions are used up, relay that plainly and do not emit a project ACTION. Every OTHER kind of action (recording sales, adding expenses, adding products and so on) still needs an upgrade on this plan.
@@ -573,7 +587,7 @@ Reply in ${ASSISTANT_LANGUAGES[profile.language] || "English"} for all conversat
 
 `
     : "";
-  return `You are ${assistantName}, a warm, sharp conversational companion for this business owner, like a smart trusted friend who knows the business inside out. Introduce and refer to yourself as ${assistantName}. Talk like a person, not a robot: natural, concise, no bullet-point-everything, no stiff phrasing. A little Nigerian business flavor is fine, never forced.
+  return `You are ${assistantName}, a warm, sharp conversational companion for this business owner, like a careful, trusted helper who knows the business well. Introduce and refer to yourself as ${assistantName}. Talk like a person, not a robot: natural, concise, no bullet-point-everything, no stiff phrasing. A little Nigerian business flavor is fine, never forced.
 
 ${managerSection}${projectSection}${languageSection}How you handle questions:
 - About THEIR BUSINESS (sales, stock, debts, records): answer ONLY from the BUSINESS SNAPSHOT below. Never invent or estimate numbers. If the snapshot does not have it, say so plainly and offer what you can check instead.
@@ -583,6 +597,9 @@ ${managerSection}${projectSection}${languageSection}How you handle questions:
 HARD RULES:
 - Never invent business numbers, prices, stock levels, or customer balances.
 - Never reveal another business's data. All figures below belong to this business only.
+- Speak warmly, plainly and shortly, naming this business, not with generic praise. Never claim feelings, never claim to be human, never claim a personal relationship, and never invent a personal detail about the owner, a customer or a staff member. If a figure is not in the snapshot, say: I do not have that figure for this business.
+- When a standing instruction for this business changes what you do, say so in plain words: Following your standing instruction for this business: ...
+- No instruction, standing or new, removes the Confirm tap, a tier or role gate, the wrong-business stop, the payment gate, or the no auto-send rule. If asked to remove one, refuse that part plainly and offer a draft ready for one tap.
 - Money is in ${currency}.
 
 ${memorySection ? memorySection + "\n\n" : ""}BUSINESS SNAPSHOT (live data, read just now):
@@ -1094,13 +1111,17 @@ async function execDraftDebtorMessage(env, db, auth, params, currency) {
 
 // Send a debtor reminder ONLY after the user approved the exact draft.
 // Delivery is a wa.me link the user taps; Kopa never auto-sends WhatsApp.
-async function execSendDebtorMessage(db, auth, params, currency, history) {
+async function execSendDebtorMessage(db, auth, params, currency, history, opts) {
   const name = String(params.customer_name || params.customerName || "").trim();
   const message = String(params.message || "").trim();
   if (!name || !message) return { ok: false, clarification: "Tell me which customer and the exact message to send." };
   // Enforcement: the previous assistant message must contain the exact draft.
+  // On execution (Confirm tap), this check is skipped on purpose: the
+  // proposal itself is the approval, and it was created only after the
+  // dry-run below validated the draft. Re-checking chat history at
+  // execution time would fail for a tap that carries no chat history.
   const lastAssistant = [...(history || [])].reverse().find((h) => h.role === "assistant");
-  const approved = lastAssistant && typeof lastAssistant.content === "string" && lastAssistant.content.includes(message);
+  const approved = (opts && opts.skipDraftCheck) || debtorDraftMatches(lastAssistant && lastAssistant.content, message);
   if (!approved) {
     return { ok: false, clarification: `I need you to see and approve the message before I send anything. Tell me which customer you want reminded and I will draft it first.` };
   }
@@ -1108,6 +1129,17 @@ async function execSendDebtorMessage(db, auth, params, currency, history) {
   if (!matches.length) return { ok: false, clarification: `I could not find a customer called "${name}".` };
   if (matches.length > 1) return { ok: false, clarification: `"${name}" matches more than one customer. Which one?` };
   const c = matches[0];
+  if (opts && opts.dryRun) {
+    // Proposal only: no action log, no link handed out yet. The link is
+    // built again at execution time, after the Confirm tap.
+    return {
+      ok: true,
+      proposal: {
+        summary: `Send a WhatsApp reminder to ${c.name} (${fmt(c.balance, currency)}).`,
+        lines: [`Send to ${c.name} on WhatsApp:`, message],
+      },
+    };
+  }
   // Fetch phone for the wa.me link.
   const row = await db.prepare(`SELECT phone FROM customers WHERE id = ? AND business_id = ?`).bind(c.id, auth.business.id).first().catch(() => null);
   const digits = String((row && row.phone) || "").replace(/\D/g, "");
@@ -1155,6 +1187,31 @@ async function execSaveMemory(context, db, auth, params, currency, opts) {
   await logAiAction(db, auth, params, "save_memory", { key }, { value });
   return { ok: true, summary: `Remembered "${key}". I will keep it in mind from now on.` };
 }
+
+async function execMarkReminderDone(context, db, auth, params, currency, opts) {
+  const reminderId = String((params && (params.reminder_id || params.reminderId || params.id)) || "").trim();
+  const title = String((params && params.title) || "").trim();
+  if (!reminderId) return { ok: false, clarification: "Which reminder should I mark as done? Give me its exact title." };
+  if (opts && opts.dryRun) {
+    return {
+      ok: true,
+      proposal: {
+        summary: `Mark reminder "${title || reminderId}" as done.`,
+        lines: [`Mark reminder "${title || reminderId}" as done.`],
+      },
+    };
+  }
+  try {
+    const res = await db.prepare(`UPDATE bot_reminders SET status = 'done' WHERE id = ? AND business_id = ?`).bind(reminderId, businessIdOf(auth)).run();
+    // D1 run() does not reliably report changed rows, so re-read to prove it.
+    const row = await db.prepare(`SELECT status FROM bot_reminders WHERE id = ? AND business_id = ?`).bind(reminderId, businessIdOf(auth)).first();
+    if (!row || row.status !== "done") return { ok: false, clarification: "I could not find that reminder in this business." };
+  } catch (e) {
+    return { ok: false, clarification: "I could not update that reminder just now. Please try again." };
+  }
+  return { ok: true, summary: `Marked the reminder "${title || reminderId}" as done.` };
+}
+function businessIdOf(auth) { return auth && auth.business ? auth.business.id : null; }
 
 async function logAiAction(db, auth, params, tool, p, result) {
   try {
@@ -1344,13 +1401,14 @@ function plannedProjectDescription(goal, lines, currency) {
 
 async function execCreateProjectPlan(context, db, auth, params, currency, opts) {
   const name = cleanProjectText(projectParam(params, "name", "project", "project_name", "projectName"), 200);
-  if (!name) return { ok: false, clarification: "What should we call the project?" };
   const type = String(projectParam(params, "type", "project_type", "projectType") || "").trim().toLowerCase();
-  if (!PROJECT_TYPES.includes(type)) {
-    return { ok: false, clarification: `What type of project is "${name}"? Choose one: ${PROJECT_TYPES.join(", ")}.` };
-  }
   const goal = cleanProjectText(projectParam(params, "goal", "description", "objective"), 2000);
-  if (!goal) return { ok: false, clarification: `What is the goal of "${name}"? Tell me what success should look like.` };
+  // Interview gate, shared with local tests: no action while name, type,
+  // or goal is missing. Each missing field asks one short question.
+  const missingField = firstMissingProjectField(name, type, goal);
+  if (missingField === "name") return { ok: false, clarification: "What should we call the project?" };
+  if (missingField === "type") return { ok: false, clarification: `What type of project is "${name}"? Choose one: ${PROJECT_TYPES.join(", ")}.` };
+  if (missingField === "goal") return { ok: false, clarification: `What is the goal of "${name}"? Tell me what success should look like.` };
 
   const milestoneResult = normalizeProjectMilestones(params || {});
   if (milestoneResult.error) return { ok: false, clarification: milestoneResult.error };
@@ -1680,6 +1738,7 @@ const TOOL_EXECUTORS = {
   get_customer_balance: execGetCustomerBalance,
   draft_debtor_message: execDraftDebtorMessage,
   send_debtor_message: execSendDebtorMessage,
+  mark_reminder_done: execMarkReminderDone,
   save_memory: execSaveMemory,
   create_project_plan: execCreateProjectPlan,
   project_add_milestone: execProjectAddMilestone,
@@ -1691,11 +1750,632 @@ const TOOL_EXECUTORS = {
 };
 
 // ---------------------------------------------------------------------------
+// Guardrails: confirm-before-action, common sense, memory and instructions.
+// Plan: GUARDRAILS-CONFIRM-COMMONSENSE.md. These helpers run BEFORE a
+// proposal is stored (see runGuardrailChecks, called from the ACTION path)
+// and BEFORE a proposal is executed for the stale-debtor check (tap path).
+// They never execute a write themselves: they return a stop (hard check),
+// a warning (soft check, stored as a pending warning, never as a proposal),
+// a conflict question (standing instruction), or ok. One warning at a
+// time, one question at a time. Every check is bound to the session
+// business only; no other business's data is ever read or quoted.
+// Provisional threshold, awaiting Fortune's own thresholds in words:
+// an "unusual amount" warning fires above 3x the largest recent amount
+// for the same product/customer in THIS business only. It only warns;
+// it never blocks, and it never uses a market price or another business.
+// ---------------------------------------------------------------------------
+
+export const GUARDRAIL_UNUSUAL_MULTIPLIER = 3;
+
+// Tone: honest warmth only. The sanitizer strips the exact stock phrases
+// and claimed-feeling phrases the guardrail bans, so no reply the server
+// sends can carry them even if a model draft does. It never invents text.
+const GUARDRAIL_BANNED_PHRASES = [
+  "As an AI language model",
+  "I am here to help you with all your needs",
+  "Rest assured",
+  "I feel happy for you",
+  "I understand how hard this is for you",
+];
+export function sanitizeTone(text) {
+  let out = String(text || "");
+  for (const phrase of GUARDRAIL_BANNED_PHRASES) {
+    out = out.split(phrase).join("").replace(/[ \t]{2,}/g, " ");
+  }
+  return out.trim();
+}
+
+// Plain answer when the snapshot cannot answer a figure question.
+// Never a guessed figure, never a warm-sounding half-promise.
+export function unknownFigureText() {
+  return "I do not have that figure for this business.";
+}
+
+// The exact 5-part warning shape, in order. A warning is not a proposal
+// and not a confirmation: answering it only lets the agent draft, and
+// that draft still needs a Confirm tap.
+export function formatWarning(parts) {
+  const asked = parts.asked || "";
+  const why = parts.why || "";
+  const change = parts.change || "";
+  const safer = parts.safer || "";
+  const question = parts.question
+    || "Do you want the safer way, or do you still want the original? Tell me, and I will draft it for your Confirm tap.";
+  return [
+    "What you asked for: " + asked,
+    "Why this looks like it could be a mistake: " + why,
+    "What would change if it went ahead: " + change,
+    "The safer alternative: " + safer,
+    "One question: " + question,
+  ].join("\n");
+}
+
+// What an owner's reply to a warning question means. Returns 'safer',
+// 'original', 'drop', 'once' (follow a conflicting instruction just this
+// once), 'replace' (replace a standing instruction going forward), or
+// null (not a warning answer: a name, a correction, or a new request).
+export function parseWarningAnswer(text) {
+  const t = normalizeIntentText(text);
+  if (!t) return null;
+  if (/\breplace\b/.test(t) && /going forward|from now on|keep (it|that) as|make it (the )?new/.test(t)) return "replace";
+  if (/just this once|only this once|just once|one time only/.test(t)) return "once";
+  if (/use (the )?existing|use existing|existing one|safer way|safer one|safer\b/.test(t)) return "safer";
+  if (/second sale|second one|it is a second|two sales/.test(t)) return "original";
+  if (/create (a )?new|new one|keep (the )?original|original\b|still want|keep it\b/.test(t)) return "original";
+  if (/first one|first sale|it was the first|only one sale|drop it|forget it|never mind/.test(t)) return "drop";
+  return null;
+}
+
+// An instruction that asks to remove a hard gate. Returns the plain
+// refusal of that part, or null. No instruction may remove the Confirm
+// tap, a tier or role gate, the wrong-business stop, the payment gate,
+// or the no auto-send rule.
+export function instructionGateRefusal(text) {
+  const t = normalizeIntentText(String(text || ""));
+  if (!t) return null;
+  const asksGateRemoval = /without asking|without confirm|no confirm|skip confirm|skip asking|automatically|auto send|send automatically|do not ask|don't ask|never ask|no need to ask|no need to confirm/.test(t);
+  if (!asksGateRemoval) return null;
+  return "I still need your Confirm tap for every write, even with that instruction. I can draft it ready for one tap, and nothing will go out until you tap Confirm.";
+}
+
+// Requests the agent has no tool for: plan, price, billing, staff changes.
+// Plain refusal, no change, pointer to where the owner does it themselves.
+export function outOfScopeRefusal(text) {
+  const t = normalizeIntentText(String(text || ""));
+  if (!t) return null;
+  const asksOutOfScope = /upgrade (my )?plan|change (my |the )?(plan|price|billing)|remove (a )?staff|delete (a )?staff|fire (a )?staff|change (the )?staff/.test(t);
+  if (!asksOutOfScope) return null;
+  return "I cannot change plans, prices, billing, or staff from this chat. You do that yourself in the app's plan and staff settings, outside this chat. I can still answer questions about this business and draft sales, expenses, and reminders for your Confirm tap.";
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+// Close-name test for S3/S5: contains, shared first word, singular/plural,
+// or a small edit distance. Never across businesses: callers only pass
+// names already resolved inside this business.
+export function namesSimilar(a, b) {
+  const na = String(a || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const nb = String(b || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!na || !nb || na === nb) return na === nb;
+  if (na.length >= 3 && nb.length >= 3 && (na.includes(nb) || nb.includes(na))) return true;
+  const sing = (s) => (s.endsWith("s") ? s.slice(0, -1) : s);
+  if (sing(na) === sing(nb)) return true;
+  const fa = na.split(" ")[0], fb = nb.split(" ")[0];
+  if (fa.length >= 3 && fa === fb) return true;
+  if (na.length >= 4 && nb.length >= 4 && levenshtein(na, nb) <= 2) return true;
+  return false;
+}
+
+export function amountsIn(text) {
+  const out = [];
+  const re = /(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/g;
+  let m;
+  while ((m = re.exec(String(text || "")))) out.push(Number(m[1].replace(/,/g, "")));
+  return out;
+}
+
+export function debtorBalanceChanged(storedBalance, currentBalance) {
+  return Number(storedBalance) !== Number(currentBalance);
+}
+
+// Memory for this business only. Returns null when the ai_memory table
+// is absent (migration 0050 not live): memory is then not promised.
+export async function loadBusinessMemory(db, businessId) {
+  try {
+    const rows = await db.prepare(
+      `SELECT memory_key, memory_value FROM ai_memory WHERE business_id = ? ORDER BY updated_at DESC LIMIT 10`
+    ).bind(businessId).all();
+    return (rows.results || []).map((r) => ({ memory_key: r.memory_key, memory_value: r.memory_value }));
+  } catch (e) {
+    return null;
+  }
+}
+
+// Pending warnings: the same on-demand table pattern as proposals.
+// A warning row is not a proposal: it carries the original params, the
+// safer alternative, and the question, and it expires after 10 minutes.
+let pendingWarningsEnsured = false;
+export async function ensurePendingWarnings(db) {
+  if (pendingWarningsEnsured) return;
+  try {
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_pending_warnings (
+        id TEXT PRIMARY KEY,
+        business_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        session_key TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        params TEXT NOT NULL,
+        safer_action TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        lines TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        question TEXT NOT NULL,
+        candidates TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      )`
+    ).run();
+    pendingWarningsEnsured = true;
+  } catch (e) { /* warnings are best effort; a failed store means no warning, never a write */ }
+}
+
+export async function storePendingWarning(db, w) {
+  await ensurePendingWarnings(db);
+  const id = "warn_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const createdAt = new Date();
+  const expiresStr = toSqliteDate(new Date(createdAt.getTime() + PROPOSAL_TTL_MS));
+  await db.prepare(
+    `UPDATE ai_pending_warnings SET status = 'superseded' WHERE business_id = ? AND session_key = ? AND status = 'pending'`
+  ).bind(w.businessId, w.sessionKey).run();
+  await db.prepare(
+    `INSERT INTO ai_pending_warnings (id, business_id, user_id, session_key, tool, params, safer_action, summary, lines, kind, question, candidates, status, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+  ).bind(id, w.businessId, w.userId, w.sessionKey, w.tool, JSON.stringify(w.params || {}), JSON.stringify(w.saferAction || { action: "proposal" }),
+    w.summary || "", JSON.stringify(w.lines || []), w.kind || "", w.question || "",
+    JSON.stringify(w.candidates || []), toSqliteDate(createdAt), expiresStr).run();
+  return { id, expires_at: expiresStr };
+}
+
+export async function loadPendingWarning(db, businessId, sessionKey) {
+  await ensurePendingWarnings(db);
+  try {
+    const row = await db.prepare(
+      `SELECT id, business_id, user_id, session_key, tool, params, safer_action, summary, lines, kind, question, candidates, status, created_at, expires_at
+       FROM ai_pending_warnings
+       WHERE business_id = ? AND session_key = ? AND status = 'pending' AND expires_at > ?
+       ORDER BY created_at DESC LIMIT 1`
+    ).bind(businessId, sessionKey, toSqliteDate(new Date())).first();
+    return row || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function clearPendingWarnings(db, businessId, sessionKey, status) {
+  try {
+    await db.prepare(
+      `UPDATE ai_pending_warnings SET status = ? WHERE business_id = ? AND session_key = ? AND status = 'pending'`
+    ).bind(status || "superseded", businessId, sessionKey).run();
+  } catch (e) { /* best effort */ }
+}
+
+// One shared proposal store for the warning resolver and for pa.js.
+// Same shape as the ACTION path: supersede older pending, 10-minute
+// expiry, business_id + session_key binding. It never executes anything.
+export async function createAiProposal(db, businessId, userId, sessionKey, tool, params, summary, lines) {
+  await ensurePendingProposals(db);
+  const proposalId = "prop_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const createdAt = new Date();
+  const expiresStr = toSqliteDate(new Date(createdAt.getTime() + PROPOSAL_TTL_MS));
+  await db.prepare(
+    `UPDATE ai_pending_proposals SET status = 'superseded', resolved_at = ? WHERE business_id = ? AND session_key = ? AND status = 'pending'`
+  ).bind(toSqliteDate(createdAt), businessId, sessionKey).run();
+  await db.prepare(
+    `INSERT INTO ai_pending_proposals (id, business_id, user_id, session_key, tool, params, summary, status, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+  ).bind(proposalId, businessId, userId, sessionKey, tool, JSON.stringify(params || {}), summary, toSqliteDate(createdAt), expiresStr).run();
+  return { id: proposalId, tool, summary, lines: lines || [], expires_at: expiresStr };
+}
+
+// Guardrail gate, run after a dry-run proposal exists and before that
+// proposal is stored. Returns { ok: true }, { stop: "one short question" },
+// { warning: {...} } (soft check: warn first, propose only after the
+// owner answers), or { conflict: {...} } (standing instruction clash).
+// Hard checks first (H1-H6), then the first firing soft warning only
+// (S1-S6): one question at a time. Any unexpected database error fails
+// open to ok here, because the executors re-validate at execution time
+// and a gate failure must never break the chat; it must never invent a
+// pass for a check it could not run, so soft warnings that need data
+// simply do not fire when their data is unavailable.
+export async function runGuardrailChecks(db, auth, tool, params, proposal, userMessage, currency, opts) {
+  const businessId = auth.business.id;
+  const sessionKey = (opts && opts.sessionKey) || "";
+  const fmtCur = (n) => fmt(n, currency);
+  const stop = (msg) => ({ stop: msg });
+  const askedText = (proposal && proposal.summary) || (tool + " request");
+  try {
+    // H1: an explicit business id in the params that is not this business.
+    const paramBusiness = params && (params.business_id || params.businessId);
+    if (paramBusiness && String(paramBusiness) !== String(businessId)) {
+      return stop("That belongs to a different business, not this one. I can only work in this business, so I have not recorded anything.");
+    }
+
+    if (tool === "save_memory") {
+      const key = String((params && (params.key || params.label)) || "").trim().slice(0, 80);
+      const value = String((params && (params.value || params.fact)) || "").trim().slice(0, 1000);
+      if (!key) return stop("What should I remember? Give me a short label and the fact.");
+      const refuse = instructionGateRefusal(key + " " + value);
+      if (refuse) return stop(refuse);
+      const mem = await loadBusinessMemory(db, businessId);
+      if (mem === null) {
+        return stop("Memory is not available yet for this business, so I have not saved that. Your records are untouched.");
+      }
+      if (value) {
+        const isInstruction = key.toLowerCase().startsWith("instruction:")
+          || /\b(always|never)\b/.test(value.toLowerCase())
+          || value.toLowerCase().includes("from now on");
+        if (isInstruction) {
+          const old = mem.find((r) => r.memory_key.toLowerCase() === key.toLowerCase());
+          if (old && old.memory_value !== value) {
+            return { conflict: {
+              kind: "instruction_conflict", key, oldValue: old.memory_value, newValue: value,
+              question: "You previously said, for this business, " + old.memory_value + ". This message says " + value + ". Should I follow " + value + " just this once, or replace " + old.memory_value + " going forward?",
+            } };
+          }
+        }
+      }
+      return { ok: true };
+    }
+
+    if (tool === "record_sale") {
+      const items = Array.isArray(params.items) ? params.items : [];
+      if (!items.length) return stop("What exactly should I record? Tell me the product and quantity, e.g. '2 Rice'.");
+      const resolved = [];
+      for (const it of items) {
+        const qty = Number(it.qty || it.quantity || 1);
+        if (!Number.isFinite(qty) || qty <= 0) return stop("How many \"" + (it.product || "") + "\"? I need a valid quantity.");
+        const matches = await matchProduct(db, businessId, it.product || "");
+        if (!matches.length) return stop("I could not find \"" + (it.product || "") + "\" in this business's products. Check the name and try again.");
+        if (matches.length > 1) return stop("\"" + (it.product || "") + "\" matches more than one product: " + matches.map((p) => p.name).join(", ") + ". Which one do you mean?");
+        const p = matches[0];
+        if (p.stock < qty) return stop("Not enough stock for " + p.name + ". You have " + p.stock + " " + p.unit + " left.");
+        resolved.push({ requested: String(it.product || ""), product: p, qty, lineTotal: Math.round(p.price * qty * 100) / 100 });
+      }
+      const total = Math.round(resolved.reduce((s, r) => s + r.lineTotal, 0) * 100) / 100;
+      const amountPaid = params.amount_paid !== undefined && params.amount_paid !== null ? Number(params.amount_paid) : null;
+      if (amountPaid !== null && (!Number.isFinite(amountPaid) || amountPaid < 0)) return stop("How much did the customer pay? I need a valid amount.");
+      // Customer resolution: a brand-new customer is created inside a
+      // confirmed sale, so 0 matches is not a stop here; 2+ is.
+      let cust = null;
+      const customerName = String(params.customer_name || params.customerName || "").trim();
+      if (customerName) {
+        const cm = await matchCustomer(db, businessId, customerName);
+        if (cm.length > 1) return stop("\"" + customerName + "\" matches more than one customer: " + cm.map((c) => c.name).join(", ") + ". Which one?");
+        if (cm.length === 1) cust = cm[0];
+      }
+      // S3 lookalike product or customer: a single fuzzy match that is
+      // not the exact name asked for. Show the closest match and ask.
+      const nonExactProduct = resolved.find((r) => r.product.name.toLowerCase() !== r.requested.trim().toLowerCase());
+      if (nonExactProduct) {
+        const saferParams = { ...params, items: params.items.map((it) => (String(it.product || "").trim().toLowerCase() === nonExactProduct.requested.trim().toLowerCase() ? { ...it, product: nonExactProduct.product.name } : it)) };
+        return { warning: {
+          kind: "lookalike", asked: askedText,
+          why: "\"" + nonExactProduct.requested + "\" is close to, but not exactly, the product \"" + nonExactProduct.product.name + "\" in this business.",
+          change: "Stock of " + nonExactProduct.product.name + " would go from " + nonExactProduct.product.stock + " to " + (nonExactProduct.product.stock - nonExactProduct.qty) + ", total " + fmtCur(total) + ".",
+          safer: "Use the existing product \"" + nonExactProduct.product.name + "\".",
+          question: "Did you mean \"" + nonExactProduct.product.name + "\", or a different product? Tell me, and I will draft it for your Confirm tap.",
+          candidates: [nonExactProduct.product.name],
+          saferAction: { action: "proposal", params: saferParams, summary: proposal ? proposal.summary : askedText, lines: proposal ? proposal.lines : [] },
+        } };
+      }
+      if (cust && cust.name.toLowerCase() !== customerName.toLowerCase()) {
+        return { warning: {
+          kind: "lookalike", asked: askedText,
+          why: "\"" + customerName + "\" is close to, but not exactly, the customer \"" + cust.name + "\" in this business.",
+          change: "A sale of " + fmtCur(total) + " would be recorded for " + cust.name + ".",
+          safer: "Use the existing customer \"" + cust.name + "\".",
+          question: "Did you mean \"" + cust.name + "\", or a different customer? Tell me, and I will draft it for your Confirm tap.",
+          candidates: [cust.name],
+          saferAction: { action: "proposal", params: { ...params, customer_name: cust.name }, summary: proposal ? proposal.summary : askedText, lines: proposal ? proposal.lines : [] },
+        } };
+      }
+      // S1 duplicate: same customer + product + amount recorded today,
+      // or already waiting as a pending proposal in this session.
+      let duplicate = false;
+      try {
+        const todayRows = await db.prepare(
+          `SELECT id, customer_id, total_amount FROM sales WHERE business_id = ? AND date(created_at) = date('now')`
+        ).bind(businessId).all();
+        for (const s of (todayRows.results || [])) {
+          if (Number(s.total_amount) !== total) continue;
+          let saleCustomer = "";
+          if (s.customer_id) {
+            const crow = await db.prepare(`SELECT name FROM customers WHERE id = ?`).bind(s.customer_id).first();
+            saleCustomer = crow ? String(crow.name) : "";
+          }
+          if (saleCustomer.toLowerCase() !== customerName.toLowerCase()) continue;
+          const itemRows = await db.prepare(
+            `SELECT p.name FROM sale_items si JOIN products p ON p.id = si.product_id WHERE si.sale_id = ?`
+          ).bind(s.id).all();
+          const saleProducts = (itemRows.results || []).map((r) => String(r.name).toLowerCase()).sort().join("|");
+          const wantProducts = resolved.map((r) => r.product.name.toLowerCase()).sort().join("|");
+          if (saleProducts === wantProducts) { duplicate = true; break; }
+        }
+        if (!duplicate && sessionKey) {
+          const pend = await db.prepare(
+            `SELECT tool, params FROM ai_pending_proposals WHERE business_id = ? AND session_key = ? AND status = 'pending'`
+          ).bind(businessId, sessionKey).all();
+          for (const pr of (pend.results || [])) {
+            if (pr.tool !== "record_sale") continue;
+            try {
+              const pp = JSON.parse(pr.params || "{}");
+              if (JSON.stringify(pp) === JSON.stringify(params)) { duplicate = true; break; }
+            } catch (e) { /* ignore unparseable rows */ }
+          }
+        }
+      } catch (e) { /* duplicate data unavailable: do not warn on a guess */ }
+      if (duplicate) {
+        const first = resolved[0];
+        return { warning: {
+          kind: "duplicate", asked: askedText,
+          why: "This is the second time today with the same customer, product and amount.",
+          change: "A second sale would record " + fmtCur(total) + " again, and stock of " + first.product.name + " would go from " + first.product.stock + " to " + (first.product.stock - first.qty) + ".",
+          safer: "Record it as one sale, not two. The first sale already stands.",
+          question: "Is this a second sale, or did you mean the first one?",
+          candidates: [],
+          saferAction: { action: "reply", reply: "Understood. I will keep the first sale only and I have not recorded a second one. Nothing else changed." },
+        } };
+      }
+      // S2 wrong or changed price: the owner's own words state one amount
+      // for the sale, the product record says another total. Never silently
+      // correct it and never silently keep the wrong one.
+      // The owner's stated price is the amount in their words that is not
+      // simply a quantity (e.g. in "1 Rice for 4000", 1 is the quantity
+      // and 4000 is the stated price). If the only amounts are quantities,
+      // there is no stated price to compare.
+      const qtyNumbers = new Set(resolved.map((r) => r.qty));
+      const statedAmounts = amountsIn(userMessage).filter((n) => !qtyNumbers.has(n));
+      const distinctStated = [...new Set(statedAmounts)];
+      if (distinctStated.length === 1 && distinctStated[0] !== total && amountPaid === null && !/paid/i.test(String(userMessage || ""))) {
+        const stated = distinctStated[0];
+        const first = resolved[0];
+        return { warning: {
+          kind: "price_mismatch", asked: askedText,
+          why: "That price is different from the price on this product: you said " + fmtCur(stated) + ", but the product record says " + fmtCur(first.product.price) + " per " + first.product.unit + ", so " + first.qty + " comes to " + fmtCur(total) + ".",
+          change: "At the product record price, the total would be " + fmtCur(total) + " and stock of " + first.product.name + " would go from " + first.product.stock + " to " + (first.product.stock - first.qty) + ".",
+          safer: "Record it at the product record price, total " + fmtCur(total) + ".",
+          question: "Do you want the safer way, or do you still want the original? Tell me, and I will draft it for your Confirm tap.",
+          candidates: [],
+          saferAction: { action: "proposal", params, summary: proposal ? proposal.summary : askedText, lines: proposal ? proposal.lines : [] },
+        } };
+      }
+      // S4 unusual amount, single-product sales only, judged only on this
+      // business's recent sales of that product. Provisional 3x threshold.
+      if (resolved.length === 1) {
+        try {
+          const rec = await db.prepare(
+            `SELECT s.total_amount FROM sales s JOIN sale_items si ON si.sale_id = s.id WHERE s.business_id = ? AND si.product_id = ? ORDER BY s.id DESC LIMIT 5`
+          ).bind(businessId, resolved[0].product.id).all();
+          const totals = (rec.results || []).map((r) => Number(r.total_amount) || 0).filter((n) => n > 0);
+          const maxRecent = totals.length ? Math.max(...totals) : 0;
+          if (maxRecent > 0 && total > GUARDRAIL_UNUSUAL_MULTIPLIER * maxRecent) {
+            return { warning: {
+              kind: "unusual_amount", asked: askedText,
+              why: "That amount is far above this product's recent sales in this business: your recent sales of " + resolved[0].product.name + " are around " + fmtCur(maxRecent) + ", and this sale is " + fmtCur(total) + ".",
+              change: "Stock of " + resolved[0].product.name + " would go from " + resolved[0].product.stock + " to " + (resolved[0].product.stock - resolved[0].qty) + ", total " + fmtCur(total) + ".",
+              safer: "Double-check the amount first, and tell me the correct amount if this one is wrong.",
+              question: "Do you want the safer way, or do you still want the original? Tell me, and I will draft it for your Confirm tap.",
+              candidates: [],
+              saferAction: { action: "reply", reply: "Understood. I have not recorded anything yet. Tell me the correct amount and I will draft it again for your Confirm tap." },
+            } };
+          }
+        } catch (e) { /* no recent data: do not warn on a guess */ }
+      }
+      // Memory never overrides the snapshot for figures. A saved price
+      // rule that disagrees with the product record is a question, and
+      // the snapshot wins unless the owner updates the product itself.
+      try {
+        const mem = await loadBusinessMemory(db, businessId);
+        if (mem) {
+          for (const row of mem) {
+            const hay = (row.memory_key + " " + row.memory_value).toLowerCase();
+            const prod = resolved.find((r) => hay.includes(r.product.name.toLowerCase()));
+            if (!prod) continue;
+            const memAmounts = amountsIn(row.memory_value);
+            const disagree = memAmounts.find((n) => n !== prod.product.price);
+            if (disagree !== undefined) {
+              return { warning: {
+                kind: "memory_price", asked: askedText,
+                why: "Your saved price says " + fmtCur(disagree) + ", but the product record says " + fmtCur(prod.product.price) + " for " + prod.product.name + ".",
+                change: "At the product record price, the total would be " + fmtCur(total) + " and stock of " + prod.product.name + " would go from " + prod.product.stock + " to " + (prod.product.stock - prod.qty) + ".",
+                safer: "Use the product record price, " + fmtCur(prod.product.price) + " per " + prod.product.unit + ".",
+                question: "Do you want the safer way, or do you still want the original? Tell me, and I will draft it for your Confirm tap.",
+                candidates: [],
+                saferAction: { action: "proposal", params, summary: proposal ? proposal.summary : askedText, lines: proposal ? proposal.lines : [] },
+              } };
+            }
+          }
+        }
+      } catch (e) { /* memory unavailable: snapshot figures already used */ }
+      return { ok: true };
+    }
+
+    if (tool === "record_customer_payment") {
+      const name = String(params.customer_name || params.customerName || "").trim();
+      const amt = Number(params.amount);
+      if (!name) return stop("Which customer paid?");
+      if (!Number.isFinite(amt) || amt <= 0) return stop("How much did they pay? I need an amount greater than zero.");
+      const matches = await matchCustomer(db, businessId, name);
+      if (!matches.length) return stop("I could not find a customer called \"" + name + "\" in this business. Check the name and try again.");
+      if (matches.length > 1) return stop("\"" + name + "\" matches more than one customer: " + matches.map((c) => c.name).join(", ") + ". Which one?");
+      const c = matches[0];
+      if (c.balance <= 0) return stop(c.name + " has no outstanding balance, so there is nothing to record.");
+      if (amt > c.balance) return stop(c.name + " owes " + fmtCur(c.balance) + ". " + fmtCur(amt) + " is more than the balance. Tell me the correct amount.");
+      if (c.name.toLowerCase() !== name.toLowerCase()) {
+        return { warning: {
+          kind: "lookalike", asked: askedText,
+          why: "\"" + name + "\" is close to, but not exactly, the customer \"" + c.name + "\" in this business.",
+          change: c.name + "'s balance would go from " + fmtCur(c.balance) + " to " + fmtCur(c.balance - amt) + ".",
+          safer: "Use the existing customer \"" + c.name + "\".",
+          question: "Did you mean \"" + c.name + "\", or a different customer? Tell me, and I will draft it for your Confirm tap.",
+          candidates: [c.name],
+          saferAction: { action: "proposal", params: { ...params, customer_name: c.name }, summary: proposal ? proposal.summary : askedText, lines: proposal ? proposal.lines : [] },
+        } };
+      }
+      try {
+        const payRows = await db.prepare(
+          `SELECT customer_id, amount FROM payment_records WHERE business_id = ? AND date(created_at) = date('now')`
+        ).bind(businessId).all();
+        const dup = (payRows.results || []).some((r) => Number(r.customer_id) === Number(c.id) && Number(r.amount) === amt);
+        if (dup) {
+          return { warning: {
+            kind: "duplicate", asked: askedText,
+            why: "This payment, same customer and same amount, was already recorded today.",
+            change: c.name + "'s balance would go from " + fmtCur(c.balance) + " to " + fmtCur(c.balance - amt) + " a second time.",
+            safer: "Record it as one payment, not two. The first payment already stands.",
+            question: "Is this a second payment, or did you mean the first one?",
+            candidates: [],
+            saferAction: { action: "reply", reply: "Understood. I will keep the first payment only and I have not recorded a second one. Nothing else changed." },
+          } };
+        }
+        const rec = await db.prepare(
+          `SELECT amount FROM payment_records WHERE business_id = ? AND customer_id = ? ORDER BY id DESC LIMIT 5`
+        ).bind(businessId, c.id).all();
+        const amounts = (rec.results || []).map((r) => Number(r.amount) || 0).filter((n) => n > 0);
+        const maxRecent = amounts.length ? Math.max(...amounts) : 0;
+        if (maxRecent > 0 && amt > GUARDRAIL_UNUSUAL_MULTIPLIER * maxRecent) {
+          return { warning: {
+            kind: "unusual_amount", asked: askedText,
+            why: "That payment is far above this customer's usual payments in this business: recent payments from " + c.name + " are around " + fmtCur(maxRecent) + ", and this one is " + fmtCur(amt) + ".",
+            change: c.name + "'s balance would go from " + fmtCur(c.balance) + " to " + fmtCur(c.balance - amt) + ".",
+            safer: "Double-check the amount first, and tell me the correct amount if this one is wrong.",
+            question: "Do you want the safer way, or do you still want the original? Tell me, and I will draft it for your Confirm tap.",
+            candidates: [],
+            saferAction: { action: "reply", reply: "Understood. I have not recorded anything yet. Tell me the correct amount and I will draft it again for your Confirm tap." },
+          } };
+        }
+      } catch (e) { /* no payment history: do not warn on a guess */ }
+      return { ok: true };
+    }
+
+    if (tool === "add_product") {
+      const name = String(params.name || "").trim();
+      const price = Number(params.price);
+      if (!name) return stop("What is the product called?");
+      if (!Number.isFinite(price) || price <= 0) return stop("What is the selling price of \"" + name + "\"? I need a price greater than zero.");
+      try {
+        const rows = await db.prepare(
+          `SELECT name FROM products WHERE business_id = ? AND is_active = 1`
+        ).bind(businessId).all();
+        const close = (rows.results || []).map((r) => String(r.name)).find((n) => n.toLowerCase() !== name.toLowerCase() && namesSimilar(n, name));
+        if (close) {
+          return { warning: {
+            kind: "new_product_may_exist", asked: askedText,
+            why: "\"" + name + "\" closely matches the existing product \"" + close + "\" in this business, so this may already exist.",
+            change: "A new catalogue entry \"" + name + "\" at " + fmtCur(price) + " would be created alongside \"" + close + "\".",
+            safer: "Use the existing product \"" + close + "\" instead of creating a new one.",
+            question: "Do you want to use the existing product, or create a new one? Tell me, and I will draft it for your Confirm tap.",
+            candidates: [close],
+            saferAction: { action: "reply", reply: "Understood. I will use the existing product \"" + close + "\" and I have not created a new one. Tell me what to record with it." },
+          } };
+        }
+      } catch (e) { /* catalogue unavailable: executor still validates */ }
+      return { ok: true };
+    }
+
+    if (tool === "add_expense") {
+      const amt = Number(params.amount);
+      if (!Number.isFinite(amt) || amt <= 0) return stop("How much was the expense? I need an amount greater than zero.");
+      if (!String(params.description || "").trim()) return stop("What was the expense for? Give me a short description.");
+      return { ok: true };
+    }
+
+    if (tool === "set_reminder") {
+      const text = String(params.text || "").trim();
+      if (!text) return stop("What should I remind you about?");
+      const remindAt = parseRemindAt(params.remind_at || params.remindAt, auth.business.timezone);
+      const nowStr = toSqliteDate(new Date());
+      const explained = /late|overdue|missed|backdate|already (due|passed)/i.test(String(userMessage || ""));
+      if (remindAt < nowStr && !explained) {
+        return stop("That reminder time is in the past (" + remindAt + " UTC). What time should it be instead?");
+      }
+      return { ok: true };
+    }
+
+    if (tool === "send_debtor_message") {
+      const name = String(params.customer_name || params.customerName || "").trim();
+      const message = String(params.message || "").trim();
+      if (!name || !message) return stop("Tell me which customer and the exact message to send.");
+      const matches = await matchCustomer(db, businessId, name);
+      if (!matches.length) return stop("I could not find a customer called \"" + name + "\" in this business.");
+      if (matches.length > 1) return stop("\"" + name + "\" matches more than one customer. Which one?");
+      if (matches[0].balance <= 0) return stop(matches[0].name + " has no outstanding balance, so there is no reminder to send.");
+      return { ok: true };
+    }
+
+    if (tool === "mark_reminder_done") {
+      const reminderId = String(params.reminder_id || params.reminderId || params.id || "").trim();
+      if (!reminderId) return stop("Which reminder should I mark as done? Give me its exact title.");
+      try {
+        const row = await db.prepare(
+          `SELECT id, title, status FROM bot_reminders WHERE id = ? AND business_id = ?`
+        ).bind(reminderId, businessId).first();
+        if (!row) return stop("I could not find that reminder in this business.");
+      } catch (e) { /* reminder table unavailable: executor re-checks */ }
+      return { ok: true };
+    }
+
+    if (tool === "create_project_plan") {
+      const missing = firstMissingProjectField(params.name, params.type, params.goal);
+      if (missing === "name") return stop("What should we call the project?");
+      if (missing === "type") return stop("What type of project is \"" + (params.name || "") + "\"? Choose one: construction, event, charity, business, custom.");
+      if (missing === "goal") return stop("What is the goal of \"" + (params.name || "") + "\"? Tell me what success should look like.");
+      return { ok: true };
+    }
+
+    if (PROJECT_WRITE_TOOLS.includes(tool) && tool !== "create_project_plan") {
+      const resolved = await resolveBusinessProject(db, auth, params);
+      if (resolved.clarification) return stop(resolved.clarification);
+      const project = resolved.project;
+      const status = String(project.status || "active").toLowerCase();
+      if (status === "completed" || status === "closed") {
+        if (tool === "project_update") {
+          const want = String(params.status || params.action || "").trim().toLowerCase();
+          if (["active", "reopen", "reopened"].includes(want)) return { ok: true };
+          return stop(project.name + " is closed. I can reopen it as active, but I cannot add a milestone or record a transaction on a closed project.");
+        }
+        return stop(project.name + " is closed, so I cannot change it. Reopen it first, or pick an active project.");
+      }
+      return { ok: true };
+    }
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: true };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Confirm-before-write: pending proposals for the write tools.
 // A write is first dry-run into an exact proposal, stored here, and only
 // executed when the user confirms. Proposals expire after 10 minutes.
 // ---------------------------------------------------------------------------
-const WRITE_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "save_memory", ...PROJECT_WRITE_TOOLS];
+const WRITE_TOOLS = ["record_sale", "add_expense", "add_product", "record_customer_payment", "set_reminder", "save_memory", "send_debtor_message", "mark_reminder_done", ...PROJECT_WRITE_TOOLS];
 const PROPOSAL_TTL_MS = 10 * 60 * 1000;
 
 let pendingProposalsEnsured = false;
@@ -1726,16 +2406,20 @@ async function ensurePendingProposals(db) {
 }
 
 const CLEAR_CHAT_RE = /^\s*(?:please\s+)?(?:clear chat|clear the chat|clear this chat|clear my chat|clear conversation|clear history|delete chat|wipe chat|start fresh|start over|fresh start|new chat)\s*[.!?]*\s*$/i;
-// Confirm and cancel sets: English is primary. Conservative equivalents in
-// Pidgin, Hausa, Yoruba and Igbo are additions, matched case-insensitively
-// and accent-insensitively (diacritics are stripped before matching, so
-// "beenì" and "beeni" are the same word here). The tap Confirm and Cancel
-// buttons always remain available regardless of language.
-// Pidgin confirm: na so, oya na, correct. Hausa confirm: i, eh, to.
-// Yoruba confirm: beeni, eeni, o dara. Igbo confirm: ee.
+// Confirm-tap-only rule (personal agent, best version): chat words never
+// execute a proposal. A bare "yes", "confirm", "go ahead", or their Pidgin,
+// Hausa, Yoruba, and Igbo equivalents in chat only produces the waiting
+// reply below; the proposal stays pending until the owner taps Confirm on
+// its card. The tap Confirm and Cancel buttons always remain available
+// regardless of language.
+// Chat confirm words, matched case-insensitively and accent-insensitively
+// (diacritics are stripped before matching, so "beenì" and "beeni" are the
+// same word here). They are detected ONLY to answer "still waiting".
+// Pidgin: na so, oya na, correct. Hausa: i, eh, to.
+// Yoruba: beeni, eeni, o dara. Igbo: ee.
 // Pidgin cancel: cancel am, no do am. Hausa cancel: a'a, aa, bari.
 // Yoruba cancel: rara, ko si. Igbo cancel: mba.
-const CONFIRM_RE = /^\s*(?:yes|yeah|yep|confirm|confirmed|go ahead|ok|okay|proceed|do it|sure|yes please|correct|that is right|that's right|na so|oya na|i|eh|to|beeni|eeni|o dara|ee)\s*[.!?]*\s*$/;
+const CHAT_CONFIRM_WORDS_RE = /^\s*(?:yes|yeah|yep|confirm|confirmed|go ahead|ok|okay|proceed|do it|sure|yes please|correct|that is right|that's right|na so|oya na|i|eh|to|beeni|eeni|o dara|ee)\s*[.!?]*\s*$/;
 const CANCEL_RE = /^\s*(?:no|cancel|cancel that|stop|don't|do not|never mind|forget it|leave it|cancel am|no do am|a'a|aa|bari|rara|ko si|mba)\s*[.!?]*\s*$/;
 
 function normalizeIntentText(text) {
@@ -1749,6 +2433,21 @@ function normalizeIntentText(text) {
 
 function intentMatches(re, text) {
   return re.test(normalizeIntentText(text));
+}
+
+async function loadPendingProposalById(db, businessId, sessionKey, proposalId) {
+  await ensurePendingProposals(db);
+  try {
+    const row = await db.prepare(
+      `SELECT id, business_id, user_id, session_key, tool, params, summary, status, created_at, expires_at
+       FROM ai_pending_proposals
+       WHERE id = ? AND business_id = ? AND session_key = ? AND status = 'pending' AND expires_at > ?
+       ORDER BY created_at DESC LIMIT 1`
+    ).bind(proposalId, businessId, sessionKey, toSqliteDate(new Date())).first();
+    return row || null;
+  } catch (e) {
+    return null;
+  }
 }
 
 async function loadPendingProposal(db, businessId, sessionKey) {
@@ -1800,6 +2499,10 @@ async function updateProposalStatus(db, businessId, proposalId, status, resultTe
 
 async function callWriteExecutor(context, db, auth, tool, params, currency, opts) {
   const exec = TOOL_EXECUTORS[tool];
+  // send_debtor_message has a different signature (db first, no context)
+  // and its draft check is skipped at execution: the proposal is the
+  // approval, created only after the dry-run validated the draft.
+  if (tool === "send_debtor_message") return exec(db, auth, params, currency, [], { skipDraftCheck: true });
   return exec(context, db, auth, params, currency, opts);
 }
 
@@ -1892,27 +2595,27 @@ export async function getAssistantProfile(db, businessId, tier) {
 export const PROPOSAL_TEXT = {
   en: {
     intro: "Here is exactly what I will record:",
-    closing: "Shall I go ahead? Tap Confirm, or reply yes. Tap Cancel, or reply no, and nothing is recorded.",
+    closing: "Tap Confirm to run it, or tap Cancel to drop it. Nothing is recorded yet.",
     cancelled: "Cancelled. Nothing was recorded.",
   },
   pcm: {
     intro: "Na wetin I go record be this:",
-    closing: "Make I go ahead? Tap Confirm, or talk say yes. Tap Cancel, or talk say no, I no go record anything.",
+    closing: "Tap Confirm to run am. Tap Cancel, and nothing is recorded.",
     cancelled: "Cancelled. I no record anything.",
   },
   ha: {
     intro: "Ga abin da zan rubuta:",
-    closing: "In ci gaba? Taɓa Confirm, ko ka ce i. Taɓa Cancel, ko ka ce a'a, ba zan rubuta komai ba.",
+    closing: "Taɓa Confirm don gudanar da shi, ko taɓa Cancel don sokewa. Ba a rubuta komai ba tukuna.",
     cancelled: "Na soke. Ba a rubuta komai ba.",
   },
   yo: {
     intro: "Ohun ti mo ma kọ silẹ ni eyi:",
-    closing: "Ki n tẹsiwaju? Tẹ Confirm, tabi ki o sọ pe beeni. Tẹ Cancel, tabi ki o sọ rara, emi ko ni kọ nkankan silẹ.",
+    closing: "Tẹ Confirm lati ṣiṣẹ rẹ, tabi tẹ Cancel lati fagile rẹ. Ko si ohun ti a kọ silẹ sibẹsibẹ.",
     cancelled: "Mo ti fagile. Ko si ohun ti a kọ silẹ.",
   },
   ig: {
     intro: "Nke a bụ ihe m ga-edekọ:",
-    closing: "Ka m gaa n'ihu? Pịa Confirm, ma ọ bụ kwuo ee. Pịa Cancel, ma ọ bụ kwuo mba, agaghị m edekọ ihe ọ bụla.",
+    closing: "Pịa Confirm iji mee ya, ma ọ bụ pịa Cancel iji hapụ ya. Edebeghị ihe ọ bụla.",
     cancelled: "Akagbuola. Ọ dịghị ihe edekọrọ.",
   },
 };
@@ -2135,14 +2838,85 @@ export async function runKopaAiChat(context, auth, body) {
 
     const safeBody = body || {};
     const message = String(safeBody.message || safeBody.question || "").trim().slice(0, 1000);
-    if (!message) return { status: 400, body: { ok: false, message: "Ask a question first." } };
+    // A Confirm tap may carry no message text at all, so it is exempt
+    // from the ask-a-question guard. It still runs below, after sessionKey.
+    if (!message && !safeBody.confirmProposalId) return { status: 400, body: { ok: false, message: "Ask a question first." } };
     const history = Array.isArray(safeBody.history)
       ? safeBody.history.filter((h) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string").slice(-HISTORY_LIMIT)
       : [];
     const sessionKey = safeBody.sessionId ? "s:" + safeBody.sessionId : "u:" + auth.user.id + ":b:" + businessId;
 
-    // Daily counters (per business per UTC day). bumpActions lives here so
-    // the early confirm path below can count an action on execution.
+    // Confirm-tap execution path (structured, not a chat word). The
+    // frontend proposal card sends { confirmProposalId: "<id>" } when the
+    // owner taps Confirm. This is the ONLY path that executes a proposal
+    // in this version: a typed "yes" in chat only produces the waiting
+    // reply above. If the frontend still sends the word "confirm" as a
+    // chat message, it must be wired to this flag before this set ships,
+    // or proposals will stay pending. See PUSH-READY-DIFF-V2.md.
+    if (typeof safeBody.confirmProposalId === "string" && safeBody.confirmProposalId) {
+      const tapProposal = await loadPendingProposalById(db, businessId, sessionKey, safeBody.confirmProposalId);
+      if (!tapProposal) {
+        return { status: 200, body: { ok: true, reply: "That proposal is no longer waiting. It may have expired after 10 minutes, been cancelled, or already run. Nothing was recorded by this tap.", answer: "That proposal is no longer waiting.", actions_taken: [], fallback: false } };
+      }
+      const tapDay = new Date().toISOString().slice(0, 10);
+      if (tier === "free" && !isPlatformOwner && PROJECT_WRITE_TOOLS.includes(tapProposal.tool)) {
+        const usedProjectActions = await countProjectActionsToday(db, businessId, tapDay);
+        if (usedProjectActions >= FREE_PROJECT_ACTIONS_PER_DAY) {
+          await updateProposalStatus(db, businessId, tapProposal.id, "failed", FREE_PROJECT_CAP_MSG);
+          return { status: 200, body: { ok: true, reply: FREE_PROJECT_CAP_MSG, answer: FREE_PROJECT_CAP_MSG, actions_taken: [], fallback: false, capped: true } };
+        }
+      }
+      let tapParams = {};
+      try { tapParams = JSON.parse(tapProposal.params || "{}") || {}; } catch (e) { tapParams = {}; }
+      // S6 stale debtor balance: the draft was approved against the balance
+      // at draft time. If it changed since, stop, show the new balance, and
+      // hand out no link. The owner asks for a fresh draft; nothing is sent.
+      if (tapProposal.tool === "send_debtor_message" && tapParams._balanceAtDraft !== undefined) {
+        const storedBalance = Number(tapParams._balanceAtDraft);
+        delete tapParams._balanceAtDraft;
+        const tapMatches = await matchCustomer(db, businessId, tapParams.customer_name || tapParams.customerName || "");
+        if (tapMatches.length === 1 && debtorBalanceChanged(storedBalance, tapMatches[0].balance)) {
+          const staleReply = "That balance changed since the draft: it was " + fmt(storedBalance, currency) + ", and now it is " + fmt(tapMatches[0].balance, currency) + ". I have not sent anything. Ask me to draft it again and I will draft it with the new balance.";
+          await updateProposalStatus(db, businessId, tapProposal.id, "stale", staleReply);
+          return { status: 200, body: { ok: true, reply: sanitizeTone(staleReply), answer: sanitizeTone(staleReply), actions_taken: [], fallback: false } };
+        }
+      } else if (tapParams._balanceAtDraft !== undefined) {
+        delete tapParams._balanceAtDraft;
+      }
+      let tapResult;
+      try {
+        if (!WRITE_TOOLS.includes(tapProposal.tool) || !TOOL_EXECUTORS[tapProposal.tool]) throw new Error("unknown proposal tool");
+        tapResult = await callWriteExecutor(context, db, auth, tapProposal.tool, tapParams, currency);
+      } catch (e) {
+        tapResult = { ok: false, clarification: "Something went wrong while doing that. Your data is untouched. Try again." };
+      }
+      if (!tapResult || tapResult.clarification || !tapResult.ok) {
+        const tapFail = (tapResult && tapResult.clarification) || "Something went wrong while doing that. Your data is untouched. Try again.";
+        await updateProposalStatus(db, businessId, tapProposal.id, "failed", tapFail);
+        return { status: 200, body: { ok: true, reply: tapFail, answer: tapFail, actions_taken: [], fallback: false } };
+      }
+      await updateProposalStatus(db, businessId, tapProposal.id, "executed", tapResult.summary);
+      // Count the executed action here, inline: this path runs before the
+      // bumpActions helper below is defined, and the SQL is identical to it.
+      try {
+        await db.prepare(
+          `INSERT INTO ai_usage (business_id, day, count, actions) VALUES (?, ?, 0, 1)
+           ON CONFLICT(business_id, day) DO UPDATE SET actions = actions + 1`
+        ).bind(String(businessId), tapDay).run();
+      } catch (e) { /* action counting must never break execution */ }
+      try { await audit(context, auth, "ai.proposal.execute", "ai_pending_proposal", tapProposal.id, { tool: tapProposal.tool }); } catch (e) { /* audit must never break execution */ }
+      // Debtor send: the WhatsApp link is the result, not a generated
+      // confirmation. The owner taps the link; Kopa never sends it.
+      if (tapProposal.tool === "send_debtor_message" && tapResult.waLink) {
+        const tapWaReply = `${tapResult.summary}\n\nTap to send on WhatsApp:\n${tapResult.waLink}`;
+        return { status: 200, body: { ok: true, reply: sanitizeTone(tapWaReply), answer: sanitizeTone(tapWaReply), actions_taken: [{ tool: tapProposal.tool, summary: tapResult.summary }], waLink: tapResult.waLink, fallback: false } };
+      }
+      return { status: 200, body: { ok: true, reply: sanitizeTone("Done. " + tapResult.summary), answer: sanitizeTone("Done. " + tapResult.summary), actions_taken: [{ tool: tapProposal.tool, summary: tapResult.summary }], fallback: false } };
+    }
+
+    // Daily counters (per business per UTC day). bumpActions lives here
+    // for non-proposal action execution below; the confirm tap path above
+    // counts its executed action inline with the same SQL.
     const day = new Date().toISOString().slice(0, 10);
     const bumpActions = async () => {
       await db.prepare(
@@ -2152,7 +2926,7 @@ export async function runKopaAiChat(context, auth, body) {
     };
 
     // ---- Early intents -----------------------------------------------------
-    // Clear chat, language switch, and confirm or cancel of a pending
+    // Clear chat, language switch, and cancel of a pending
     // proposal run BEFORE the daily question cap and BEFORE the question is
     // counted: none of them may consume a question or be blocked by the cap.
     if (CLEAR_CHAT_RE.test(message)) {
@@ -2202,56 +2976,31 @@ export async function runKopaAiChat(context, auth, body) {
       return { status: 200, body: { ok: true, reply: langReply, answer: langReply, actions_taken: [], fallback: false } };
     }
 
+    // Guardrail refusals, before the question cap (like clear and language
+    // switch): the agent has no tool for plan, price, billing, or staff
+    // changes, and no instruction may remove a hard gate.
+    const outOfScope = outOfScopeRefusal(message);
+    if (outOfScope) {
+      return { status: 200, body: { ok: true, reply: sanitizeTone(outOfScope), answer: sanitizeTone(outOfScope), actions_taken: [], fallback: false } };
+    }
+    const gateRefusal = instructionGateRefusal(message);
+    if (gateRefusal) {
+      return { status: 200, body: { ok: true, reply: sanitizeTone(gateRefusal), answer: sanitizeTone(gateRefusal), actions_taken: [], fallback: false } };
+    }
+    let oneOffInstruction = null;
+
     const pendingProposal = await loadPendingProposal(db, businessId, sessionKey);
     if (pendingProposal) {
-      if (intentMatches(CONFIRM_RE, message)) {
-        // Free project-action bucket, enforced again at execution time: a
-        // proposal prepared earlier must not land once today's 5 free
-        // project actions are used up (another session may have spent
-        // them in between). The proposal is closed as failed, nothing is
-        // created, and the user hears the plain cap message.
-        if (tier === "free" && !isPlatformOwner && PROJECT_WRITE_TOOLS.includes(pendingProposal.tool)) {
-          const usedProjectActions = await countProjectActionsToday(db, businessId, day);
-          if (usedProjectActions >= FREE_PROJECT_ACTIONS_PER_DAY) {
-            await updateProposalStatus(db, businessId, pendingProposal.id, "failed", FREE_PROJECT_CAP_MSG);
-            return { status: 200, body: { ok: true, reply: FREE_PROJECT_CAP_MSG, answer: FREE_PROJECT_CAP_MSG, actions_taken: [], fallback: false, capped: true } };
-          }
-        }
-        let storedParams = {};
-        try { storedParams = JSON.parse(pendingProposal.params || "{}") || {}; } catch (e) { storedParams = {}; }
-        let execResult;
-        try {
-          if (!WRITE_TOOLS.includes(pendingProposal.tool) || !TOOL_EXECUTORS[pendingProposal.tool]) throw new Error("unknown proposal tool");
-          execResult = await callWriteExecutor(context, db, auth, pendingProposal.tool, storedParams, currency);
-        } catch (e) {
-          execResult = { ok: false, clarification: "Something went wrong while doing that. Your data is untouched. Try again." };
-        }
-        if (!execResult || execResult.clarification || !execResult.ok) {
-          const failText = (execResult && execResult.clarification) || "Something went wrong while doing that. Your data is untouched. Try again.";
-          await updateProposalStatus(db, businessId, pendingProposal.id, "failed", failText);
-          return { status: 200, body: { ok: true, reply: failText, answer: failText, actions_taken: [], fallback: false } };
-        }
-        await updateProposalStatus(db, businessId, pendingProposal.id, "executed", execResult.summary);
-        await bumpActions();
-        try {
-          await audit(context, auth, "ai.proposal.execute", "ai_pending_proposal", pendingProposal.id, { tool: pendingProposal.tool });
-        } catch (e) { /* audit must never break the execution */ }
-        let confirmReply;
-        try {
-          confirmReply = await generateText(context.env, [
-              { role: "system", content: `You are ${assistant.name}, the warm, human KopaBook business assistant for Nigerian shop owners. The user asked you to do something and you just did it. Write a short, natural confirmation (2-3 sentences max) using ONLY the facts given. Never add numbers that are not in the facts.` },
-              { role: "user", content: `User request: ${message}\nWhat was done: ${execResult.summary}\nWrite the confirmation now.` },
-            ], { maxOutputTokens: 400 });
-          confirmReply = String(confirmReply);
-          if (!confirmReply) throw new Error("empty");
-        } catch (e) {
-          confirmReply = "Done. " + execResult.summary;
-        }
-        return { status: 200, body: {
-          ok: true, reply: confirmReply, answer: confirmReply,
-          actions_taken: [{ tool: pendingProposal.tool, summary: execResult.summary }],
-          fallback: false,
-        } };
+      // Confirm-tap-only: chat words never execute a proposal. A bare
+      // "yes" (or its Pidgin, Hausa, Yoruba, or Igbo equivalent) only
+      // produces this waiting reply. The proposal stays pending, nothing
+      // is recorded, and no action is counted. Execution happens only
+      // when the owner taps Confirm on the proposal card, which runs the
+      // separate confirm path: free project-action bucket re-checked,
+      // then callWriteExecutor, then the proposal is marked executed.
+      if (intentMatches(CHAT_CONFIRM_WORDS_RE, message)) {
+        const waitingReply = `That action is still waiting for your confirmation. Tap Confirm on its card to run it, or tap Cancel on the card to drop it. Nothing is recorded yet. Waiting: ${pendingProposal.summary}`;
+        return { status: 200, body: { ok: true, reply: waitingReply, answer: waitingReply, actions_taken: [], fallback: false, proposal: pendingProposal } };
       }
       if (intentMatches(CANCEL_RE, message)) {
         await updateProposalStatus(db, businessId, pendingProposal.id, "cancelled");
@@ -2262,6 +3011,67 @@ export async function runKopaAiChat(context, auth, body) {
         return { status: 200, body: { ok: true, reply: cancelReply, answer: cancelReply, actions_taken: [], fallback: false } };
       }
       // Any other message: the proposal stays pending and the normal flow runs.
+    }
+
+    // Pending-warning resolution, before the question cap: answering a
+    // warning question never consumes a question and never executes
+    // anything. A safer/original answer drafts a proposal (still needing
+    // a Confirm tap); a name answer drops the warning and falls through
+    // so the normal flow re-emits with the exact name; any other message
+    // supersedes the warning and falls through as a new request.
+    const pendingWarning = await loadPendingWarning(db, businessId, sessionKey);
+    if (pendingWarning) {
+      let wParams = {};
+      let wSafer = { action: "proposal" };
+      let wCandidates = [];
+      try { wParams = JSON.parse(pendingWarning.params || "{}") || {}; } catch (e) { wParams = {}; }
+      try { wSafer = JSON.parse(pendingWarning.safer_action || "{}") || { action: "proposal" }; } catch (e) { wSafer = { action: "proposal" }; }
+      try { wCandidates = JSON.parse(pendingWarning.candidates || "[]") || []; } catch (e) { wCandidates = []; }
+      const normMsg = normalizeIntentText(message);
+      const candidateHit = wCandidates.find((c) => normalizeIntentText(c) === normMsg);
+      if (intentMatches(CANCEL_RE, message)) {
+        await clearPendingWarnings(db, businessId, sessionKey, "cancelled");
+        const warnCancelReply = proposalText.cancelled;
+        return { status: 200, body: { ok: true, reply: warnCancelReply, answer: warnCancelReply, actions_taken: [], fallback: false } };
+      } else if (candidateHit) {
+        await clearPendingWarnings(db, businessId, sessionKey, "superseded");
+        // Fall through: the normal flow below re-emits with the exact name.
+      } else {
+        const warnAnswer = parseWarningAnswer(message);
+        if (warnAnswer === "once" && pendingWarning.kind === "instruction_conflict") {
+          await clearPendingWarnings(db, businessId, sessionKey, "answered");
+          oneOffInstruction = wParams.value || wParams.fact || "";
+          // Fall through: the one-off instruction is appended to the
+          // memory section for this next action only, and the standing
+          // instruction is left unchanged.
+        } else if (warnAnswer === "replace" && pendingWarning.kind === "instruction_conflict") {
+          await clearPendingWarnings(db, businessId, sessionKey, "answered");
+          const replaceProposal = await createAiProposal(db, businessId, auth.user.id, sessionKey, "save_memory", wParams, pendingWarning.summary, [pendingWarning.summary]);
+          try { await audit(context, auth, "ai.proposal.create", "ai_pending_proposal", replaceProposal.id, { tool: "save_memory", supersedes: pendingWarning.summary }); } catch (e) { /* audit must never break the proposal */ }
+          const replaceReply = proposalText.intro + "\n" + replaceProposal.lines.join("\n") + "\n" + proposalText.closing;
+          return { status: 200, body: { ok: true, reply: sanitizeTone(replaceReply), answer: sanitizeTone(replaceReply), actions_taken: [], fallback: false, proposal: replaceProposal } };
+        } else if (warnAnswer === "safer" || warnAnswer === "original") {
+          await clearPendingWarnings(db, businessId, sessionKey, "answered");
+          if (warnAnswer === "original" && pendingWarning.kind === "memory_price") {
+            const memPriceReply = "I record sales at the product record price, so I cannot record it at the saved price. Update the product price first, or confirm the record price and I will draft it for your Confirm tap.";
+            return { status: 200, body: { ok: true, reply: memPriceReply, answer: memPriceReply, actions_taken: [], fallback: false } };
+          }
+          if (warnAnswer === "safer" && wSafer.action === "reply") {
+            const saferReply = wSafer.reply || "Understood. I have not recorded anything yet.";
+            return { status: 200, body: { ok: true, reply: saferReply, answer: saferReply, actions_taken: [], fallback: false } };
+          }
+          const chosenParams = warnAnswer === "safer" ? (wSafer.params || wParams) : wParams;
+          const chosenSummary = warnAnswer === "safer" ? (wSafer.summary || pendingWarning.summary) : pendingWarning.summary;
+          const chosenLines = warnAnswer === "safer" ? (wSafer.lines || []) : (() => { try { return JSON.parse(pendingWarning.lines || "[]"); } catch (e) { return [pendingWarning.summary]; } })();
+          const chosenProposal = await createAiProposal(db, businessId, auth.user.id, sessionKey, pendingWarning.tool, chosenParams, chosenSummary, chosenLines);
+          try { await audit(context, auth, "ai.proposal.create", "ai_pending_proposal", chosenProposal.id, { tool: pendingWarning.tool, warning_kind: pendingWarning.kind, warning_answer: warnAnswer }); } catch (e) { /* audit must never break the proposal */ }
+          const chosenReply = proposalText.intro + "\n" + chosenProposal.lines.join("\n") + "\n" + proposalText.closing;
+          return { status: 200, body: { ok: true, reply: sanitizeTone(chosenReply), answer: sanitizeTone(chosenReply), actions_taken: [], fallback: false, proposal: chosenProposal } };
+        } else {
+          await clearPendingWarnings(db, businessId, sessionKey, "superseded");
+          // Fall through: a new, unrelated request replaces the warning.
+        }
+      }
     }
 
     // Daily question cap for this tier (per business per UTC day).
@@ -2316,9 +3126,9 @@ export async function runKopaAiChat(context, auth, body) {
         const eod = await buildEodSummary(db, auth, snap, currency);
         return { status: 200, body: { ok: true, reply: eod, answer: eod, actions_taken: [], fallback: false, usage: countedUsage } };
       }
-      // Reminder done: this executes directly, with no proposal, because it
-      // is the owner's explicit instruction about their own reminder, not a
-      // book entry. It is not a sale, expense or any other record of money.
+      // Reminder done (best version): a proposal first, like every other
+      // write. The owner's words only select the reminder; only a Confirm
+      // tap on the proposal card marks it done. Nothing is updated here.
       if (/reminder/i.test(message) && /(done|mark|complete|finished)/i.test(message)) {
         let pendingReminders = [];
         try {
@@ -2342,15 +3152,31 @@ export async function runKopaAiChat(context, auth, body) {
         } else {
           reminderReply = "I do not have a due reminder to mark as done.";
         }
+        let reminderProposal = null;
         if (target) {
+          // Same proposal shape as the ACTION path: supersede any older
+          // pending proposal for this session, store this one with a
+          // 10-minute expiry, and ask for a Confirm tap. Execution runs
+          // only through the confirm tap path, via mark_reminder_done.
+          const proposalId = "prop_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+          const createdAt = new Date();
+          const expiresStr = toSqliteDate(new Date(createdAt.getTime() + PROPOSAL_TTL_MS));
           try {
-            await db.prepare(`UPDATE bot_reminders SET status = 'done' WHERE id = ? AND business_id = ?`).bind(target.id, businessId).run();
-            reminderReply = `Done. I have marked the reminder '${target.title}' as done.`;
+            await ensurePendingProposals(db);
+            await db.prepare(
+              `UPDATE ai_pending_proposals SET status = 'superseded', resolved_at = ? WHERE business_id = ? AND session_key = ? AND status = 'pending'`
+            ).bind(toSqliteDate(createdAt), businessId, sessionKey).run();
+            await db.prepare(
+              `INSERT INTO ai_pending_proposals (id, business_id, user_id, session_key, tool, params, summary, status, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+            ).bind(proposalId, businessId, auth.user.id, sessionKey, "mark_reminder_done", JSON.stringify({ reminder_id: target.id, title: target.title }), `Mark reminder "${target.title}" as done.`, toSqliteDate(createdAt), expiresStr).run();
+            reminderProposal = { id: proposalId, tool: "mark_reminder_done", summary: `Mark reminder "${target.title}" as done.`, lines: [`Mark reminder "${target.title}" as done.`], expires_at: expiresStr };
+            reminderReply = proposalText.intro + "\n" + reminderProposal.lines.join("\n") + "\n" + proposalText.closing;
           } catch (e) {
-            reminderReply = "I could not update that reminder just now. Please try again.";
+            reminderReply = "I could not prepare that for confirmation just now. Your reminder is untouched. Try again.";
           }
         }
-        return { status: 200, body: { ok: true, reply: reminderReply, answer: reminderReply, actions_taken: [], fallback: false, usage: countedUsage } };
+        return { status: 200, body: { ok: true, reply: reminderReply, answer: reminderReply, actions_taken: [], fallback: false, usage: countedUsage, proposal: reminderProposal } };
       }
     }
 
@@ -2365,6 +3191,10 @@ export async function runKopaAiChat(context, auth, body) {
         memorySection = "What you remember about this business:\n" + mems.map((r) => `- ${r.memory_key}: ${r.memory_value}`).join("\n");
       }
     } catch (e) { /* ai_memory table not migrated yet; skip silently */ }
+
+    if (oneOffInstruction) {
+      memorySection = (memorySection ? memorySection + "\n" : "") + "One-off instruction for this next action only (it does not replace any standing instruction): " + oneOffInstruction;
+    }
 
     const sys = systemPrompt(snap, currency, tier, memorySection, assistant);
 
@@ -2434,13 +3264,15 @@ export async function runKopaAiChat(context, auth, body) {
         const exec = TOOL_EXECUTORS[action.tool];
         // Write tools run in dry-run mode first: they validate everything
         // and return an exact proposal, and nothing is recorded yet.
-        // Debtor tools need the Workers AI handle and conversation history.
-        result = isWriteTool
-          ? await exec(context, db, auth, action.params, currency, { dryRun: true, userMessage: message })
-          : action.tool === "draft_debtor_message"
-            ? await exec(context.env, db, auth, action.params, currency)
-            : action.tool === "send_debtor_message"
-              ? await exec(db, auth, action.params, currency, history)
+        // send_debtor_message has a different signature (db first) and its
+        // dry-run validates the draft against chat history, without
+        // logging an action or handing out a WhatsApp link yet.
+        result = isWriteTool && action.tool === "send_debtor_message"
+          ? await exec(db, auth, action.params, currency, history, { dryRun: true, userMessage: message })
+          : isWriteTool
+            ? await exec(context, db, auth, action.params, currency, { dryRun: true, userMessage: message })
+            : action.tool === "draft_debtor_message"
+              ? await exec(context.env, db, auth, action.params, currency)
               : await exec(context, db, auth, action.params, currency);
       } catch (e) {
         result = { ok: false, clarification: "Something went wrong while doing that. Your data is untouched. Try again." };
@@ -2448,9 +3280,51 @@ export async function runKopaAiChat(context, auth, body) {
       if (result.clarification) {
         // Never execute on ambiguity. Ask the user, conversationally.
         return { status: 200, body: {
-          ok: true, reply: result.clarification, answer: result.clarification,
+          ok: true, reply: sanitizeTone(result.clarification), answer: sanitizeTone(result.clarification),
           actions_taken: [], fallback: false, usage: usageObj(),
         } };
+      }
+      // Guardrails, after the dry-run validates and before any proposal is
+      // stored: hard stops ask one short question, soft warnings warn
+      // first in the exact 5-part shape, instruction conflicts ask which
+      // wins. Tier and role gates already ran above, before the dry-run.
+      if (isWriteTool && result.proposal) {
+        const gate = await runGuardrailChecks(db, auth, action.tool, action.params, result.proposal, message, currency, { sessionKey });
+        if (gate.stop) {
+          return { status: 200, body: {
+            ok: true, reply: sanitizeTone(gate.stop), answer: sanitizeTone(gate.stop),
+            actions_taken: [], fallback: false, usage: usageObj(),
+          } };
+        }
+        if (gate.conflict) {
+          const conflictWarning = await storePendingWarning(db, {
+            businessId, userId: auth.user.id, sessionKey, tool: "save_memory",
+            params: { key: gate.conflict.key, value: gate.conflict.newValue },
+            summary: "Remember " + gate.conflict.key + ": " + gate.conflict.newValue,
+            lines: ["Remember " + gate.conflict.key + ": " + gate.conflict.newValue],
+            kind: "instruction_conflict", question: gate.conflict.question, candidates: [],
+            saferAction: { action: "reply", reply: "" },
+          });
+          void conflictWarning;
+          return { status: 200, body: {
+            ok: true, reply: sanitizeTone(gate.conflict.question), answer: sanitizeTone(gate.conflict.question),
+            actions_taken: [], fallback: false, usage: usageObj(),
+          } };
+        }
+        if (gate.warning) {
+          const w = gate.warning;
+          await storePendingWarning(db, {
+            businessId, userId: auth.user.id, sessionKey, tool: action.tool,
+            params: action.params, summary: result.proposal.summary, lines: result.proposal.lines,
+            kind: w.kind, question: w.question, candidates: w.candidates || [],
+            saferAction: w.saferAction || { action: "proposal", params: action.params, summary: result.proposal.summary, lines: result.proposal.lines },
+          });
+          const warningReply = formatWarning({ asked: w.asked, why: w.why, change: w.change, safer: w.safer, question: w.question });
+          return { status: 200, body: {
+            ok: true, reply: sanitizeTone(warningReply), answer: sanitizeTone(warningReply),
+            actions_taken: [], fallback: false, usage: usageObj(),
+          } };
+        }
       }
       if (action.tool === "project_report") {
         // A read-only report is returned exactly as the Projects endpoint
@@ -2472,10 +3346,17 @@ export async function runKopaAiChat(context, auth, body) {
           await db.prepare(
             `UPDATE ai_pending_proposals SET status = 'superseded', resolved_at = ? WHERE business_id = ? AND session_key = ? AND status = 'pending'`
           ).bind(toSqliteDate(createdAt), businessId, sessionKey).run();
+          let storedParams = action.params || {};
+          if (action.tool === "send_debtor_message") {
+            try {
+              const draftMatches = await matchCustomer(db, businessId, action.params.customer_name || action.params.customerName || "");
+              if (draftMatches.length === 1) storedParams = { ...storedParams, _balanceAtDraft: draftMatches[0].balance };
+            } catch (e) { /* no baseline: the tap path then skips the stale check */ }
+          }
           await db.prepare(
             `INSERT INTO ai_pending_proposals (id, business_id, user_id, session_key, tool, params, summary, status, created_at, expires_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
-          ).bind(proposalId, businessId, auth.user.id, sessionKey, action.tool, JSON.stringify(action.params || {}), result.proposal.summary, toSqliteDate(createdAt), expiresStr).run();
+          ).bind(proposalId, businessId, auth.user.id, sessionKey, action.tool, JSON.stringify(storedParams), result.proposal.summary, toSqliteDate(createdAt), expiresStr).run();
         } catch (e) {
           return { status: 200, body: {
             ok: true, reply: "I could not prepare that for confirmation just now. Your data is untouched. Try again.", answer: "I could not prepare that for confirmation just now. Your data is untouched. Try again.",
@@ -2487,7 +3368,7 @@ export async function runKopaAiChat(context, auth, body) {
         } catch (e) { /* audit must never break the proposal */ }
         const proposalReply = proposalText.intro + "\n" + result.proposal.lines.join("\n") + "\n" + proposalText.closing;
         return { status: 200, body: {
-          ok: true, reply: proposalReply, answer: proposalReply, actions_taken: [], fallback: false,
+          ok: true, reply: sanitizeTone(proposalReply), answer: sanitizeTone(proposalReply), actions_taken: [], fallback: false,
           proposal: { id: proposalId, tool: action.tool, summary: result.proposal.summary, lines: result.proposal.lines, expires_at: expiresStr },
           usage: usageObj(),
         } };
@@ -2516,7 +3397,7 @@ export async function runKopaAiChat(context, auth, body) {
       let reply;
       try {
         reply = await generateText(context.env, [
-            { role: "system", content: `You are ${assistant.name}, the warm, human KopaBook business assistant for Nigerian shop owners. The user asked you to do something and you just did it. Write a short, natural confirmation (2-3 sentences max) using ONLY the facts given. Never add numbers that are not in the facts.` },
+            { role: "system", content: `You are ${assistant.name}, the warm, plain KopaBook business assistant for Nigerian shop owners. The user asked you to do something and you just did it. Write a short, natural confirmation (2-3 sentences max) using ONLY the facts given. Never add numbers that are not in the facts.` },
             { role: "user", content: `User request: ${message}\nWhat was done: ${result.summary}\nWrite the confirmation now.` },
           ], { maxOutputTokens: 400 });
         reply = String(reply);
@@ -2533,7 +3414,7 @@ export async function runKopaAiChat(context, auth, body) {
     // Plain conversational answer (ACTION line stripped if the model left one).
     const cleanReply = action && action.rest ? action.rest : modelText;
     return { status: 200, body: {
-      ok: true, reply: cleanReply, answer: cleanReply, actions_taken: [],
+      ok: true, reply: sanitizeTone(cleanReply), answer: sanitizeTone(cleanReply), actions_taken: [],
       fallback: false, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay },
     } };
   } catch (error) {

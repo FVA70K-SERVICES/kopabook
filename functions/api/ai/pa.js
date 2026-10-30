@@ -1,5 +1,7 @@
 // GET  /api/ai/pa - PA cards for the signed-in business (Solo and Pro).
-// POST /api/ai/pa - { action: 'reminder_done', reminder_id }
+// POST /api/ai/pa - { action: 'reminder_done', reminder_id, sessionId? }
+// reminder_done creates a mark_reminder_done proposal only; the Confirm
+// tap path in chat.js executes it. It never updates bot_reminders directly.
 //
 // The personal assistant is a Solo and Pro feature: naming, the manager
 // behaviour and these cards unlock on those tiers (a promo Pro month counts,
@@ -7,7 +9,7 @@
 // here is scoped to the caller's own business only.
 import { json, getAuthContext, requireAuth, toSqliteDate } from "../_utils.js";
 import { getBusinessOwnerTier } from "../billing.js";
-import { getAssistantProfile } from "./chat.js";
+import { getAssistantProfile, createAiProposal } from "./chat.js";
 
 function fmt(n, currency) {
   const v = Number(n || 0);
@@ -137,13 +139,26 @@ export async function onRequestPost(context) {
     const body = await context.request.json().catch(() => ({}));
     const action = body.action;
 
+    // Guardrail: marking a reminder done is a write, so it is a proposal
+    // first, never a direct update. The owner taps Confirm on the proposal
+    // card (through the /send confirm path, which executes
+    // mark_reminder_done in chat.js) and only then is the row updated.
+    // sessionKey matches chat.js: "s:" + chat session id when the widget
+    // sends one, otherwise the auth-derived "u:<user>:b:<business>" key.
     if (action === "reminder_done") {
       const reminderId = body.reminder_id || body.reminderId || body.id;
       if (!reminderId) return json({ ok: false, message: "Pick a reminder first." }, 400);
-      await db.prepare(
-        `UPDATE bot_reminders SET status = 'done' WHERE id = ? AND business_id = ?`
-      ).bind(reminderId, businessId).run();
-      return json({ ok: true });
+      const row = await db.prepare(
+        `SELECT id, title, status FROM bot_reminders WHERE id = ? AND business_id = ?`
+      ).bind(reminderId, businessId).first();
+      if (!row) return json({ ok: false, message: "I could not find that reminder in this business." }, 404);
+      if (row.status === "done") return json({ ok: false, message: "That reminder is already marked done." }, 400);
+      const sessionKey = body.sessionId ? "s:" + body.sessionId : "u:" + auth.user.id + ":b:" + businessId;
+      const proposal = await createAiProposal(db, businessId, auth.user.id, sessionKey, "mark_reminder_done",
+        { reminder_id: row.id, title: row.title },
+        `Mark reminder "${row.title}" as done.`,
+        [`Mark reminder "${row.title}" as done.`]);
+      return json({ ok: true, proposal });
     }
 
     return json({ ok: false, message: "Unknown action." }, 400);
