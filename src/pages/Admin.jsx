@@ -41,17 +41,23 @@ function Overview() {
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <h3 style={{ marginTop: 0 }}>Newest accounts</h3>
-        <table><thead><tr><th>Email</th><th>Tier</th><th>Joined</th></tr></thead>
+        <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--muted)" }}>Scroll sideways to see all columns.</p>
+        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <table style={{ width: "100%", minWidth: 560 }}><thead><tr><th>Email</th><th>Tier</th><th>Joined</th></tr></thead>
         <tbody>{d.recentUsers.map((u) => (
-          <tr key={u.id}><td><small>{u.email}</small></td><td style={{ textTransform: "capitalize" }}>{u.tier}</td><td><small>{String(u.created_at || "").slice(0, 10)}</small></td></tr>
+          <tr key={u.id}><td title={u.email}><small>{u.email}</small></td><td style={{ textTransform: "capitalize", whiteSpace: "nowrap" }}>{u.tier}</td><td style={{ whiteSpace: "nowrap" }}><small>{String(u.created_at || "").slice(0, 10)}</small></td></tr>
         ))}</tbody></table>
+        </div>
       </div>
       <div className="card" style={{ marginTop: 18 }}>
         <h3 style={{ marginTop: 0 }}>Latest payments</h3>
-        <table><thead><tr><th>Account</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead>
+        <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--muted)" }}>Scroll sideways to see all columns.</p>
+        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <table style={{ width: "100%", minWidth: 560 }}><thead><tr><th>Account</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead>
         <tbody>{d.recentPayments.map((p) => (
-          <tr key={p.id}><td><small>{p.email}</small></td><td style={{ textTransform: "capitalize" }}>{p.tier}</td><td className="money">NGN {(Number(p.amount_kobo) / 100).toLocaleString()}</td><td>{p.status}</td></tr>
+          <tr key={p.id}><td title={p.email}><small>{p.email}</small></td><td style={{ textTransform: "capitalize", whiteSpace: "nowrap" }}>{p.tier}</td><td className="money">NGN {(Number(p.amount_kobo) / 100).toLocaleString()}</td><td style={{ whiteSpace: "nowrap" }}>{p.status}</td></tr>
         ))}</tbody></table>
+        </div>
       </div>
     </>
   );
