@@ -33,7 +33,6 @@ import {
 
 const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const GEMINI_MODEL = "gemini-3.8-flash";
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 // Groq retired llama-3.3-70b-versatile for free tier on 2026-08-16; their
 // recommended free replacement is openai/gpt-oss-120b.
@@ -41,6 +40,22 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free";
 const PROVIDER_TIMEOUT_MS = 20000;
+// Paid Gemini slot (PLAN step 2). Model is deliberately the same verified
+// Gemini model as the free chain until a list-models check in a secure
+// session proves what the paid key can call; no new model name is assumed.
+// Env var name only: GEMINI_PAID_API_KEY, Pages dashboard secret, never in
+// code, chat, files, logs, or any endpoint response.
+const GEMINI_PAID_MODEL = GEMINI_MODEL;
+const STANDARD_MAX_OUTPUT_TOKENS = 2048;
+const ADVANCED_MAX_OUTPUT_TOKENS = 4096;
+const STATIC_CACHE_TTL_MS = 600000; // 10 minutes, static knowledge only
+const RETRY_BACKOFF_MS = 300;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Static-knowledge cache only. Business chat always carries a live snapshot,
+// so it must never opt in: a caller may pass staticKnowledge + staticCacheKey
+// only for a business-free, static answer (plans, how-to, product facts).
+// The key itself must never contain business data, figures, or user text.
+const staticKnowledgeCache = new Map();
 
 // Every provider below has the same shape: (env, messages, opts) => text,
 // and throws when it cannot answer. A missing credential throws a
@@ -49,6 +64,12 @@ async function providerGemini(env, messages, opts) {
   const key = env && env.GEMINI_API_KEY ? String(env.GEMINI_API_KEY) : "";
   if (!key) throw new Error("gemini not configured");
   return geminiGenerate(key, messages, opts);
+}
+
+async function providerGeminiPaid(env, messages, opts) {
+  const key = env && env.GEMINI_PAID_API_KEY ? String(env.GEMINI_PAID_API_KEY) : "";
+  if (!key) throw new Error("gemini-paid not configured");
+  return geminiGenerate(key, messages, opts, GEMINI_PAID_MODEL);
 }
 
 async function providerWorkersAi(env, messages, opts) {
@@ -87,28 +108,41 @@ async function openAiChat(url, apiKey, model, messages, opts, extraHeaders) {
     temperature: typeof o.temperature === "number" ? o.temperature : 0.7,
     max_tokens: o.maxOutputTokens || 2048,
   };
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: Object.assign(
-        { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-        extraHeaders || {}
-      ),
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-    return String(text || "").trim();
-  } finally {
-    clearTimeout(timer);
+  // Single retry only on 429 or 5xx, with a short backoff. Never on 400
+  // (a bad request will fail again) and never on a timeout/abort.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: Object.assign(
+          { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+          extraHeaders || {}
+        ),
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        if ((res.status === 429 || res.status >= 500) && attempt === 0) {
+          await sleep(RETRY_BACKOFF_MS);
+          continue;
+        }
+        throw new Error("HTTP " + res.status);
+      }
+      const data = await res.json();
+      const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+      return String(text || "").trim();
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw new Error("HTTP retry exhausted");
 }
 
-async function geminiGenerate(key, messages, opts) {
+async function geminiGenerate(key, messages, opts, modelName) {
+  const model = modelName || GEMINI_MODEL;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
   // Convert OpenAI-style {role, content} messages to Gemini format: the first
   // system message becomes system_instruction, assistant turns become model
   // turns. gemini-3.8-flash is a reasoning model, so the token budget leaves
@@ -128,50 +162,96 @@ async function geminiGenerate(key, messages, opts) {
     temperature: typeof opts.temperature === "number" ? opts.temperature : 0.7,
     maxOutputTokens: opts.maxOutputTokens || 2048,
   };
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
-  try {
-    const res = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error("Gemini HTTP " + res.status);
-    const data = await res.json();
-    const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
-    return parts.map((p) => (p && p.text) || "").join("").trim();
-  } finally {
-    clearTimeout(timer);
+  // Single retry only on 429 or 5xx, with a short backoff. Never on 400
+  // and never on a timeout/abort.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        if ((res.status === 429 || res.status >= 500) && attempt === 0) {
+          await sleep(RETRY_BACKOFF_MS);
+          continue;
+        }
+        throw new Error("Gemini HTTP " + res.status);
+      }
+      const data = await res.json();
+      const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+      return parts.map((p) => (p && p.text) || "").join("").trim();
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw new Error("Gemini HTTP retry exhausted");
 }
 
 const AI_PROVIDERS = {
   "gemini": providerGemini,
+  "gemini-paid": providerGeminiPaid,
   "workers-ai": providerWorkersAi,
   "groq": providerGroq,
   "openrouter": providerOpenRouter,
 };
 
 export function aiProviderAvailable(env) {
-  return !!(env && (env.GEMINI_API_KEY || env.AI || env.GROQ_API_KEY || env.OPENROUTER_API_KEY));
+  return !!(env && (env.GEMINI_API_KEY || env.GEMINI_PAID_API_KEY || env.AI || env.GROQ_API_KEY || env.OPENROUTER_API_KEY));
 }
 
 // Provider chain with easy switching: order comes from env.AI_PROVIDER_ORDER
 // (comma-separated, e.g. "gemini,workers-ai,groq,openrouter"), default
-// "gemini,workers-ai". First success wins; every failure is logged; throws
-// only when all fail, and the caller then serves the graceful snapshot
-// fallback.
+// "gemini,workers-ai". First success wins; every failure is logged by
+// provider name only (never a key, prompt, or answer); throws only when
+// all fail, and the caller then serves the graceful snapshot fallback.
+//
+// Paid routing (opts.advanced === true, currently only the Admin AI engine
+// sets it): try "gemini-paid" first, then the existing free chain in its
+// current order, so a paid failure falls back to free. Standard questions
+// (advanced not set) keep the existing order unchanged and never silently
+// upgrade to paid. If GEMINI_PAID_API_KEY is absent, providerGeminiPaid
+// throws "not configured" and the chain falls through to free exactly as
+// today, with no user-facing error.
+//
+// Tiered output caps: an explicit opts.maxOutputTokens always wins
+// (draft/confirm calls keep 400). Otherwise standard calls get
+// STANDARD_MAX_OUTPUT_TOKENS and advanced calls get
+// ADVANCED_MAX_OUTPUT_TOKENS, set per call, never globally.
+//
+// Static cache: only when opts.staticKnowledge === true AND the caller
+// supplies a business-free opts.staticCacheKey. Business chat never sets
+// either, because its snapshot is live data that must never be cached.
 export async function generateText(env, messages, opts) {
-  const order = String((env && env.AI_PROVIDER_ORDER) || "gemini,workers-ai")
+  const o = opts || {};
+  const isAdvanced = o.advanced === true;
+  const maxOutputTokens = typeof o.maxOutputTokens === "number"
+    ? o.maxOutputTokens
+    : (isAdvanced ? ADVANCED_MAX_OUTPUT_TOKENS : STANDARD_MAX_OUTPUT_TOKENS);
+  const callOpts = Object.assign({}, o, { maxOutputTokens });
+  const cacheKey = o.staticKnowledge === true && typeof o.staticCacheKey === "string" && o.staticCacheKey
+    ? o.staticCacheKey : null;
+  if (cacheKey) {
+    const hit = staticKnowledgeCache.get(cacheKey);
+    if (hit && Date.now() < hit.expiresAt) return hit.text;
+    if (hit) staticKnowledgeCache.delete(cacheKey);
+  }
+  let order = String((env && env.AI_PROVIDER_ORDER) || "gemini,workers-ai")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (isAdvanced) order = ["gemini-paid", ...order.filter((n) => n !== "gemini-paid")];
   let lastErr = null;
   for (const name of order) {
     const fn = AI_PROVIDERS[name];
     if (!fn) { console.error("AI provider order: unknown provider '" + name + "'"); continue; }
     try {
-      const text = await fn(env, messages, opts);
-      if (text) return text;
+      const text = await fn(env, messages, callOpts);
+      if (text) {
+        if (cacheKey) staticKnowledgeCache.set(cacheKey, { text, expiresAt: Date.now() + STATIC_CACHE_TTL_MS });
+        return text;
+      }
       throw new Error("empty response from " + name);
     } catch (e) {
       lastErr = e;
