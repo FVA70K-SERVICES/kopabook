@@ -124,7 +124,7 @@ async function saveHandoffSnapshot(db, sessionId, siteId, visitorName) {
 export async function onRequestPost(context) {
   const { request, env } = context;
   try {
-    const { sessionId, sender, message, siteId, ownerCtx, mode } = await request.json();
+    const { sessionId, sender, message, siteId, ownerCtx, mode, confirmProposalId } = await request.json();
     if (!sessionId || !message || !message.trim()) {
       return Response.json({ error: 'Missing fields' }, { status: 400 });
     }
@@ -241,8 +241,10 @@ export async function onRequestPost(context) {
         // questions from support knowledge and escalates to a human.
         if (verifiedOwner) {
           if (ownerAuth.user.fullName) visitorName = ownerAuth.user.fullName;
-          result = getEscalationResponse(clean, visitorName);
-          if (!result && isFrustrated(clean)) {
+          // A Confirm tap must reach the AI engine untouched: escalation,
+          // frustration, and platform-question branches never intercept it.
+          result = confirmProposalId ? null : getEscalationResponse(clean, visitorName);
+          if (!result && !confirmProposalId && isFrustrated(clean)) {
             result = {
               answer: 'I am sorry this has been frustrating. I have flagged this chat for a person on the FVA70K team, and they will join here. The full conversation goes with it, so you will not have to repeat yourself.',
               quickReplies: [],
@@ -251,7 +253,7 @@ export async function onRequestPost(context) {
             };
           }
           if (!result && activeMode === 'ai') {
-            if (isPlatformQuestion(clean)) {
+            if (!confirmProposalId && isPlatformQuestion(clean)) {
               result = {
                 answer: PLATFORM_SUPPORT_SUGGESTION,
                 quickReplies: [],
@@ -275,7 +277,7 @@ export async function onRequestPost(context) {
                   .filter((m) => m.sender === 'visitor' || m.sender === 'bot' || m.sender === 'agent')
                   .map((m) => ({ role: m.sender === 'visitor' ? 'user' : 'assistant', content: String(m.message || '').slice(0, 1000) }))
                   .slice(-20);
-                const aiRes = await runKopaAiChat(context, ownerAuth, { message: clean, history, sessionId });
+                const aiRes = await runKopaAiChat(context, ownerAuth, { message: clean, history, sessionId, confirmProposalId });
                 const b = aiRes.body || {};
                 const answer = b.reply || b.answer || b.message || 'Ask Kopa AI could not answer just now. Please try again.';
                 result = { answer, quickReplies: [], confidence: 'high', proposal: b.proposal || null, clearChat: b.clear_chat || false };
