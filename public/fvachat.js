@@ -39,6 +39,9 @@
   let paCardsRenderedThisOpen = false;
   let localAssistantLanguage = '';
   let activeProposal = null;
+  // PA reminder card waiting on its proposal card: { el, btn } or null.
+  // Confirm removes it (the reminder is done); Cancel re-enables it.
+  let pendingPaCard = null;
 
   // ---- Live voice (Web Speech API, AI mode, owner mode) ----
   // Listening is a bounded session, never an open-ended loop: every session
@@ -578,11 +581,19 @@
           const res = await fetch((API_BASE || '') + '/api/ai/pa', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'reminder_done', reminder_id: card.reminder_id }),
+            body: JSON.stringify({ action: 'reminder_done', reminder_id: card.reminder_id, sessionId }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || (data && data.ok === false)) throw new Error('failed');
-          el.remove();
+          // Guardrail: /api/ai/pa now returns a proposal, never a direct
+          // update. Show its Confirm card; the PA card goes away only
+          // when the owner taps Confirm, or its button returns on Cancel.
+          if (data && data.proposal) {
+            pendingPaCard = { el, btn: b };
+            renderProposalCard(data.proposal);
+          } else {
+            el.remove();
+          }
         } catch (e) {
           b.disabled = false;
           err.textContent = 'Could not mark that done. Please try again.';
@@ -951,7 +962,7 @@
       voiceState = 'processing';
       setVoiceChip('Thinking...');
       updateVoiceButtonState();
-      enqueueSpeech('I did not catch that. Say yes to confirm, or no to cancel.');
+      enqueueSpeech('I did not catch that. Tap Confirm on its card to run it, or tap Cancel to drop it.');
       if (!speechSpeaking && !speechQueue.length) scheduleListeningRestart(400);
     } else {
       finishListenSession('nospeech');
@@ -1110,7 +1121,7 @@
       if (!s) return '';
       return /[.!?]$/.test(s) ? s : s + '.';
     }).filter(Boolean);
-    const text = (parts.join(' ') + ' Say yes to confirm, or no to cancel.').trim();
+    const text = (parts.join(' ') + ' Tap Confirm to run it, or tap Cancel to drop it.').trim();
     enqueueSpeech(text);
   }
 
@@ -1817,7 +1828,7 @@
     return null;
   }
 
-  async function sendMessage(text) {
+  async function sendMessage(text, opts) {
     if (IS_KOPABOOK && isOwnerMode() && !chatMode) {
       showDoorPicker();
       appendModeNote('Choose Ask Kopa AI or Kopa Support first, then send that again.');
@@ -1836,6 +1847,9 @@
     showBotTyping();
     try {
       const payload = { sessionId, sender: 'visitor', message: text, siteId: SITE_ID };
+      // Confirm tap: a structured id, not the word "Confirm". The server
+      // executes only through confirmProposalId; a chat word never does.
+      if (opts && opts.confirmProposalId) payload.confirmProposalId = opts.confirmProposalId;
       const ownerCtx = getOwnerCtx();
       if (ownerCtx) payload.ownerCtx = ownerCtx;
       if (IS_KOPABOOK && ownerCtx) payload.mode = chatMode || 'support';
@@ -1865,8 +1879,9 @@
         maybeSpeakBotText(data.botReply.answer);
       }
       // Confirmation proposal card for a write action proposed by Ask Kopa AI.
-      // Confirming or cancelling is an ordinary chat message: the server
-      // interprets the exact texts "Confirm" and "Cancel".
+      // Confirm is a structured tap: the button sends confirmProposalId
+      // with the proposal id. Cancel stays an ordinary chat message
+      // "Cancel"; cancelling records nothing.
       if (data.botReply && data.botReply.proposal) {
         renderProposalCard(data.botReply.proposal);
       }
@@ -1936,16 +1951,24 @@
     cancelBtn.className = 'fva-proposal-btn fva-proposal-cancel';
     cancelBtn.textContent = 'Cancel';
 
-    const choose = (statusText, message) => {
+    const choose = (statusText, message, confirmProposalId) => {
       if (confirmBtn.disabled || cancelBtn.disabled) return;
       confirmBtn.disabled = true;
       cancelBtn.disabled = true;
       card.classList.add('is-done');
       if (activeProposal && activeProposal.cardEl === card) activeProposal = null;
       status.textContent = statusText;
-      sendMessage(message);
+      if (confirmProposalId) {
+        if (pendingPaCard && pendingPaCard.el) pendingPaCard.el.remove();
+        pendingPaCard = null;
+        sendMessage(message, { confirmProposalId });
+      } else {
+        if (pendingPaCard && pendingPaCard.btn) pendingPaCard.btn.disabled = false;
+        pendingPaCard = null;
+        sendMessage(message);
+      }
     };
-    confirmBtn.addEventListener('click', () => choose('You tapped Confirm', 'Confirm'));
+    confirmBtn.addEventListener('click', () => choose('You tapped Confirm', 'You tapped Confirm', (p.id !== undefined && p.id !== null ? String(p.id) : null)));
     cancelBtn.addEventListener('click', () => choose('You cancelled this', 'Cancel'));
 
     actions.appendChild(confirmBtn);
