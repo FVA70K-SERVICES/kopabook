@@ -87,10 +87,13 @@ function parseToolCall(text) {
 }
 
 async function callModel(context, deps, messages) {
+  // Admin AI is advanced work: gemini-paid first (if its key is set), then
+  // the existing free chain. No explicit maxOutputTokens here, so
+  // generateText applies the advanced tier cap (4096) for this call only.
   if (deps && typeof deps.generateText === "function") {
-    return await deps.generateText(context.env, messages, { temperature: 0.2, maxOutputTokens: 1200 });
+    return await deps.generateText(context.env, messages, { temperature: 0.2, advanced: true });
   }
-  return await generateText(context.env, messages, { temperature: 0.2, maxOutputTokens: 1200 });
+  return await generateText(context.env, messages, { temperature: 0.2, advanced: true });
 }
 
 export async function runAdminAiChat(context, auth, body, deps = {}) {
