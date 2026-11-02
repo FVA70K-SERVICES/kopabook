@@ -1,4 +1,4 @@
-// POST /api/ai/chat: Kopa, the KopaBook business assistant (paid-only Gemini, no free chain).
+// POST /api/ai/chat: Kopa, the KopaBook business assistant (paid Gemini keys only, no free chain).
 //
 // One live chatbot that answers EVERYTHING about the business from real,
 // live store data. The LLM never writes SQL and never invents numbers: every
@@ -35,12 +35,16 @@ import {
 
 const GEMINI_MODEL = "gemini-3.8-flash";
 const PROVIDER_TIMEOUT_MS = 20000;
-// Paid Gemini slot, now the ONLY model provider for every Kopa bot.
+// Two paid Gemini slots, the ONLY model providers for every Kopa bot.
+// Fortune confirmed 2026-11-02 that the Gemini keys already held are paid
+// API keys, so both are paid providers, not a free chain: GEMINI_PAID_API_KEY
+// is tried first, then the already-held GEMINI_API_KEY. No Groq, OpenRouter,
+// Workers AI, or any other provider is restored by this change.
 // Model is deliberately the same verified Gemini model as before until a
-// list-models check in a secure session proves what the paid key can call;
+// list-models check in a secure session proves what the paid keys can call;
 // no new model name is assumed.
-// Env var name only: GEMINI_PAID_API_KEY, Pages dashboard secret, never in
-// code, chat, files, logs, or any endpoint response.
+// Env var names only: GEMINI_PAID_API_KEY, GEMINI_API_KEY, Pages dashboard
+// secrets, never in code, chat, files, logs, or any endpoint response.
 const GEMINI_PAID_MODEL = GEMINI_MODEL;
 const STANDARD_MAX_OUTPUT_TOKENS = 2048;
 const ADVANCED_MAX_OUTPUT_TOKENS = 4096;
@@ -53,13 +57,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The key itself must never contain business data, figures, or user text.
 const staticKnowledgeCache = new Map();
 
-// The only provider below has this shape: (env, messages, opts) => text,
-// and throws when it cannot answer. A missing paid credential throws a
-// "not configured" error and the call fails closed, never falling back
-// to any free provider.
+// Each provider below has this shape: (env, messages, opts) => text,
+// and throws when it cannot answer. A missing credential throws a
+// "not configured" error and the call moves to the next paid key, never
+// falling back to any free provider.
 async function providerGeminiPaid(env, messages, opts) {
   const key = env && env.GEMINI_PAID_API_KEY ? String(env.GEMINI_PAID_API_KEY) : "";
   if (!key) throw new Error("gemini-paid not configured");
+  return geminiGenerate(key, messages, opts, GEMINI_PAID_MODEL);
+}
+
+// Already-held Gemini key, confirmed paid 2026-11-02, tried second only
+// when gemini-paid fails or is absent. Same model, same endpoint.
+async function providerGeminiExisting(env, messages, opts) {
+  const key = env && env.GEMINI_API_KEY ? String(env.GEMINI_API_KEY) : "";
+  if (!key) throw new Error("gemini-existing not configured");
   return geminiGenerate(key, messages, opts, GEMINI_PAID_MODEL);
 }
 
@@ -116,17 +128,19 @@ async function geminiGenerate(key, messages, opts, modelName) {
 
 const AI_PROVIDERS = {
   "gemini-paid": providerGeminiPaid,
+  "gemini-existing": providerGeminiExisting,
 };
 
 export function aiProviderAvailable(env) {
-  return !!(env && env.GEMINI_PAID_API_KEY);
+  return !!((env && env.GEMINI_PAID_API_KEY) || (env && env.GEMINI_API_KEY));
 }
 
 // Paid-only routing: every Kopa bot (business chat, Admin AI, drafts,
-// confirms) calls generateText, and generateText calls gemini-paid only.
+// confirms) calls generateText, and generateText calls paid Gemini keys
+// only, GEMINI_PAID_API_KEY first, then the already-held GEMINI_API_KEY.
 // There is no free chain, no provider order env var, and no silent
-// upgrade or downgrade. If GEMINI_PAID_API_KEY is absent, providerGeminiPaid
-// throws "not configured" and the call fails closed; callers keep their
+// upgrade or downgrade. If both paid keys are absent or both fail,
+// generateText throws and the call fails closed; callers keep their
 // own deterministic fallbacks (business snapshot figures, Admin briefing),
 // which are local figures, not a free AI provider.
 //
@@ -154,7 +168,7 @@ export async function generateText(env, messages, opts) {
     if (hit && Date.now() < hit.expiresAt) return hit.text;
     if (hit) staticKnowledgeCache.delete(cacheKey);
   }
-  const order = ["gemini-paid"];
+  const order = ["gemini-paid", "gemini-existing"];
   let lastErr = null;
   for (const name of order) {
     const fn = AI_PROVIDERS[name];
