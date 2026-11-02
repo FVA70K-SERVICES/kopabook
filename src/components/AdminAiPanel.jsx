@@ -136,10 +136,42 @@ function resolveVoiceDetailed(choice, voicesList, langTag) {
 
 function cleanTextForSpeech(text) {
   return String(text || "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/https?:\/\/[^\s]+/g, "")
     .replace(/www\.[^\s]+/g, "")
+    .replace(/[*#`_~>|]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// Split a reply into short spoken chunks, sentence first, then word
+// boundary, so a long briefing is spoken in full instead of being cut
+// off by the browser's long-utterance limit. Mirrors the proven pattern
+// already used in public/fvachat.js.
+function splitSpeechText(text) {
+  const src = String(text || "").replace(/\s+/g, " ").trim();
+  if (!src) return [];
+  const sentences = src.match(/[^.!?…]+[.!?…]*["')\]]*\s*/g) || [src];
+  const parts = [];
+  let cur = "";
+  const push = (v) => { const t = String(v || "").trim(); if (t) parts.push(t); };
+  for (const raw of sentences) {
+    const sentence = String(raw || "").trim();
+    if (!sentence) continue;
+    if ((cur + " " + sentence).trim().length <= 200) { cur = (cur + " " + sentence).trim(); continue; }
+    if (cur) { push(cur); cur = ""; }
+    if (sentence.length <= 200) { cur = sentence; continue; }
+    let rest = sentence;
+    while (rest.length > 200) {
+      let cut = rest.lastIndexOf(" ", 200);
+      if (cut < 80) cut = 200;
+      push(rest.slice(0, cut));
+      rest = rest.slice(cut).trim();
+    }
+    cur = rest;
+  }
+  if (cur) push(cur);
+  return parts;
 }
 
 function getSpeechRecognition() {
@@ -313,6 +345,8 @@ export default function AdminAiPanel() {
   const voiceChoiceRef = useRef(voiceChoice);
   const assistantLanguageRef = useRef(assistantLanguage);
   const speakingIdRef = useRef(null);
+  const speechTokenRef = useRef(0);
+  const speechQueueRef = useRef([]);
   const recognitionRef = useRef(null);
   const autoSpokenIdsRef = useRef(new Set());
   const pendingAutoSpeakRef = useRef(null);
@@ -338,6 +372,8 @@ export default function AdminAiPanel() {
   }
 
   function stopSpeaking() {
+    speechTokenRef.current += 1;
+    speechQueueRef.current = [];
     try {
       if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
     } catch (e) {}
@@ -345,46 +381,65 @@ export default function AdminAiPanel() {
     setSpeakingId(null);
   }
 
-  // Speak one assistant message with the resolved device voice. If the
-  // browser blocks speech, stay silent and show no error.
+  // Speak one assistant message with the resolved device voice, in
+  // short chunks spoken in sequence. If the browser blocks speech, stay
+  // silent and show no error. Stop cancels the whole queue, not just
+  // the chunk currently playing.
   function speakMessage(msg) {
     if (!msg || typeof msg.content !== "string") return false;
     const clean = cleanTextForSpeech(msg.content);
-    if (!clean) return false;
+    const chunks = splitSpeechText(clean);
+    if (!chunks.length) return false;
     if (!hasSpeechSynthesis()) return false;
+    const token = speechTokenRef.current + 1;
+    speechTokenRef.current = token;
+    speechQueueRef.current = chunks.slice();
     if (speakingIdRef.current && speakingIdRef.current !== msg.id) {
       try { window.speechSynthesis.cancel(); } catch (e) {}
     }
-    let utter;
-    try {
-      utter = new window.SpeechSynthesisUtterance(clean);
-    } catch (e) {
-      return false;
-    }
-    const langTag = resolveLang(assistantLanguageRef.current);
-    utter.lang = langTag;
-    const resolved = resolveVoiceDetailed(voiceChoiceRef.current, refreshCachedVoices(), langTag);
-    if (resolved.voice) {
-      try { utter.voice = resolved.voice; } catch (e) {}
-    }
-    utter.pitch = resolved.pitch;
-    utter.rate = resolved.rate;
     speakingIdRef.current = msg.id;
     setSpeakingId(msg.id);
-    const finish = () => {
-      if (speakingIdRef.current === msg.id) {
-        speakingIdRef.current = null;
-        setSpeakingId(null);
+    const langTag = resolveLang(assistantLanguageRef.current);
+    const resolved = resolveVoiceDetailed(voiceChoiceRef.current, refreshCachedVoices(), langTag);
+    const speakNext = () => {
+      if (speechTokenRef.current !== token) return;
+      const chunk = speechQueueRef.current.shift();
+      if (!chunk) {
+        if (speakingIdRef.current === msg.id) {
+          speakingIdRef.current = null;
+          setSpeakingId(null);
+        }
+        return;
+      }
+      let utter;
+      try {
+        utter = new window.SpeechSynthesisUtterance(chunk);
+      } catch (e) {
+        if (speakingIdRef.current === msg.id) {
+          speakingIdRef.current = null;
+          setSpeakingId(null);
+        }
+        return;
+      }
+      utter.lang = langTag;
+      if (resolved.voice) {
+        try { utter.voice = resolved.voice; } catch (e) {}
+      }
+      utter.pitch = resolved.pitch;
+      utter.rate = resolved.rate;
+      const finish = () => {
+        if (speechTokenRef.current !== token) return;
+        speakNext();
+      };
+      utter.onend = finish;
+      utter.onerror = finish;
+      try {
+        window.speechSynthesis.speak(utter);
+      } catch (e) {
+        finish();
       }
     };
-    utter.onend = finish;
-    utter.onerror = finish;
-    try {
-      window.speechSynthesis.speak(utter);
-    } catch (e) {
-      finish();
-      return false;
-    }
+    speakNext();
     return true;
   }
 
