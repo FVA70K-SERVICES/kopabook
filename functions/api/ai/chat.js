@@ -1,4 +1,4 @@
-// POST /api/ai/chat: Kopa, the KopaBook business assistant (multi-provider chain with memory).
+// POST /api/ai/chat: Kopa, the KopaBook business assistant (paid-only Gemini, no free chain).
 //
 // One live chatbot that answers EVERYTHING about the business from real,
 // live store data. The LLM never writes SQL and never invents numbers: every
@@ -33,18 +33,12 @@ import {
   onRequestDelete as deleteProjectEndpoint,
 } from "../projects/[id].js";
 
-const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const GEMINI_MODEL = "gemini-3.8-flash";
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-// Groq retired llama-3.3-70b-versatile for free tier on 2026-08-16; their
-// recommended free replacement is openai/gpt-oss-120b.
-const GROQ_MODEL = "openai/gpt-oss-120b";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free";
 const PROVIDER_TIMEOUT_MS = 20000;
-// Paid Gemini slot (PLAN step 2). Model is deliberately the same verified
-// Gemini model as the free chain until a list-models check in a secure
-// session proves what the paid key can call; no new model name is assumed.
+// Paid Gemini slot, now the ONLY model provider for every Kopa bot.
+// Model is deliberately the same verified Gemini model as before until a
+// list-models check in a secure session proves what the paid key can call;
+// no new model name is assumed.
 // Env var name only: GEMINI_PAID_API_KEY, Pages dashboard secret, never in
 // code, chat, files, logs, or any endpoint response.
 const GEMINI_PAID_MODEL = GEMINI_MODEL;
@@ -59,87 +53,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The key itself must never contain business data, figures, or user text.
 const staticKnowledgeCache = new Map();
 
-// Every provider below has the same shape: (env, messages, opts) => text,
-// and throws when it cannot answer. A missing credential throws a
-// "not configured" error so the chain skips that provider quietly.
-async function providerGemini(env, messages, opts) {
-  const key = env && env.GEMINI_API_KEY ? String(env.GEMINI_API_KEY) : "";
-  if (!key) throw new Error("gemini not configured");
-  return geminiGenerate(key, messages, opts);
-}
-
+// The only provider below has this shape: (env, messages, opts) => text,
+// and throws when it cannot answer. A missing paid credential throws a
+// "not configured" error and the call fails closed, never falling back
+// to any free provider.
 async function providerGeminiPaid(env, messages, opts) {
   const key = env && env.GEMINI_PAID_API_KEY ? String(env.GEMINI_PAID_API_KEY) : "";
   if (!key) throw new Error("gemini-paid not configured");
   return geminiGenerate(key, messages, opts, GEMINI_PAID_MODEL);
-}
-
-async function providerWorkersAi(env, messages, opts) {
-  const ai = env && env.AI;
-  if (!ai) throw new Error("workers-ai not configured");
-  const resp = await ai.run(AI_MODEL, { messages });
-  const text = resp && (resp.response || resp.answer || resp.text);
-  if (!text) throw new Error("empty workers-ai response");
-  return String(text);
-}
-
-async function providerGroq(env, messages, opts) {
-  const key = env && env.GROQ_API_KEY ? String(env.GROQ_API_KEY) : "";
-  if (!key) throw new Error("groq not configured");
-  return openAiChat(GROQ_URL, key, GROQ_MODEL, messages, opts || {});
-}
-
-async function providerOpenRouter(env, messages, opts) {
-  const key = env && env.OPENROUTER_API_KEY ? String(env.OPENROUTER_API_KEY) : "";
-  if (!key) throw new Error("openrouter not configured");
-  return openAiChat(OPENROUTER_URL, key, OPENROUTER_MODEL, messages, opts || {}, {
-    "HTTP-Referer": "https://kopabook.com",
-    "X-Title": "KopaBook",
-  });
-}
-
-// OpenAI-compatible chat completions POST, used by Groq and OpenRouter.
-async function openAiChat(url, apiKey, model, messages, opts, extraHeaders) {
-  const o = opts || {};
-  const payload = {
-    model,
-    messages: (messages || []).map((m) => ({
-      role: m && m.role === "assistant" ? "assistant" : m && m.role === "system" ? "system" : "user",
-      content: String((m && m.content) || ""),
-    })).filter((m) => m.content),
-    temperature: typeof o.temperature === "number" ? o.temperature : 0.7,
-    max_tokens: o.maxOutputTokens || 2048,
-  };
-  // Single retry only on 429 or 5xx, with a short backoff. Never on 400
-  // (a bad request will fail again) and never on a timeout/abort.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: Object.assign(
-          { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-          extraHeaders || {}
-        ),
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      if (!res.ok) {
-        if ((res.status === 429 || res.status >= 500) && attempt === 0) {
-          await sleep(RETRY_BACKOFF_MS);
-          continue;
-        }
-        throw new Error("HTTP " + res.status);
-      }
-      const data = await res.json();
-      const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-      return String(text || "").trim();
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw new Error("HTTP retry exhausted");
 }
 
 async function geminiGenerate(key, messages, opts, modelName) {
@@ -194,35 +115,27 @@ async function geminiGenerate(key, messages, opts, modelName) {
 }
 
 const AI_PROVIDERS = {
-  "gemini": providerGemini,
   "gemini-paid": providerGeminiPaid,
-  "workers-ai": providerWorkersAi,
-  "groq": providerGroq,
-  "openrouter": providerOpenRouter,
 };
 
 export function aiProviderAvailable(env) {
-  return !!(env && (env.GEMINI_API_KEY || env.GEMINI_PAID_API_KEY || env.AI || env.GROQ_API_KEY || env.OPENROUTER_API_KEY));
+  return !!(env && env.GEMINI_PAID_API_KEY);
 }
 
-// Provider chain with easy switching: order comes from env.AI_PROVIDER_ORDER
-// (comma-separated, e.g. "gemini,workers-ai,groq,openrouter"), default
-// "gemini,workers-ai". First success wins; every failure is logged by
-// provider name only (never a key, prompt, or answer); throws only when
-// all fail, and the caller then serves the graceful snapshot fallback.
-//
-// Paid routing (opts.advanced === true, currently only the Admin AI engine
-// sets it): try "gemini-paid" first, then the existing free chain in its
-// current order, so a paid failure falls back to free. Standard questions
-// (advanced not set) keep the existing order unchanged and never silently
-// upgrade to paid. If GEMINI_PAID_API_KEY is absent, providerGeminiPaid
-// throws "not configured" and the chain falls through to free exactly as
-// today, with no user-facing error.
+// Paid-only routing: every Kopa bot (business chat, Admin AI, drafts,
+// confirms) calls generateText, and generateText calls gemini-paid only.
+// There is no free chain, no provider order env var, and no silent
+// upgrade or downgrade. If GEMINI_PAID_API_KEY is absent, providerGeminiPaid
+// throws "not configured" and the call fails closed; callers keep their
+// own deterministic fallbacks (business snapshot figures, Admin briefing),
+// which are local figures, not a free AI provider.
 //
 // Tiered output caps: an explicit opts.maxOutputTokens always wins
 // (draft/confirm calls keep 400). Otherwise standard calls get
 // STANDARD_MAX_OUTPUT_TOKENS and advanced calls get
-// ADVANCED_MAX_OUTPUT_TOKENS, set per call, never globally.
+// ADVANCED_MAX_OUTPUT_TOKENS, set per call, never globally. The
+// advanced flag now only sets the output cap, it no longer changes
+// which provider is used, because paid is the only provider either way.
 //
 // Static cache: only when opts.staticKnowledge === true AND the caller
 // supplies a business-free opts.staticCacheKey. Business chat never sets
@@ -241,9 +154,7 @@ export async function generateText(env, messages, opts) {
     if (hit && Date.now() < hit.expiresAt) return hit.text;
     if (hit) staticKnowledgeCache.delete(cacheKey);
   }
-  let order = String((env && env.AI_PROVIDER_ORDER) || "gemini,workers-ai")
-    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (isAdvanced) order = ["gemini-paid", ...order.filter((n) => n !== "gemini-paid")];
+  const order = ["gemini-paid"];
   let lastErr = null;
   for (const name of order) {
     const fn = AI_PROVIDERS[name];
