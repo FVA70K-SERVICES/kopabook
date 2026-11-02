@@ -34,7 +34,13 @@ import {
 } from "../projects/[id].js";
 
 const GEMINI_MODEL = "gemini-3.7-flash";
-const PROVIDER_TIMEOUT_MS = 20000;
+// Raised 2026-11-02 from 20000: log capture showed gemini-paid aborted at
+// the 20s ceiling on Admin AI (large system prompt, reasoning model), so a
+// single provider call never got a chance to finish. 45s per provider, with
+// the Admin AI frontend ceiling raised to 100s, so even a two-provider call
+// (90s worst case) can still finish inside the frontend ceiling instead of
+// timing out at 30s.
+const PROVIDER_TIMEOUT_MS = 45000;
 // Two paid Gemini slots, the ONLY model providers for every Kopa bot.
 // Fortune confirmed 2026-11-02 that the Gemini keys already held are paid
 // API keys, so both are paid providers, not a free chain: GEMINI_PAID_API_KEY

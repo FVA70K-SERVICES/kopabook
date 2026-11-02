@@ -656,7 +656,7 @@ export default function AdminAiPanel() {
     setInput("");
     setBusy(true);
     try {
-      const data = await api.post("/api/admin/ai/chat", { message: text, history });
+      const data = await api.post("/api/admin/ai/chat", { message: text, history }, { timeoutMs: 100000 });
       const additions = [];
       let replyMsg = null;
       if (data && data.reply) {

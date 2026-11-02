@@ -5,12 +5,16 @@ const REQUEST_TIMEOUT_MS = 30000;
 
 async function request(path, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  // Per-call override for long-running calls only (Admin AI chat, 100s).
+  // Every other call keeps the 30s ceiling below.
+  const { timeoutMs: _timeoutMs, ...fetchOptions } = options || {};
+  const timeoutMs = typeof _timeoutMs === "number" ? _timeoutMs : REQUEST_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(path, {
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      ...options,
+      ...fetchOptions,
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
@@ -34,7 +38,7 @@ async function request(path, options = {}) {
 
 export const api = {
   get: (path) => request(path),
-  post: (path, body) => request(path, { method: "POST", body: JSON.stringify(body || {}) }),
+  post: (path, body, opts) => request(path, { method: "POST", body: JSON.stringify(body || {}), timeoutMs: opts && opts.timeoutMs }),
   put: (path, body) => request(path, { method: "PUT", body: JSON.stringify(body || {}) }),
   patch: (path, body) => request(path, { method: "PATCH", body: JSON.stringify(body || {}) }),
   del: (path) => request(path, { method: "DELETE" }),
