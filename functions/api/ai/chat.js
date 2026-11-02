@@ -33,16 +33,17 @@ import {
   onRequestDelete as deleteProjectEndpoint,
 } from "../projects/[id].js";
 
-const GEMINI_MODEL = "gemini-3.8-flash";
+const GEMINI_MODEL = "gemini-3.7-flash";
 const PROVIDER_TIMEOUT_MS = 20000;
 // Two paid Gemini slots, the ONLY model providers for every Kopa bot.
 // Fortune confirmed 2026-11-02 that the Gemini keys already held are paid
 // API keys, so both are paid providers, not a free chain: GEMINI_PAID_API_KEY
 // is tried first, then the already-held GEMINI_API_KEY. No Groq, OpenRouter,
 // Workers AI, or any other provider is restored by this change.
-// Model is deliberately the same verified Gemini model as before until a
-// list-models check in a secure session proves what the paid keys can call;
-// no new model name is assumed.
+// Model changed 2026-11-02 from gemini-3.8-flash to gemini-3.7-flash:
+// Fortune reported from his own Google AI Studio check that 3.7 is the
+// version available to his keys, after both keys failed on 3.8-flash.
+// No other provider, key order, or cap changes in this set.
 // Env var names only: GEMINI_PAID_API_KEY, GEMINI_API_KEY, Pages dashboard
 // secrets, never in code, chat, files, logs, or any endpoint response.
 const GEMINI_PAID_MODEL = GEMINI_MODEL;
@@ -80,7 +81,7 @@ async function geminiGenerate(key, messages, opts, modelName) {
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
   // Convert OpenAI-style {role, content} messages to Gemini format: the first
   // system message becomes system_instruction, assistant turns become model
-  // turns. gemini-3.8-flash is a reasoning model, so the token budget leaves
+  // turns. gemini-3.7-flash is a reasoning model, so the token budget leaves
   // room for its thinking plus the visible answer.
   let systemText = "";
   const contents = [];
