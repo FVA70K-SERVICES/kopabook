@@ -90,6 +90,11 @@ export const KOPABOOK_KNOWLEDGE = [
     quickReplies: ['Pricing', 'Features', 'Talk to human']
   },
   {
+    patterns: ['hello', 'good morning', 'good afternoon', 'good evening'],
+    answer: 'Hello! I am Kopa Bot, your KopaBook assistant. I can help with pricing, features like sales and stock, staff and upgrades, or any problem you are having. What would you like to do first?',
+    quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human']
+  },
+  {
     patterns: ['price', 'cost', 'how much', 'pricing', 'fee', 'subscription', 'plan'],
     answer: 'KopaBook is free to start! Here are the plans:\n\n- Free: NGN 0, free forever (1 business, 100 products, 1 staff). Ask Kopa AI: 5 questions a day, read-only\n- Starter: NGN 1,000/month or NGN 10,000/year (5 businesses, 1,000 products, 5 staff). Ask Kopa AI: 20 questions a day plus actions\n- Solo: NGN 5,000/month or NGN 50,000/year (1 business, 500 products, 3 staff, plus an AI worker). Ask Kopa AI: 50 questions a day\n- Pro: NGN 10,000/month or NGN 100,000/year (unlimited businesses, products and staff). Ask Kopa AI: 100 questions a day\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want help picking one?',
     quickReplies: ['Start free', 'What is Solo?', 'Talk to human']
@@ -148,6 +153,16 @@ export const KOPABOOK_KNOWLEDGE = [
     patterns: ['whatsapp', 'receipt'],
     answer: 'KopaBook can send receipts and payment reminders via WhatsApp! Keep your customers updated without extra effort.',
     quickReplies: ['Features', 'Pricing']
+  },
+  {
+    patterns: ['team', 'upgrade', 'upgrading', 'renew', 'renewal', 'free pro', 'pro month', 'add staff', 'add worker', 'staff account'],
+    answer: 'Good, team and upgrade is exactly what I can help with. For your team: Free plan allows 1 staff, Starter allows 5 staff, Solo allows 3 staff, and Pro allows unlimited staff. You add staff in Settings, under Staff accounts, and you control what each person can see and do. For upgrade: Starter is NGN 1,000 a month, Solo is NGN 5,000 a month, and Pro is NGN 10,000 a month or NGN 100,000 a year, with unlimited businesses, products and staff, and Ask Kopa AI 100 questions a day. You pay securely by Paystack for your KopaBook subscription only, and your plan activates immediately after payment. Recording a sale is never blocked on any plan, and recording sales is unlimited, even on Free. Nothing stops a sale from being recorded, on Free or on any paid plan. Want help picking a plan, or adding your first staff member?',
+    quickReplies: ['Pricing', 'How to start', 'Talk to human']
+  },
+  {
+    patterns: ['owner settings', 'business settings', 'settings', 'brand color', 'tagline', 'share card', 'business profile'],
+    answer: 'Owner settings are in Settings, for the business owner only. There you can see your plan, price and renew date, how many businesses, products and staff you have used, and your store branding. Your brand color and tagline appear on the share cards you send on WhatsApp, so check the preview before you save. Only the owner can change plan, payment, branding and business profile. Staff can see only what the owner allows them to see, for that business only.',
+    quickReplies: ['Pricing', 'Talk to human']
   },
   {
     patterns: ['staff', 'employee', 'role'],
