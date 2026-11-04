@@ -77,8 +77,8 @@ export function isBusinessDataQuestion(message) {
   const lower = String(message || '').toLowerCase();
   if (BUSINESS_DATA_SIGNALS.some(s => lower.includes(s))) return true;
   // "how much is X" / "price of X" about a product, not about KopaBook plans
-  if (/how much (is|are|does)/.test(lower) && !/kopabook|plan|subscription|starter|pro|solo|pricing/.test(lower)) return true;
-  if (/price of /.test(lower) && !/kopabook|plan|subscription/.test(lower)) return true;
+  if (/how much (is|are|does)/.test(lower) && !/kopabook|plan|subscription|starter|pro|solo|pricing|cost|start|free/.test(lower)) return true;
+  if (/price of /.test(lower) && !/kopabook|plan|subscription|cost|start/.test(lower)) return true;
   return false;
 }
 
@@ -90,14 +90,60 @@ export const KOPABOOK_KNOWLEDGE = [
     quickReplies: ['Pricing', 'Features', 'Talk to human']
   },
   {
-    patterns: ['hello', 'good morning', 'good afternoon', 'good evening'],
+    patterns: ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'],
     answer: 'Hello! I am Kopa Bot, your KopaBook assistant. I can help with pricing, features like sales and stock, staff and upgrades, or any problem you are having. What would you like to do first?',
     quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human']
+  },
+  {
+    patterns: ['broken', 'phone broke', 'app broke', 'app is broken'],
+    answer: 'Sorry about that. I have flagged this for our support team and someone will look into it. For the fastest help, WhatsApp us at +234 813 024 4617.',
+    escalate: true,
+    quickReplies: ['Talk to human']
   },
   {
     patterns: ['don\'t have money', 'dont have money', 'do not have money', 'no money', 'not have money', 'cannot afford', 'can\'t afford', 'cant afford', 'no cash', 'without money', 'zero money', 'i am broke', 'broke', 'free to start', 'start free', 'start for free', 'want to start', 'i want to start'],
     answer: 'Good news, you do not need money to start. KopaBook is free to start, and the Free plan is NGN 0, free forever, with 1 business, 100 products and 1 staff, and no card needed. Recording a sale is never blocked on any plan, and recording sales is unlimited, even on Free. Start today in three steps: 1. Create your free account. 2. Add your business. 3. Start recording sales. You only upgrade later, when you want more, Starter NGN 1,000 a month, Solo NGN 5,000 a month, Pro NGN 10,000 a month. Want me to guide you to start free?',
     quickReplies: ['How to start', 'Pricing', 'Talk to human']
+  },
+  {
+    patterns: ['pay with card', 'can i pay', 'do you take payment', 'do you accept payment', 'card payment', 'how do i pay', 'pay for kopabook', 'pay for subscription', 'pay for a plan', 'payment'],
+    answer: 'KopaBook records payments and never takes, processes, or collects payment, except its own Paystack subscription checkout. You pay for your KopaBook subscription securely by Paystack, and that checkout is only for your KopaBook plan. For money from your customers, KopaBook records the sale and the payment, it does not collect the money itself.',
+    quickReplies: ['Pricing', 'How to start', 'Talk to human']
+  },
+  {
+    patterns: ['loan', 'borrow money', 'lend me money'],
+    answer: 'KopaBook does not give loans. KopaBook is a record book: it records sales, stock, debts, expenses, staff, and customers, so you can see who owes you clearly. If you need help with debt records, ask about features, or talk to a person on our team.',
+    quickReplies: ['Features', 'Talk to human']
+  },
+  {
+    patterns: ['cancel my subscription', 'cancel subscription', 'cancel my plan', 'cancel plan', 'stop my subscription', 'unsubscribe'],
+    answer: 'To cancel your KopaBook subscription, go to Settings, then Subscription, and cancel there. If you cannot find the cancel option, WhatsApp us at +234 813 024 4617 or email info@kopabook.com and our team will help you.',
+    quickReplies: ['Pricing', 'Talk to human']
+  },
+  {
+    patterns: ['delete my account', 'delete account', 'close my account'],
+    answer: 'To delete your KopaBook account, contact our support team at info@kopabook.com or on WhatsApp at +234 813 024 4617 and ask for account deletion, with the email on the account. Our team will confirm with you before anything is deleted. There is no self delete button in the app to tap by mistake.',
+    quickReplies: ['Talk to human']
+  },
+  {
+    patterns: ['how do i record', 'how to record', 'how do i record a sale', 'how to record a sale'],
+    answer: 'Recording a sale is simple:\n1. Open your KopaBook app\n2. Tap New Sale\n3. Add the product, quantity, and amount\n4. Save it\n\nYour sale shows on the Dashboard right away. Recording a sale is never blocked on any plan, even on Free. Want me to guide you?',
+    quickReplies: ['How to start', 'Pricing', 'Talk to human']
+  },
+  {
+    patterns: ['what is my balance', 'my balance', 'check my balance', 'balance'],
+    answer: 'For your own shop balance, sign in to your KopaBook account, open Chat, and choose Ask Kopa AI: it works with your own shop records and can tell you your balance there. This public Kopa Support chat cannot see or change any shop records. If you are already signed in, switch to Ask Kopa AI and ask there.',
+    quickReplies: ['Pricing', 'Talk to human']
+  },
+  {
+    patterns: ['thank you', 'thanks', 'bye', 'goodbye'],
+    answer: 'You are welcome! I am here whenever you need help with KopaBook. Have a great day with your business.',
+    quickReplies: ['Pricing', 'Features', 'How to start']
+  },
+  {
+    patterns: ['explain kopabook', 'tell me about kopabook'],
+    answer: 'KopaBook is the free record book for Nigerian local businesses. It records sales, stock, debts, expenses, staff, and customers, all in one app. It is free to start, with no card needed, and recording a sale is never blocked on any plan. What would you like to know more about?',
+    quickReplies: ['Pricing', 'How to start', 'Talk to human']
   },
   {
     patterns: ['price', 'cost', 'how much', 'pricing', 'fee', 'subscription', 'plan'],
@@ -246,6 +292,7 @@ export function isBusinessActionCommand(message) {
     /\bspent\b.+\bon\b/, /\bexpense of\b/, /\brestock\b/, /\badd stock\b/,
     /\bhow much did i (sell|make|spend)\b/, /\bhow many sales\b/, /\btoday'?s sales\b/, /\bsales today\b/,
     /\bwho owes\b/, /\bwho is owing\b/, /\bowing me\b/, /\bdebtors?\b/, /\boutstanding balance\b/,
+    /\bmy balance\b/, /\bbalance\b/, /\bsend (a )?reminder\b/, /\bremind\b.+\b(customer|debtor)\b/,
     /\bmy (sales|expenses|profit|stock|products|customers|debts|records)\b/,
     /\bstock (level|count|remaining)\b/, /\bwhat (do i|did i) (have|sell|sold)\b/,
   ];

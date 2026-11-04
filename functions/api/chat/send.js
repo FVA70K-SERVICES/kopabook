@@ -35,11 +35,22 @@ async function loadD1Knowledge(db) {
   return KNOWLEDGE_CACHE.rows;
 }
 
+// P1 word-boundary matcher: bare substrings caused live false hits.
+// 'broke' matched 'broken', 'fee' matched 'feel' and 'coffee', and bare
+// 'hi' would have matched 'this' and 'they'. Word boundaries stop all
+// three, while whole-message greetings 'hi' and 'hey' still match.
+// Patterns are plain strings, never regexes, so they are escaped first.
+function matchesPattern(lower, pattern) {
+  const p = String(pattern || '').toLowerCase().trim();
+  if (!p) return false;
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + escaped + '\\b').test(lower);
+}
 function matchKnowledge(message, entries) {
   const lower = message.toLowerCase().trim();
   for (const entry of entries) {
     for (const pattern of (entry.patterns || [])) {
-      if (pattern && lower.includes(String(pattern).toLowerCase())) {
+      if (pattern && matchesPattern(lower, pattern)) {
         return {
           answer: entry.answer,
           quickReplies: entry.quickReplies || entry.quick_replies || [],
@@ -58,9 +69,12 @@ async function getKopaBookResponse(message, db) {
   const d1rows = await loadD1Knowledge(db);
   const hit = matchKnowledge(message, d1rows) || matchKnowledge(message, KOPABOOK_KNOWLEDGE);
   if (hit) return hit;
-  // No match - ask warmly, don't guess (the bot's HEART)
+  // No match - one deterministic fallback, never a random clarifier.
+  // Random clarifiers hid every gap: the same question got a different
+  // generic reply each time, so a retest could look fixed when it was not.
+  // WARM_CLARIFIERS is kept exported for compatibility but is no longer used here.
   return {
-    answer: WARM_CLARIFIERS[Math.floor(Math.random() * WARM_CLARIFIERS.length)],
+    answer: 'I am Kopa Bot. I can help with KopaBook itself: pricing, features like sales and stock, how to start, or a problem you are having. Tell me which one you need, or tap Talk to human for a person from the FVA70K team.',
     quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human'],
     escalate: false,
     confidence: 'low'
@@ -299,7 +313,13 @@ export async function onRequestPost(context) {
                 confidence: 'high'
               };
             } else {
-              result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
+              // P5: verified support gets the same guide follow-up as public
+              // support. A bare 'Yes' after 'Want me to guide you?' must
+              // continue the guide, not fall into the knowledge fallback.
+              // This runs only in support mode, never in AI mode, and never
+              // on a Confirm tap, so 'Yes' still never confirms a proposal.
+              if (!confirmProposalId) result = handleFollowUp(clean, recentMessages, siteConfig);
+              if (!result) result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
               if (result && result.answer === PUBLIC_LOCKDOWN_ANSWER) {
                 result = {
                   answer: BUSINESS_ACTION_POINTER,
@@ -329,24 +349,24 @@ export async function onRequestPost(context) {
           result = getEscalationResponse(clean, visitorName);
         }
 
-        // 2a) Signed-out shop commands get a clear pointer to Ask Kopa AI
-        // inside the app, never a generic deflection.
-        if (!result && sid === 'kopabook' && !verifiedOwner && isBusinessActionCommand(clean)) {
-          result = {
-            answer: SIGNED_OUT_ACTION_POINTER,
-            quickReplies: ['Pricing', 'Features', 'Talk to human'],
-            escalate: false,
-            confidence: 'high'
-          };
-        }
-
-        // 2b) PUBLIC BOT LOCKDOWN: on the public marketing site (siteId
+        // 2a) PUBLIC BOT LOCKDOWN: on the public marketing site (siteId
         // 'kopabook'), business-data questions get the lockdown answer
         // immediately, before AI or knowledge, so no path can leak a
         // store's private business info on the public site.
         if (!result && sid === 'kopabook' && !verifiedOwner && isBusinessDataQuestion(clean)) {
           result = {
             answer: PUBLIC_LOCKDOWN_ANSWER,
+            quickReplies: ['Pricing', 'Features', 'Talk to human'],
+            escalate: false,
+            confidence: 'high'
+          };
+        }
+
+        // 2b) Signed-out shop commands get a clear pointer to Ask Kopa AI
+        // inside the app, never a generic deflection.
+        if (!result && sid === 'kopabook' && !verifiedOwner && isBusinessActionCommand(clean)) {
+          result = {
+            answer: SIGNED_OUT_ACTION_POINTER,
             quickReplies: ['Pricing', 'Features', 'Talk to human'],
             escalate: false,
             confidence: 'high'
@@ -376,7 +396,8 @@ export async function onRequestPost(context) {
         }
 
         // Handle follow-ups ("yes", "no", "ok") using conversation context
-        if (!result && !verifiedOwner) {
+        // Verified AI mode is excluded here too: 'Yes' never confirms there.
+        if (!result && !verifiedOwner && !confirmProposalId) {
           result = handleFollowUp(clean, recentMessages, siteConfig);
           if (result) result.isFollowUp = true;
         }
