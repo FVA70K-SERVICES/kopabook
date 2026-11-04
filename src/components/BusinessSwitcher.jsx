@@ -125,6 +125,7 @@ export default function BusinessSwitcher({ session, collapsed }) {
       {showNew && (
         <div className="modal-back" onClick={() => setShowNew(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowNew(false)}>✕</button>
             <h2>New business</h2>
             <p className="hint">It gets its own dashboard, stock, staff and records. You stay in control with this same account.</p>
             {error && (

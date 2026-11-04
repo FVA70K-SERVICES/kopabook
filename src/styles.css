@@ -118,7 +118,7 @@ a:hover { text-decoration: underline; }
 .btn-secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
 .btn-secondary:hover { background: var(--bg); text-decoration: none; }
 .btn-danger { background: var(--danger-soft); color: var(--danger); }
-.btn-sm { padding: 8px 14px; font-size: 13.5px; border-radius: 8px; }
+.btn-sm { padding: 8px 14px; font-size: 13.5px; border-radius: 8px; min-height: 44px; }
 .btn-block { width: 100%; }
 .btn[disabled] { opacity: 0.6; cursor: not-allowed; }
 
@@ -278,7 +278,7 @@ a:hover { text-decoration: underline; }
   .mobilebar .more-btn .mi { font-size: 20px; display: block; }
   .menu-btn {
     display: inline-flex !important; background: none; border: 1px solid var(--line);
-    border-radius: 9px; padding: 9px 13px; font-size: 15px; cursor: pointer;
+    border-radius: 9px; padding: 9px 13px; font-size: 15px; cursor: pointer; min-height: 44px;
   }
 }
 @media (min-width: 861px) { .mobilebar, .menu-btn { display: none !important; } }
@@ -326,10 +326,36 @@ table.data tr:first-child td { border-top: 0; }
 .search { padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 15px; min-width: 220px; font-family: var(--font); }
 .modal-back { position: fixed; inset: 0; background: rgba(15, 31, 20, 0.5); z-index: 200; display: flex; align-items: flex-end; justify-content: center; }
 @media (min-width: 640px) { .modal-back { align-items: center; } }
-.modal { background: var(--surface); color: var(--ink); border-radius: 18px 18px 0 0; padding: 26px; width: 100%; max-width: 520px; max-height: 92vh; overflow-y: auto; }
+.modal { position: relative; background: var(--surface); color: var(--ink); border-radius: 18px 18px 0 0; padding: 26px; width: 100%; max-width: 520px; max-height: 92vh; overflow-y: auto; }
 @media (min-width: 640px) { .modal { border-radius: 18px; } }
 .modal h2 { margin: 0 0 16px; font-size: 21px; }
+/* UX upgrade, rule 5: every modal gets a visible X in the top right corner.
+   The button reuses the modal's existing backdrop close handler, so closing
+   by X, by backdrop tap, or by an existing Cancel/Done button does the same thing. */
+.modal-close {
+  position: absolute; top: 10px; right: 10px;
+  width: 44px; height: 44px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.modal-close:hover { background: var(--bg); }
 .loading { padding: 60px 20px; text-align: center; color: var(--muted); }
+/* UX upgrade, rule 6 and the second AgenticMatt reel: show something is
+   happening, even before data arrives. The plain loading line stays, and a
+   calm spinner sits above it, with no extra motion or decoration. */
+.loading::before {
+  content: ""; display: block;
+  width: 28px; height: 28px; margin: 0 auto 12px;
+  border: 3px solid var(--line); border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: kb-spin 0.8s linear infinite;
+}
+@keyframes kb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .loading::before { animation: none; }
+}
 .debt-amt { color: var(--danger); }
 .steps { display: grid; gap: 14px; margin: 30px 0; }
 .step { display: flex; gap: 16px; align-items: flex-start; }

@@ -186,6 +186,7 @@ export default function ProjectsPage({ session }) {
       {showCreate && (
         <div className="modal-back" onClick={() => setShowCreate(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowCreate(false)}>✕</button>
             <h2>New project</h2>
             <form onSubmit={createProject}>
               <div className="field"><label>Project name *</label><input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} placeholder="e.g. Shop building phase 2" required /></div>
@@ -489,6 +490,7 @@ function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack })
       {showTx && (
         <div className="modal-back" onClick={() => setShowTx(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowTx(false)}>✕</button>
             <h2>Add record</h2>
             <form onSubmit={saveTx}>
               <div className="field"><label>Type</label>
@@ -509,6 +511,7 @@ function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack })
       {showMs && (
         <div className="modal-back" onClick={() => setShowMs(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowMs(false)}>✕</button>
             <h2>Add milestone</h2>
             <form onSubmit={saveMs}>
               <div className="field"><label>Title *</label><input value={msForm.title} onChange={(e) => setMsForm({ ...msForm, title: e.target.value })} placeholder="e.g. Foundation completed" required /></div>
@@ -593,6 +596,7 @@ function InviteModal({ project, onClose }) {
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={onClose}>✕</button>
         <h2>Invite to {project.name}</h2>
         <p className="hint">Invite by email or username. No new account per project: they join with their own KopaBook login and see only this project.</p>
         {error && <div className="alert alert-error">{error}</div>}

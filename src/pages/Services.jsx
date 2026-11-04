@@ -121,6 +121,7 @@ export default function ServicesPage({ session }) {
       {showForm && (
         <div className="modal-back" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowForm(false)}>✕</button>
             <h2>{editing ? "Edit service" : "Add service"}</h2>
             <form onSubmit={save}>
               <div className="field"><label>Name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>

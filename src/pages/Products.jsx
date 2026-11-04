@@ -188,6 +188,7 @@ export default function ProductsPage({ session }) {
       {showForm && (
         <div className="modal-back" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowForm(false)}>✕</button>
             <h2>{editing ? "Edit product" : "Add product"}</h2>
             <form onSubmit={save}>
               <div className="field"><label htmlFor="product-name">Name *</label><input id="product-name" value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
@@ -237,6 +238,7 @@ export default function ProductsPage({ session }) {
       {adjusting && (
         <div className="modal-back" onClick={() => setAdjusting(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setAdjusting(null)}>✕</button>
             <h2>Adjust stock</h2>
             <p style={{ color: "var(--muted)" }}>Use a positive number to add stock, negative to remove.</p>
             <div className="field"><label htmlFor="adjust-qty">Quantity change (in {(products.find((p) => p.id === adjusting) || {}).unit || "piece"})</label><input id="adjust-qty" type="number" step="0.01" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder="e.g. 10 or -3" /></div>
@@ -249,6 +251,7 @@ export default function ProductsPage({ session }) {
       {historyFor && (
         <div className="modal-back" onClick={() => setHistoryFor(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setHistoryFor(null)}>✕</button>
             <h2>Goods tracking</h2>
             <p style={{ marginTop: 0 }}>
               <strong>{historyFor.name}</strong>{" "}

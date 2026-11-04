@@ -354,6 +354,7 @@ export default function HotelsPage({ session }) {
       {showRoomForm && (
         <div className="modal-back" onClick={() => setShowRoomForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowRoomForm(false)}>✕</button>
             <h2>{editingRoom ? `Edit room ${editingRoom.room_number}` : "Add room"}</h2>
             <form onSubmit={saveRoom}>
               <div className="field"><div className="row2">
@@ -378,6 +379,7 @@ export default function HotelsPage({ session }) {
       {showBookingForm && (
         <div className="modal-back" onClick={() => setShowBookingForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowBookingForm(false)}>✕</button>
             <h2>New booking{preselectedRoom ? ` — Room ${preselectedRoom.room_number}` : ""}</h2>
             <form onSubmit={saveBooking}>
               <div className="field"><label>Room *</label>
@@ -419,6 +421,7 @@ export default function HotelsPage({ session }) {
       {folioId && (
         <div className="modal-back" onClick={closeFolio}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={closeFolio}>✕</button>
             {folioLoading ? <div className="loading">Loading folio...</div> : folio && (<>
               <h2>Folio — {folio.booking.guest_name}</h2>
               <p style={{ color: "var(--muted)", marginTop: 0 }}>

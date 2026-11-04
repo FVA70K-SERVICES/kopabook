@@ -223,6 +223,7 @@ export default function MessagesPage({ session }) {
       {queue && cur && (
         <div className="modal-back" onClick={() => setQueue(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setQueue(null)}>✕</button>
             <h2>Sending ({queue.idx + 1} of {queue.list.length})</h2>
             <p><strong>{cur.name}</strong> · {cur.phone}</p>
             <div className="card" style={{ background: "var(--bg)", margin: "12px 0" }}>
@@ -243,6 +244,7 @@ export default function MessagesPage({ session }) {
       {staffQueue && curStaff && (
         <div className="modal-back" onClick={() => setStaffQueue(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setStaffQueue(null)}>✕</button>
             <h2>Sending ({staffQueue.idx + 1} of {staffQueue.list.length})</h2>
             <p><strong>{curStaff.full_name}</strong> · {curStaff.phone}</p>
             <div className="card" style={{ background: "var(--bg)", margin: "12px 0" }}>

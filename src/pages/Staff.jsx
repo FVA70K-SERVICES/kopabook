@@ -439,6 +439,7 @@ export default function StaffPage({ session }) {
       {showForm && (
         <div className="modal-back" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowForm(false)}>✕</button>
             <h2>Invite staff</h2>
             <form onSubmit={invite}>
               <div className="field"><label>Full name *</label><input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} required /></div>
@@ -468,6 +469,7 @@ export default function StaffPage({ session }) {
       {resetFor && (
         <div className="modal-back" onClick={() => setResetFor(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setResetFor(null)}>✕</button>
             <h2>Reset password</h2>
             <p className="hint">Set a new password for <strong>{resetFor.full_name}</strong> ({resetFor.email}). Share it with them directly.</p>
             {resetStatus.error && <div className="alert alert-error">{resetStatus.error}</div>}
@@ -483,6 +485,7 @@ export default function StaffPage({ session }) {
       {editing && (
         <div className="modal-back" onClick={() => setEditing(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setEditing(null)}>✕</button>
             <h2>Edit staff member</h2>
             <p className="hint">{editing.email}</p>
             <form onSubmit={saveEdit}>
@@ -502,6 +505,7 @@ export default function StaffPage({ session }) {
       {deleting && (
         <div className="modal-back" onClick={() => setDeleting(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setDeleting(null)}>✕</button>
             <h2>Remove staff member</h2>
             <p>Remove <strong>{deleting.full_name}</strong> ({deleting.email}) from {session.business?.name || "this business"}?</p>
             <p className="hint">They will lose access to this business immediately. Their other businesses are not affected.</p>

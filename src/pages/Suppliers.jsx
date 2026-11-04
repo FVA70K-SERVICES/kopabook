@@ -240,6 +240,7 @@ export default function SuppliersPage({ session }) {
       {showForm && (
         <div className="modal-back" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowForm(false)}>✕</button>
             <h2>Add supplier</h2>
             <form onSubmit={save}>
               <div className="field"><label>Name *</label><input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
@@ -254,6 +255,7 @@ export default function SuppliersPage({ session }) {
       {purchaseFor && (
         <div className="modal-back" onClick={() => setPurchaseFor(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setPurchaseFor(null)}>✕</button>
             <h2>Record purchase</h2>
             <p style={{ marginTop: 0 }}>Supplier: <strong>{purchaseFor.name}</strong> {statusPill(purchaseFor.verification_status)}</p>
             {pwarning && <div className="alert alert-error">{pwarning}</div>}

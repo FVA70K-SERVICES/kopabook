@@ -170,6 +170,7 @@ export default function CustomersPage() {
       {showContacts && (
         <div className="modal-back" onClick={() => setShowContacts(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowContacts(false)}>✕</button>
             <h2>📱 Phone contacts</h2>
             <p className="hint">
               Import your phone's real contacts so KopaBook can match them against your customers.
@@ -200,6 +201,7 @@ export default function CustomersPage() {
       {showForm && (
         <div className="modal-back" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowForm(false)}>✕</button>
             <h2>Add customer</h2>
             <p className="hint">Just a name gets them in the book. Add the WhatsApp number when you have it.</p>
             <form onSubmit={save}>

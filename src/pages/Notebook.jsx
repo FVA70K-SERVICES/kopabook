@@ -252,6 +252,7 @@ export default function NotebookPage({ session }) {
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowForm(false)}>✕</button>
             <h3 style={{ marginTop: 0 }}>{editing ? "Edit note" : "New note"}</h3>
             <form onSubmit={save}>
               <label>Title

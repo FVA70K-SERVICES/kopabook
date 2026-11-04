@@ -321,6 +321,7 @@ export default function DebtsPage({ session }) {
       {queue && current && (
         <div className="modal-back" onClick={() => setQueue(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setQueue(null)}>✕</button>
             <h2>Remind debtors ({queue.idx + 1} of {queue.list.length})</h2>
             <p><strong>{current.name}</strong> owes <strong className="debt-amt money">{fmt(current.outstanding)}</strong></p>
             <div className="card" style={{ background: "var(--bg)", margin: "12px 0" }}>
@@ -342,6 +343,7 @@ export default function DebtsPage({ session }) {
       {paying && (
         <div className="modal-back" onClick={() => setPaying(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setPaying(null)}>✕</button>
             <h2>Record payment</h2>
             <p>{paying.name} owes <strong className="debt-amt money">{fmt(paying.outstanding)}</strong></p>
             {paidMsg && <div className="alert alert-ok" style={{ marginBottom: 12 }}>{paidMsg}</div>}
@@ -370,6 +372,7 @@ export default function DebtsPage({ session }) {
       {addingDebt && (
         <div className="modal-back" onClick={() => setAddingDebt(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setAddingDebt(false)}>✕</button>
             <h2>Add debt</h2>
             <p className="hint">Money lent or goods given on credit, outside a sale.</p>
             <div className="field"><label>Customer</label>

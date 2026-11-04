@@ -41,6 +41,7 @@ export function ShipmentModal({ sale, onClose, onCreated }) {
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={onClose}>✕</button>
         {tracking ? (
           <>
             <h2>Tracking generated</h2>

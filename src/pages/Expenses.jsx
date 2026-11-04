@@ -131,6 +131,7 @@ export default function ExpensesPage({ session }) {
       {showForm && (
         <div className="modal-back" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setShowForm(false)}>✕</button>
             <h2>Add expense</h2>
             <form onSubmit={save}>
               <div className="field"><label>Amount *</label><input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => set("amount", e.target.value)} required /></div>
