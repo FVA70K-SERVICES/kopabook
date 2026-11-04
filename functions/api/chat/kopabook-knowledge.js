@@ -95,6 +95,11 @@ export const KOPABOOK_KNOWLEDGE = [
     quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human']
   },
   {
+    patterns: ['don\'t have money', 'dont have money', 'do not have money', 'no money', 'not have money', 'cannot afford', 'can\'t afford', 'cant afford', 'no cash', 'without money', 'zero money', 'i am broke', 'broke', 'free to start', 'start free', 'start for free', 'want to start', 'i want to start'],
+    answer: 'Good news, you do not need money to start. KopaBook is free to start, and the Free plan is NGN 0, free forever, with 1 business, 100 products and 1 staff, and no card needed. Recording a sale is never blocked on any plan, and recording sales is unlimited, even on Free. Start today in three steps: 1. Create your free account. 2. Add your business. 3. Start recording sales. You only upgrade later, when you want more, Starter NGN 1,000 a month, Solo NGN 5,000 a month, Pro NGN 10,000 a month. Want me to guide you to start free?',
+    quickReplies: ['How to start', 'Pricing', 'Talk to human']
+  },
+  {
     patterns: ['price', 'cost', 'how much', 'pricing', 'fee', 'subscription', 'plan'],
     answer: 'KopaBook is free to start! Here are the plans:\n\n- Free: NGN 0, free forever (1 business, 100 products, 1 staff). Ask Kopa AI: 5 questions a day, read-only\n- Starter: NGN 1,000/month or NGN 10,000/year (5 businesses, 1,000 products, 5 staff). Ask Kopa AI: 20 questions a day plus actions\n- Solo: NGN 5,000/month or NGN 50,000/year (1 business, 500 products, 3 staff, plus an AI worker). Ask Kopa AI: 50 questions a day\n- Pro: NGN 10,000/month or NGN 100,000/year (unlimited businesses, products and staff). Ask Kopa AI: 100 questions a day\n\nYearly plans save you 2 months! Sales are never blocked on any plan. Want help picking one?',
     quickReplies: ['Start free', 'What is Solo?', 'Talk to human']
