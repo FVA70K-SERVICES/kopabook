@@ -23,6 +23,40 @@
   // 'ai' = Ask Kopa AI (the shop's AI assistant), 'support' = Kopa Support
   // (platform help from the FVA70K team). Signed-out visitors never see this.
   const IS_KOPABOOK = SITE_ID === 'kopabook';
+
+  // ---- In-app shell marker (round 3: launcher over the bottom nav) ----
+  // The app stylesheet lifts the launcher clear of the mobile bottom nav
+  // only under body.kb-in-app, but nothing in the app ever added that
+  // class, so on every signed-in page (Sales, Dashboard, ...) the
+  // launcher sat at bottom:16/24px, over the More tab. The widget adds
+  // the class itself, two ways: at load on an /app route (before the
+  // session resolves, so there is no flash of overlap), and whenever the
+  // signed-in owner context arrives via window.setFVAChatOwner (the app
+  // calls it after the session loads, including after an SPA navigation
+  // from a signed-out page). Signed-out pages never get the class.
+  // Receipt pages are excluded at load: they have no bottom nav.
+  function markInApp() {
+    try {
+      if (!IS_KOPABOOK) return;
+      if (document && document.body && document.body.classList) document.body.classList.add('kb-in-app');
+    } catch (e) {}
+  }
+  try {
+    if (IS_KOPABOOK && window.location && String(window.location.pathname || '').indexOf('/app') === 0
+        && String(window.location.pathname || '').indexOf('/app/receipt') !== 0) markInApp();
+  } catch (e) {}
+  if (IS_KOPABOOK) {
+    try {
+      const prevSetOwner = window.setFVAChatOwner;
+      window.setFVAChatOwner = function (ctx) {
+        try {
+          if (typeof prevSetOwner === 'function') prevSetOwner(ctx);
+          else window.FVAChatOwner = ctx;
+        } catch (e) { try { window.FVAChatOwner = ctx; } catch (e2) {} }
+        markInApp();
+      };
+    } catch (e) {}
+  }
   let chatMode = '';
   try { chatMode = localStorage.getItem('fva_chat_mode_kopabook') || ''; } catch (e) {}
   if (chatMode !== 'ai' && chatMode !== 'support') chatMode = '';

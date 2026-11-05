@@ -307,7 +307,7 @@ export default function SalesPage({ session }) {
             <button className={"btn btn-sm " + (catalog === "products" ? "btn-primary" : "btn-secondary")} onClick={() => setCatalog("products")}>Products</button>
             <button className={"btn btn-sm " + (catalog === "services" ? "btn-primary" : "btn-secondary")} onClick={() => setCatalog("services")}>Services</button>
           </div>
-          <div className="dash-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
+          <div className="dash-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
           <div>
             {catalog === "products" ? (
               <>
@@ -398,7 +398,7 @@ export default function SalesPage({ session }) {
                       </div>
                       <div style={{ display: "flex", gap: 6 }}>
                         <input type="number" min="0" step="0.01" value={p.amount} onChange={(e) => setPay(i, "amount", e.target.value)}
-                          placeholder={i === 0 ? String(total) : "0"} aria-label="Payment amount" />
+                          placeholder="Amount paid" aria-label="Payment amount" />
                         {payments.length > 1 && (
                           <button className="btn btn-secondary btn-sm" onClick={() => removePay(i)} aria-label="Remove payment">✕</button>
                         )}

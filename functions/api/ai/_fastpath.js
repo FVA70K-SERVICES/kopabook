@@ -236,7 +236,7 @@ function removeAmount(text, amount) {
 // ---------------------------------------------------------------------------
 
 const PAYMENT_VERBS = /\b(paid|pay|payment|received|receive|collected|collect|settled|settle|gave|given)\b/;
-const PAYMENT_FILLER = /\b(record|please|kindly|just|has|have|had|now|the|a|an|payment|paid|pay|received|receive|collected|collect|settled|settle|gave|given|from|to|for|of|me|us|it|that|this|today|yesterday|this morning|on|in full|full|fully|paid up|cleared|clear|balance|in cash|cash|transfer|pos|bank transfer|via)\b/g;
+const PAYMENT_FILLER = /\b(record|please|kindly|just|has|have|had|now|the|a|an|payment|paid|pay|received|receive|collected|collect|settled|settle|gave|given|from|to|for|of|me|us|it|that|this|today|yesterday|this morning|on|in full|full|fully|paid up|cleared|clear|balance|in cash|cash|transfer|pos|bank transfer|via|by)\b/g;
 
 export function parsePaymentMention(text) {
   const t = normalizeFastText(text);
@@ -364,7 +364,7 @@ export function extractRemindName(text) {
 // a debtor payment.
 // ---------------------------------------------------------------------------
 
-const FULL_BALANCE_MARKERS = /\b(full balance|complete balance|entire balance|in full|paid up|don pay finish|don clear|don settle|don pay everything)\b/;
+const FULL_BALANCE_MARKERS = /\b(full balance|complete balance|entire balance|in full|paid full|pay full|paid up|don pay finish|don clear|don settle|don pay everything)\b/;
 const FULL_BALANCE_OWE = /\b(everything|all|what)\b[^.]{0,40}\bowe(s|ing)?\b/;
 const FULL_BALANCE_CLEAR = /\b(clear|cleared|settle|settled)\b[^.]{0,30}\b(balance|debt|owe|owes|owing|everything|all)\b/;
 const FULL_BALANCE_VERBS = /\b(paid|pay|don pay|cleared|settled)\b/;
@@ -386,7 +386,7 @@ export function isFullBalancePayment(text) {
 export function extractFullBalanceName(text) {
   const t = normalizeFastText(text);
   const rest = t
-    .replace(/\b(paid|pay|have|has|had|don|clear|cleared|settle|settled|full|in|balance|complete|entire|everything|all|what|he|she|him|her|them|they|his|their|owe|owes|owing|now|today|just|please|kindly|the|a|an|for|to|of|up|finish)\b/g, " ")
+    .replace(/\b(paid|pay|have|has|had|don|clear|cleared|settle|settled|full|in|balance|complete|entire|everything|all|what|he|she|him|her|them|they|his|their|owe|owes|owing|now|today|just|please|kindly|the|a|an|for|to|of|up|finish|by|via|transfer|cash|pos|bank)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
@@ -423,6 +423,84 @@ export function parseFullBalanceMention(text, history, snap) {
   }
   if (cleanName) return { customer_name: cleanName, amount: 0 };
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Answering the assistant's own amount question: "How much did Favour
+// pay?" followed by "Full debts 637,820" (or a bare "637,820"). The
+// user is answering the question, not starting a new statement, so the
+// reply is read as the amount and the customer comes from the question
+// or the recent turns, never from a guess. A mention already recorded
+// is never resurrected: only turns after the last "Done. Recorded ..."
+// line count as context.
+// ---------------------------------------------------------------------------
+
+const AMOUNT_QUESTION_RES = [
+  /\bhow much\b[^.?]{0,60}\bpay\b/i,
+  /\bhow much\b[^.?]{0,40}\bpaid\b/i,
+  /\bwhat amount\b[^.?]{0,60}\b(pay|paid)\b/i,
+];
+
+export function isAmountQuestion(text) {
+  const t = normalizeFastText(text);
+  return AMOUNT_QUESTION_RES.some((re) => re.test(t));
+}
+
+// Parse a reply to an amount question: a bare amount ("637,820",
+// "NGN 637,820", "five thousand"), a "full debts <amount>" /
+// "full debt <amount>" / "full payment <amount>" lead with an amount
+// after it (the amount IS the full balance the user is confirming),
+// or the lead on its own ("full debts", "full payment") with no
+// amount. Returns { amount, full } (amount null when the lead stands
+// alone: the caller uses the customer's snapshot balance) or null
+// when the message is not an amount answer at all ("Favour paid
+// 5000" is a fresh statement, not an answer, and belongs to the
+// payment parser).
+export function parseAmountAnswer(text) {
+  const t = normalizeFastText(text);
+  let rest = t;
+  let full = false;
+  const lead = /^(the\s+)?(full\s+)?(debts?|payment|balance|amount)\b\s*/;
+  if (lead.test(rest)) {
+    full = /\bfull\b/.test(rest.match(lead)[0]);
+    rest = rest.replace(lead, "").trim();
+  } else if (/^full\b/.test(rest)) {
+    full = true;
+    rest = rest.replace(/^full\b\s*/, "").trim();
+  }
+  if (!rest) return full ? { amount: null, full: true } : null;
+  const amounts = findAllAmounts(rest);
+  if (amounts.length !== 1) return null;
+  // The whole remainder must be that one amount (plus an optional
+  // currency word or symbol): "637,820", "ngn 637,820", "five thousand".
+  const before = rest.slice(0, amounts[0].index).trim();
+  const after = rest.slice(amounts[0].index + amounts[0].length).trim();
+  const leftover = (before + " " + after).trim().replace(/[^a-z]/g, "");
+  if (leftover && !CURRENCY_WORDS.includes(leftover)) return null;
+  return { amount: amounts[0].value, full };
+}
+
+// The customer an amount answer belongs to: the name in the question
+// itself ("How much did Favour pay?"), else the last debtor talked
+// about in the turns since the last "Done. Recorded ..." line.
+// Returns the debtor object or null.
+export function resolveAmountAnswerCustomer(history, snap) {
+  const hist = history || [];
+  let startIdx = 0;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && h.role === "assistant" && typeof h.content === "string" && /Done\. Recorded (payment|sale|expense)/.test(h.content)) {
+      startIdx = i + 1;
+      break;
+    }
+  }
+  const recent = hist.slice(startIdx);
+  const question = [...recent].reverse().find((h) => h && h.role === "assistant" && typeof h.content === "string" && isAmountQuestion(h.content));
+  if (question) {
+    const named = findDebtorsInText(question.content, snap);
+    if (named.length === 1) return named[0];
+  }
+  return resolvePronounCustomer(recent, snap);
 }
 
 // ---------------------------------------------------------------------------
@@ -823,6 +901,11 @@ export function parseBalanceQuery(text) {
     .trim();
   if (!rest) return null;
   if (/^(customers?|everyone|anybody|anyone|everybody)$/.test(rest)) return null;
+  // A number in the remainder is never part of a customer name
+  // ("Full debt 637,820" is an amount answer, not a customer called
+  // "Full 637,820"): let the amount-answer and bare-confirmation
+  // paths own it instead of asking the database for a nonsense name.
+  if (/\d/.test(rest)) return null;
   const words = rest.split(/\s+/);
   if (words.length > 4) return null;
   return { customer_name: titleCaseName(rest) };
@@ -1227,6 +1310,34 @@ export function resolveFastPath(message, history, snap, currency) {
     return { kind: "reply", text: "Who paid in full? Tell me the customer's name and I will draft it for your Confirm tap." };
   }
 
+  // 2a. Answer to the assistant's own amount question: the previous
+  // assistant turn asked "How much did Favour pay?" (or similar) and
+  // this message answers it, with a bare amount ("637,820") or with
+  // "full debts 637,820" (the amount IS the full balance being
+  // confirmed). The customer comes from the question or the recent
+  // turns, never from a guess. The question must be the most recent
+  // assistant turn, so no "Done. Recorded ..." line can sit after it
+  // and a recorded mention is never resurrected.
+  let lastAssistantIdx = -1;
+  for (let i = (history || []).length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (h && h.role === "assistant" && typeof h.content === "string") { lastAssistantIdx = i; break; }
+  }
+  if (lastAssistantIdx >= 0 && isAmountQuestion(history[lastAssistantIdx].content)) {
+    const answer = parseAmountAnswer(text);
+    if (answer) {
+      const debtor = resolveAmountAnswerCustomer(history, snap);
+      if (!debtor) {
+        return { kind: "reply", text: "Who did that payment come from? Tell me the customer's name and I will draft it for your Confirm tap." };
+      }
+      const amount = answer.amount !== null && answer.amount !== undefined ? answer.amount : Number(debtor.balance) || 0;
+      if (!(amount > 0)) {
+        return { kind: "reply", text: `${debtor.name} has no outstanding balance, so there is nothing to record.` };
+      }
+      return { kind: "action", tool: "record_customer_payment", params: { customer_name: debtor.name, amount } };
+    }
+  }
+
   // 2b. Direct payment mention: "Favour paid 1000000" -> propose it now.
   // A pronoun ("He paid 5000") resolves to the last customer talked
   // about; with no antecedent, one short question instead of a guess.
@@ -1472,8 +1583,14 @@ export function resolveFastPath(message, history, snap, currency) {
   // expense falls through to the existing chip flow, whose executor
   // asks its own one targeted question.
   const bareMatch = text.match(/^\s*(record|log|save)\s+(a\s+|an\s+)?(payment|sale|expense)s?\s*[.!?]*\s*$/i);
-  if (bareMatch) {
-    const bareKind = bareMatch[3].toLowerCase();
+  // A bare confirmation ("Full payment", "Full debts 637,820") is a
+  // write intent too: it confirms the payment just talked about, so it
+  // re-parses the recent turns exactly like "Record payment" does.
+  const bareFullPayment = /^\s*(the\s+)?full\s+payment\s*[.!?]*\s*$/i.test(text);
+  const bareFullDebts = /^\s*(the\s+)?full\s+debts?\b/i.test(text)
+    && findAllAmounts(text).length === 1 && parseAmountAnswer(text) !== null;
+  if (bareMatch || bareFullPayment || bareFullDebts) {
+    const bareKind = bareMatch ? bareMatch[3].toLowerCase() : "payment";
     const histArr = history || [];
     // Only turns after the last "Done. Recorded ..." line: a mention
     // already recorded must never be resurrected.
@@ -1516,6 +1633,18 @@ export function resolveFastPath(message, history, snap, currency) {
       }
     }
     if (bareKind === "payment") {
+      // "Full debts <amount>" carries its own amount: with a customer
+      // in the recent turns (after the last Done line), propose it even
+      // when no earlier mention re-parses. The amount-question answer
+      // at step 2a already handled it when a question was asked; this
+      // is the no-question fallback.
+      if (bareFullDebts) {
+        const own = parseAmountAnswer(text);
+        const debtor = resolvePronounCustomer(histArr.slice(startIdx), snap);
+        if (own && own.amount > 0 && debtor) {
+          return { kind: "action", tool: "record_customer_payment", params: { customer_name: debtor.name, amount: own.amount } };
+        }
+      }
       return { kind: "reply", text: "Who paid, and how much?" };
     }
     // Sale/expense with nothing to re-parse: fall through to the chip

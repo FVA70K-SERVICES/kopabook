@@ -317,6 +317,23 @@ table.data tr:first-child td { border-top: 0; }
 .qty-ctl button { width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 18px; cursor: pointer; }
 .total-row { display: flex; justify-content: space-between; font-size: 18px; font-weight: 800; padding: 14px 0 4px; }
 
+/* Round 3: the "Current sale" card overflowed on narrow phones. The cart
+   line was one no-wrap flex row (name + stepper + nowrap line total) and
+   a grid item's default min-width:auto let its min-content force the
+   column wider than the viewport, so the card and the line total were
+   clipped at the right edge. Let the card shrink, let the line wrap
+   (the total drops to its own right-aligned row), and shrink the
+   stepper on small screens. */
+.cart { min-width: 0; }
+.cart-line { flex-wrap: wrap; min-width: 0; }
+.cart-line > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.cart-line > .money:last-child { margin-left: auto; }
+@media (max-width: 480px) {
+  .cart { padding: 16px; }
+  .qty-ctl { gap: 6px; }
+  .qty-ctl button { width: 40px; height: 40px; }
+}
+
 /* ---------- footer ---------- */
 .mfooter { border-top: 1px solid var(--line); padding: 36px 0; margin-top: auto; color: var(--muted); font-size: 14px; }
 .mfooter .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
