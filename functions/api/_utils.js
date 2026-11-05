@@ -124,17 +124,20 @@ function tzOffsetMinutes(zone, date) {
 // "Today" in the business's own timezone. Returns the local date (YYYY-MM-DD)
 // plus the matching UTC window for comparing created_at timestamps.
 // Pure Intl, no library needed, works on Cloudflare Workers.
-export function businessDay(tz) {
+// The optional second argument is the instant to take "today" from
+// (defaults to now): pass now minus 24h for yesterday's window.
+export function businessDay(tz, at) {
   const zone = tz || "Africa/Lagos";
+  const now = at instanceof Date ? at : new Date();
   let date;
   try {
     date = new Intl.DateTimeFormat("en-CA", {
       timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-    }).format(new Date());
+    }).format(now);
   } catch {
     date = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit",
-    }).format(new Date());
+    }).format(now);
   }
   // Find UTC start of that local day via two refinement passes.
   let guess = Date.parse(date + "T00:00:00Z");

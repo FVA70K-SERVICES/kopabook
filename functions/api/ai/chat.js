@@ -16,7 +16,7 @@
 // actions/day (Projects itself is open to all plans). Starter: 20/day,
 // read + record_sale/add_expense (10 actions/day). Solo: 50/day, all tools.
 // Pro: 100/day, all tools. 60/hr rate limit on top.
-import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "../_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate, businessDay } from "../_utils";
 import { getBusinessOwnerTier, LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
 import { PROJECT_TYPES, projectTotals } from "../projects/_lib.js";
@@ -2664,13 +2664,35 @@ async function buildBriefing(db, auth, snap, currency) {
   const businessId = auth.business.id;
   const L = [];
   L.push("Here is your briefing.");
-  L.push(`Sales today so far: ${fmt(snap.salesToday.total, currency)} across ${snap.salesToday.count} ${snap.salesToday.count === 1 ? "sale" : "sales"}.`);
+  // Today and yesterday in the BUSINESS timezone, from the same "now":
+  // two disjoint UTC windows, so the two lines can never repeat each
+  // other. The old query used SQLite's UTC day (date('now','-1 day')),
+  // which is a different day from the business day after midnight WAT
+  // and repeated today's figure as yesterday's. If either window query
+  // fails, today falls back to the snapshot and yesterday is omitted,
+  // so the briefing never loses its today line.
+  const tz = (auth.business && auth.business.timezone) || "Africa/Lagos";
+  const now = new Date();
+  const todayWindow = businessDay(tz, now);
+  const yesterdayWindow = businessDay(tz, new Date(now.getTime() - 24 * 3600 * 1000));
+  let todaySales = { total: Number(snap.salesToday.total) || 0, count: Number(snap.salesToday.count) || 0 };
+  let yesterdaySales = null;
+  try {
+    const t = await db.prepare(
+      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?`
+    ).bind(businessId, todayWindow.startUtc, todayWindow.endUtc).first();
+    todaySales = { total: Number(t && t.total) || 0, count: Number(t && t.cnt) || 0 };
+  } catch (e) {}
   try {
     const y = await db.prepare(
-      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND date(created_at) = date('now','-1 day')`
-    ).bind(businessId).first();
-    L.push(`Yesterday: ${fmt(y && y.total, currency)} across ${Number(y && y.cnt) || 0} ${(Number(y && y.cnt) || 0) === 1 ? "sale" : "sales"}.`);
+      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?`
+    ).bind(businessId, yesterdayWindow.startUtc, yesterdayWindow.endUtc).first();
+    yesterdaySales = { total: Number(y && y.total) || 0, count: Number(y && y.cnt) || 0 };
   } catch (e) {}
+  L.push(`Sales today so far: ${fmt(todaySales.total, currency)} across ${todaySales.count} ${todaySales.count === 1 ? "sale" : "sales"}.`);
+  if (yesterdaySales) {
+    L.push(`Yesterday: ${fmt(yesterdaySales.total, currency)} across ${yesterdaySales.count} ${yesterdaySales.count === 1 ? "sale" : "sales"}.`);
+  }
   if (snap.debtors && snap.debtors.length) {
     const owingLines = [];
     for (const d of snap.debtors) {

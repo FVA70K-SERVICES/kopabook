@@ -636,7 +636,33 @@ export function parseSaleSnapshot(text, history, snap, currency) {
 // "Record 2 Rice", "I sold 3 Fuel for 5000", "New sale 1 Laptop".
 // ---------------------------------------------------------------------------
 
-const SALE_VERBS = /\b(record|new|add|sold|sell|sale|sales)\b/;
+const SALE_VERBS = /\b(record|new|add|sold|sell|sale|sales|bought)\b/;
+// "buy" (present tense) is deliberately NOT a sale verb: "I want to buy
+// fuel" is the owner buying supplies (an expense), not a sale. Only the
+// past tense "bought" reports a completed purchase.
+// A buyer reporting what a customer did ("someone bought 5 fvamail") is
+// a sale, not a payment or an expense: the buyer is never part of a
+// product or customer name, and implies a walk-in customer.
+const SALE_BUYER_WORDS = /\b(someone|somebody|some person|a new customer|new customer|a customer|anybody|anyone)\b/g;
+
+// Words that can only ever be part of a question, never a product name.
+// Used to stop a sales-history question ("what did we sell today?")
+// becoming a product called "what did we".
+const QUESTION_WORDS = new Set(["what", "which", "who", "whom", "whose", "when", "where", "why", "how", "did", "do", "does", "is", "are", "was", "were", "can", "could", "should", "would", "have", "has", "had", "we", "i", "you", "they", "he", "she", "it", "me", "us", "them", "him", "her", "his", "their", "my", "our", "your", "this", "that", "there", "here"]);
+
+export function isQuestionWordsOnly(product) {
+  const words = String(product || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^a-z]/g, ""))
+    .filter(Boolean);
+  return words.length > 0 && words.every((w) => QUESTION_WORDS.has(w));
+}
+
+export function isQuestionText(text) {
+  const t = normalizeFastText(text);
+  return /^\s*(what|which|who|whom|whose|when|where|why|how)\b/.test(t) || /\?\s*$/.test(t);
+}
 
 // Time words and filler are never part of a product or customer name:
 // "laptop now" is the product Laptop plus the word "now", never a
@@ -655,9 +681,20 @@ const SALE_METHODS = [
 export function parseSaleMention(text) {
   const t = normalizeFastText(text);
   if (!SALE_VERBS.test(t)) return null;
+  // A bought-only message is a sale only when a third party bought it
+  // ("someone bought 5 fvamail"): first-person "I bought fuel" is the
+  // owner buying supplies, which the expense step owns.
+  if (isBoughtOnly(t) && !isBuyerSale(t)) return null;
   let rest = t;
+  // A leading acknowledgement ("Great, now record a sale") is discourse,
+  // not a product: strip it before the sale is read.
+  rest = rest.replace(/^(great|thanks|thank you|ok|okay|good|nice|hello|hi|hey)[,!\s]+/, "");
   // Time words out first: they pollute product and customer names.
   rest = rest.replace(SALE_TIME_WORDS, " ").replace(/\s+/g, " ").trim();
+  // An unnamed buyer is a walk-in, never a name: strip the buyer words
+  // before the customer and product are read, so "someone bought 5
+  // fvamail" leaves the product "5 fvamail" and no customer.
+  rest = rest.replace(SALE_BUYER_WORDS, " ").replace(/\s+/g, " ").trim();
   // Payment method, when stated ("in cash", "by transfer"). Removed
   // before the customer and product are read.
   let paymentMethod = null;
@@ -722,9 +759,15 @@ export function parseSaleMention(text) {
     }
   }
   // Remove the sale verbs and filler, then split into item segments.
+  // "another" is filler too ("sold another laptop" is one Laptop).
+  // A dangling "to"/"for" left behind when the buyer words were stripped
+  // ("sold a laptop to somebody" -> "sold a laptop to") is dropped here,
+  // so it never lands in a product name.
   rest = rest
-    .replace(/\b(record|new|add|sold|sell|sale|sales|of|the|a|an|please|kindly|just|item|items|product|i|we)\b/g, " ")
+    .replace(/\b(record|new|add|sold|sell|sale|sales|bought|of|the|a|an|please|kindly|just|item|items|product|i|we|another)\b/g, " ")
     .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s*\b(to|for)\s*$/, "")
     .trim();
   const items = [];
   if (rest) {
@@ -744,6 +787,16 @@ export function parseSaleMention(text) {
         }
       }
     }
+  }
+  // A question is never a product: drop any item made only of question
+  // words ("what did we sold today?" leaves "what did we"), and when a
+  // question leaves nothing, return null so it never reaches the product
+  // search. A bare "record a sale" is not a question, so its empty items
+  // still flow to the executor's one targeted question.
+  const keptItems = items.filter((it) => !isQuestionWordsOnly(it.product));
+  if (keptItems.length !== items.length) {
+    if (!keptItems.length && isQuestionText(t)) return null;
+    items.splice(0, items.length, ...keptItems);
   }
   // A lone payment/expense word is not a product ("record a payment" is
   // not a sale of one "payment"). Let the model ask for the details.
@@ -772,8 +825,12 @@ export function parseExpenseMention(text) {
   // payment (the guard below), so "Favour paid 5000" never lands here.
   const firstPersonPaidFor = /\b(i|we)\s+paid\b/.test(t) && /\bfor\b/.test(t);
   if (!EXPENSE_VERBS.test(t) && !firstPersonPaidFor) return null;
-  // Must be an expense intent, not a sale or payment.
-  if (SALE_VERBS.test(t) && !/\bexpense\b/.test(t)) return null;
+  // Must be an expense intent, not a sale or payment. "bought" alone does
+  // not block the expense parser: "I bought fuel" is an expense, while
+  // "someone bought 5 fvamail" is a sale only because the bought item
+  // matches a snapshot product, which the sale step (step 11, before
+  // this one) already claimed. A non-bought sale verb does block it.
+  if (/\b(record|new|add|sold|sell|sale|sales)\b/.test(t) && !/\bexpense\b/.test(t)) return null;
   if (PAYMENT_VERBS.test(t) && !/\bexpense\b/.test(t) && !firstPersonPaidFor) return null;
   const amounts = findAllAmounts(t);
   let amount = null;
@@ -1183,7 +1240,12 @@ export function classifyReadIntent(text) {
   if (bareList) {
     return { products: "products", customers: "customers", projects: "projects", sales: "recentsales", expenses: "recentexpenses" }[bareList[1]];
   }
-  if (includesAny(t, ["sales today", "today's sales", "todays sales", "sales so far today", "how much did we sell today", "how much we sell today", "wetin we sell today", "what did we sell today", "what did i sell today", "what have i sold today", "what have we sold today", "today sales", "sales for today"])) return "today";
+  if (includesAny(t, ["sales today", "today's sales", "todays sales", "sales so far today", "how much did we sell today", "how much we sell today", "wetin we sell today", "what did we sell today", "what did i sell today", "what have i sold today", "what have we sold today", "today sales", "sales for today", "what did we sold today", "what did i sold today", "what have we sold today", "what have i sold today", "what sold today", "what we sold today"])) return "today";
+  // Bare "what did we sold" / "what have we sold" (no "today") as a whole
+  // message still means today: the snapshot has no yesterday read, and a
+  // substring match would also catch "... yesterday", which is a different
+  // day. Anchored, so "what did we sell yesterday" never lands here.
+  if (/^\s*what (did|have) (we|i) (sold|sell)\s*[.!?]*$/.test(t)) return "today";
   if (includesAny(t, ["sales this month", "sales for the month", "this month sales", "how much did we sell this month", "monthly sales", "sales month"])) return "month";
   if (includesAny(t, ["how much did i spend this month", "how much did we spend this month", "what did i spend this month", "my spending this month", "spending this month", "expenses this month", "expenses for the month"])) return "monthexpenses";
   if (includesAny(t, ["recent sales", "last sales", "latest sales", "sales history", "show sales", "last few sales", "recent transactions", "list my sales", "show my sales", "list sales", "sales list"])) return "recentsales";
@@ -1258,6 +1320,142 @@ export function formatProjects(snap, currency) {
 }
 
 // ---------------------------------------------------------------------------
+// Sale-payment question: a sale reported from the buyer's side with no
+// payment stated ("someone bought 5 fvamail now"). The payment is
+// genuinely unknown, so the fast path asks one short question instead of
+// assuming full payment, and the answer completes the sale.
+// ---------------------------------------------------------------------------
+
+// A third-party buyer is named ("someone", "somebody", "a customer",
+// "a new customer", "some person", "anybody", "anyone"): the purchase
+// is a sale to a walk-in, not the owner buying supplies.
+export function isBuyerSale(text) {
+  const t = normalizeFastText(text);
+  return /\b(someone|somebody|some person|a new customer|new customer|a customer|anybody|anyone)\b/.test(t);
+}
+
+// "bought" on its own, with no seller-side sale verb: the buyer is
+// reporting what a customer did, not the owner recording their own sale.
+export function isBoughtOnly(text) {
+  const t = normalizeFastText(text);
+  return /\bbought\b/.test(t) && !/\b(record|new|add|sold|sell|sale|sales)\b/.test(t);
+}
+
+// Total of snapshot-matched sale items, from the snapshot prices.
+export function saleTotalFromSnapshot(items, snap) {
+  const products = (snap && snap.products) || [];
+  return (items || []).reduce((s, it) => {
+    const p = products.find((x) => x.name === it.product);
+    return s + (Number(p && p.price) || 0) * (Number(it.qty) || 0);
+  }, 0);
+}
+
+function saleMethodFromText(t) {
+  for (const [re, method] of SALE_METHODS) {
+    if (re.test(t)) return method;
+  }
+  // A bare method word as a payment answer ("cash", "transfer") means
+  // the full total by that method. Only in an answer: the sale parser
+  // itself still needs "in cash" / "by transfer" so a product or a
+  // customer called Cash is never read as a method.
+  if (/\bcash\b/.test(t)) return "cash";
+  if (/\btransfer\b/.test(t)) return "transfer";
+  return null;
+}
+
+// A sale reported with no payment stated: state the sale that will be
+// recorded, then ask one short question about the payment.
+export function formatSalePaymentQuestion(items, total, currency, customerName) {
+  const parts = (items || []).map((it) => `${it.qty} × ${it.product}`);
+  const who = customerName ? `for ${customerName}` : "for a walk-in customer";
+  return `${parts.join(", ")}, total ${formatMoney(total, currency)}, ${who}. How much did they pay?`;
+}
+
+// The sale a payment question belongs to: the last assistant turn asked
+// "How much did they pay?" (the question above), and a user turn since
+// the last "Done. Recorded ..." line parses as a sale against the
+// snapshot. Returns { params, total, question } or null.
+export function findPendingSalePayment(history, snap, currency) {
+  const hist = history || [];
+  let lastAssistantIdx = -1;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && h.role === "assistant" && typeof h.content === "string") { lastAssistantIdx = i; break; }
+  }
+  if (lastAssistantIdx < 0) return null;
+  if (!/how much did they pay\?/i.test(hist[lastAssistantIdx].content)) return null;
+  let startIdx = 0;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && h.role === "assistant" && typeof h.content === "string" && /Done\. Recorded (payment|sale|expense)/.test(h.content)) {
+      startIdx = i + 1;
+      break;
+    }
+  }
+  const recent = hist.slice(startIdx);
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const h = recent[i];
+    if (!h || h.role !== "user" || typeof h.content !== "string") continue;
+    const sale = parseSaleSnapshot(h.content, hist, snap, currency);
+    if (sale) {
+      const params = sale.params;
+      const total = saleTotalFromSnapshot(params.items, snap);
+      const question = formatSalePaymentQuestion(params.items, total, currency, params.customer_name || "");
+      return { params, total, question };
+    }
+  }
+  return null;
+}
+
+// Resolve an answer to a sale-payment question ("How much did they pay?"):
+// a bare amount, "paid <amount>" / "he paid <amount>", "paid in full"
+// (the full total), "paid half" (half the total), or a payment method on
+// its own ("cash", "by transfer": full total by that method). Returns
+// { amount, method } (method may be null) or null when the answer does
+// not resolve. A real name before "paid" ("Favour paid 5000") is a fresh
+// customer payment, not an answer, so it stays with the payment parser.
+export function parseSalePaymentAnswer(text, total) {
+  const t = normalizeFastText(text);
+  const answer = parseAmountAnswer(text);
+  if (answer && answer.amount > 0) return { amount: answer.amount, method: saleMethodFromText(t) };
+  if (/\bpaid\s+half\b/.test(t)) {
+    return { amount: Math.round((total / 2) * 100) / 100, method: saleMethodFromText(t) };
+  }
+  if (/\b(paid\s+(in\s+)?full|in\s+full|fully\s+paid|full\s+payment)\b/.test(t)) {
+    return { amount: total, method: saleMethodFromText(t) };
+  }
+  const paidAmount = t.match(/^(?:(he|she|they|it|i|we)\s+)?paid\s+(.+)$/);
+  if (paidAmount) {
+    const amounts = findAllAmounts(paidAmount[2]);
+    if (amounts.length === 1) return { amount: amounts[0].value, method: saleMethodFromText(t) };
+  }
+  const method = saleMethodFromText(t);
+  if (method) return { amount: total, method };
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Bare acknowledgements and greetings: "Great", "Thanks", "Thank you",
+// "OK", "Good", "Nice", "Hello", "Hi". One short friendly line, never the
+// model, never the failure line. Whole-message anchored, so a longer
+// sentence that merely starts with one of these words is unaffected.
+// Returns the reply text or null.
+// ---------------------------------------------------------------------------
+export function acknowledgementReply(text) {
+  const t = normalizeFastText(text).replace(/[.!?]+$/, "").trim();
+  if (/^(thanks|thank you|thank you very much|thanks a lot|thanks so much)$/.test(t)) {
+    return "You are welcome. Anything else?";
+  }
+  if (/^(hello|hi|hey|good morning|good afternoon|good evening)$/.test(t)) {
+    return "Hello. How can I help today?";
+  }
+  if (/^(great|good|nice|ok|okay|awesome|perfect|lovely|brilliant|great job|well done)$/.test(t)) {
+    return "Great. Anything else I can help with?";
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Orchestrator: message + history + snapshot -> fast-path result or null.
 // ---------------------------------------------------------------------------
 
@@ -1295,6 +1493,17 @@ export function resolveFastPath(message, history, snap, currency) {
   // 2. Full-balance payment: "Favour have paid the full balance he owe
   // now", "Favour paid in full", "Favour cleared his balance". The
   // amount is the snapshot balance, never asked for, never invented.
+  // A sale-payment answer first: "paid in full" to "How much did they
+  // pay?" completes the pending sale, it is not a customer full-balance
+  // payment. Only when the last assistant turn asked the sale question
+  // and this message resolves as its answer.
+  const pendingSaleFull = findPendingSalePayment(history, snap, currency);
+  if (pendingSaleFull) {
+    const salePaymentFull = parseSalePaymentAnswer(text, pendingSaleFull.total);
+    if (salePaymentFull) {
+      return { kind: "action", tool: "record_sale", params: { ...pendingSaleFull.params, amount_paid: salePaymentFull.amount, ...(salePaymentFull.method ? { payment_method: salePaymentFull.method } : {}) } };
+    }
+  }
   if (isFullBalancePayment(text)) {
     const full = parseFullBalanceMention(text, history, snap);
     if (full && full.amount > 0) {
@@ -1324,6 +1533,20 @@ export function resolveFastPath(message, history, snap, currency) {
     if (h && h.role === "assistant" && typeof h.content === "string") { lastAssistantIdx = i; break; }
   }
   if (lastAssistantIdx >= 0 && isAmountQuestion(history[lastAssistantIdx].content)) {
+    // A sale-payment question first: the last assistant turn asked "How
+    // much did they pay?" about a sale the user reported, so the answer
+    // completes that sale, never a customer payment. A fresh statement
+    // (a named payment, a new sale, a read) is not an answer: it falls
+    // through to its own step instead of re-asking the question.
+    const pendingSale = findPendingSalePayment(history, snap, currency);
+    if (pendingSale) {
+      const salePayment = parseSalePaymentAnswer(text, pendingSale.total);
+      if (salePayment) {
+        return { kind: "action", tool: "record_sale", params: { ...pendingSale.params, amount_paid: salePayment.amount, ...(salePayment.method ? { payment_method: salePayment.method } : {}) } };
+      }
+      const fresh = parsePaymentMention(text) || SALE_VERBS.test(t) || classifyReadIntent(text) || isFullBalancePayment(text);
+      if (!fresh) return { kind: "reply", text: pendingSale.question };
+    }
     const answer = parseAmountAnswer(text);
     if (answer) {
       const debtor = resolveAmountAnswerCustomer(history, snap);
@@ -1343,7 +1566,11 @@ export function resolveFastPath(message, history, snap, currency) {
   // about; with no antecedent, one short question instead of a guess.
   // A payment with a name but no amount and no full-balance marker
   // ("Favour paid") asks how much, instead of falling to the model.
-  const payment = parsePaymentMention(text);
+  // A message that parses as a sale against the snapshot is a sale, not
+  // a payment: "Someone bought 5 fvamail now and paid in full" has a
+  // quantity (5) that the payment parser would read as the amount and
+  // the rest as a customer name. Step 11 owns it.
+  const payment = parseSaleSnapshot(text, history, snap, currency) ? null : parsePaymentMention(text);
   if (payment) {
     if (isPronounWord(payment.customer_name.split(" ")[0])) {
       const debtor = resolvePronounCustomer(history, snap);
@@ -1356,7 +1583,11 @@ export function resolveFastPath(message, history, snap, currency) {
   }
   // A question starting with "who" ("Who has not paid") is a read about
   // who owes, never a payment statement: the debtors read owns it.
-  if (PAYMENT_VERBS.test(t) && !findAllAmounts(t).length && !isDebtorRemindRequest(text) && !/^\s*who\b/.test(t)) {
+  // A sale sentence ("I sold another laptop to somebody he paid in
+  // full") never lands here: the "he" pronoun has no debtor antecedent
+  // and would ask "Who paid, and how much?" instead of proposing the
+  // sale. The sale step (step 11) owns any message with a sale verb.
+  if (PAYMENT_VERBS.test(t) && !SALE_VERBS.test(t) && !findAllAmounts(t).length && !isDebtorRemindRequest(text) && !/^\s*who\b/.test(t)) {
     const named = findDebtorsInText(text, snap);
     if (named.length === 1) {
       return { kind: "reply", text: `How much did ${named[0].name} pay?` };
@@ -1659,7 +1890,17 @@ export function resolveFastPath(message, history, snap, currency) {
   // polluted name like "laptop now".
   if (SALE_VERBS.test(t) && !/\bexpense\b/.test(t)) {
     const snapSale = parseSaleSnapshot(text, history, snap, currency);
-    if (snapSale) return snapSale;
+    if (snapSale) {
+      // A buyer-side report ("someone bought 5 fvamail") with no payment
+      // stated: ask one short question about the payment instead of
+      // assuming full payment. The seller-side ("I sold a laptop") keeps
+      // the existing full-payment default.
+      if (isBoughtOnly(t) && snapSale.params.amount_paid === undefined && !snapSale.params.payment_method) {
+        const total = saleTotalFromSnapshot(snapSale.params.items, snap);
+        return { kind: "reply", text: formatSalePaymentQuestion(snapSale.params.items, total, currency, snapSale.params.customer_name || "") };
+      }
+      return snapSale;
+    }
     const sale = parseSaleMention(text);
     if (sale) {
       return { kind: "action", tool: "record_sale", params: sale };
@@ -1667,7 +1908,11 @@ export function resolveFastPath(message, history, snap, currency) {
   }
 
   // 12. Expense mention (including the bare "Record an expense" chip).
-  if (/\bexpense\b/.test(t) || /\bspent\b/.test(t) || /\bspend\b/.test(t)) {
+  // "bought" reaches here only when the sale step did not claim it: a
+  // first-person bought ("I bought fuel") is the owner buying supplies,
+  // which is an expense. A third-party bought that matches a product
+  // was already claimed by step 11.
+  if (/\bexpense\b/.test(t) || /\bspent\b/.test(t) || /\bspend\b/.test(t) || /\bbought\b/.test(t)) {
     const expense = parseExpenseMention(text);
     if (expense) {
       return { kind: "action", tool: "add_expense", params: { amount: expense.amount, description: expense.description } };
@@ -1691,6 +1936,13 @@ export function resolveFastPath(message, history, snap, currency) {
       return { kind: "action", tool: "save_memory", params: { key: mem.key, value: mem.value } };
     }
   }
+
+  // 14b. Bare acknowledgement or greeting ("Great", "Thanks", "Hello"):
+  // one short friendly line, never the model, never the failure line.
+  // Whole-message anchored, so a longer sentence ("Great, now record a
+  // sale") still reaches its own step.
+  const ack = acknowledgementReply(text);
+  if (ack) return { kind: "reply", text: ack };
 
   // 15. Nothing matched: the model handles it.
   return null;

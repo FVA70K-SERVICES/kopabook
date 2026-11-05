@@ -69,6 +69,12 @@ html[data-theme="dark"] #fva-chat-invite {
   transition: transform 0.15s;
 }
 #fva-chat-btn:hover { transform: scale(1.05); }
+/* Round 4: the launcher lift lives in the widget's own sheet too, not
+   only in the app stylesheet, so it applies whenever the widget is in
+   the app even if the app sheet is stale or the class arrives late.
+   (Round 3 put this rule only in src/styles.css, gated on the same
+   body class the widget adds.) */
+body.kb-in-app #fva-chat-btn { bottom: 84px; }
 #fva-chat-badge {
   position: absolute; top: -4px; right: -4px;
   background: #e53935; color: white; font-size: 12px; font-weight: 700;
@@ -142,6 +148,7 @@ html[data-theme="dark"] #fva-chat-invite {
 @media (max-width: 480px) {
   #fva-chat-window { right: 16px; bottom: 88px; }
   #fva-chat-btn { right: 16px; bottom: 16px; }
+  body.kb-in-app #fva-chat-btn { bottom: 84px; right: 16px; }
   /* Open on a narrow phone: the window becomes a full sheet, so no page
      behind it can show sliced through it and the launcher (hidden while
      open) cannot cover the bottom navigation. The window ends above the

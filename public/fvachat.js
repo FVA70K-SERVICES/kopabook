@@ -26,31 +26,63 @@
 
   // ---- In-app shell marker (round 3: launcher over the bottom nav) ----
   // The app stylesheet lifts the launcher clear of the mobile bottom nav
-  // only under body.kb-in-app, but nothing in the app ever added that
-  // class, so on every signed-in page (Sales, Dashboard, ...) the
-  // launcher sat at bottom:16/24px, over the More tab. The widget adds
-  // the class itself, two ways: at load on an /app route (before the
-  // session resolves, so there is no flash of overlap), and whenever the
-  // signed-in owner context arrives via window.setFVAChatOwner (the app
-  // calls it after the session loads, including after an SPA navigation
-  // from a signed-out page). Signed-out pages never get the class.
-  // Receipt pages are excluded at load: they have no bottom nav.
+  // only under body.kb-in-app. Round 3 added that class at script load
+  // (on an /app route) and when the signed-in owner context arrived via
+  // window.setFVAChatOwner. Round 4: that is not enough. The app is a
+  // SPA, so after an in-app navigation from a signed-out page the script
+  // never re-runs, the class is never added, the bottom:84px lift never
+  // applies, and the launcher sits at bottom:16px over the More tab
+  // (live 23:47-23:49, on round-3 code). So the check is route-aware
+  // inside markInApp itself, and it re-runs on every SPA navigation
+  // (pushState / replaceState / popstate / hashchange), when the owner
+  // context arrives, and whenever the chat opens.
+  function isAppRoute() {
+    try {
+      const p = String(window.location && window.location.pathname || "");
+      return p.indexOf("/app") === 0 && p.indexOf("/app/receipt") !== 0;
+    } catch (e) { return false; }
+  }
   function markInApp() {
     try {
       if (!IS_KOPABOOK) return;
-      if (document && document.body && document.body.classList) document.body.classList.add('kb-in-app');
+      if (!isAppRoute() && !isOwnerMode()) return;
+      if (document && document.body && document.body.classList) document.body.classList.add("kb-in-app");
     } catch (e) {}
   }
   try {
-    if (IS_KOPABOOK && window.location && String(window.location.pathname || '').indexOf('/app') === 0
-        && String(window.location.pathname || '').indexOf('/app/receipt') !== 0) markInApp();
+    if (IS_KOPABOOK && window.location && isAppRoute()) markInApp();
+  } catch (e) {}
+  try {
+    if (IS_KOPABOOK && window.history) {
+      const origPush = window.history.pushState;
+      const origReplace = window.history.replaceState;
+      if (typeof origPush === "function") {
+        window.history.pushState = function () {
+          const r = origPush.apply(this, arguments);
+          try { markInApp(); } catch (e) {}
+          return r;
+        };
+      }
+      if (typeof origReplace === "function") {
+        window.history.replaceState = function () {
+          const r = origReplace.apply(this, arguments);
+          try { markInApp(); } catch (e) {}
+          return r;
+        };
+      }
+      if (typeof window.addEventListener === "function") {
+        window.addEventListener("popstate", markInApp);
+        window.addEventListener("hashchange", markInApp);
+        window.addEventListener("resize", function () { try { if (isOpen) applyNarrowSheet(); } catch (e) {} });
+      }
+    }
   } catch (e) {}
   if (IS_KOPABOOK) {
     try {
       const prevSetOwner = window.setFVAChatOwner;
       window.setFVAChatOwner = function (ctx) {
         try {
-          if (typeof prevSetOwner === 'function') prevSetOwner(ctx);
+          if (typeof prevSetOwner === "function") prevSetOwner(ctx);
           else window.FVAChatOwner = ctx;
         } catch (e) { try { window.FVAChatOwner = ctx; } catch (e2) {} }
         markInApp();
@@ -426,7 +458,39 @@
     else if (action === 'whatsapp') window.open('https://wa.me/2348130244617', '_blank');
   }
 
+  // Round 4: enforce the narrow-phone full sheet inline. The stylesheet
+  // rule exists, but on the phone the panel still rendered as a floating
+  // card (rounded corners, support page above it), consistent with a
+  // stale cached fvachat.css. Inline styles beat any cached sheet, so
+  // the sheet is guaranteed at 480px and below. Cleared on close and
+  // whenever the viewport is wider, so the desktop floating card is
+  // untouched.
+  function applyNarrowSheet() {
+    try {
+      if (window.innerWidth <= 480) {
+        win.style.left = "0"; win.style.right = "0";
+        win.style.top = "env(safe-area-inset-top, 0px)"; win.style.bottom = "88px";
+        win.style.width = "auto"; win.style.maxWidth = "none";
+        win.style.height = "auto"; win.style.maxHeight = "none";
+        win.style.borderRadius = "0";
+      } else {
+        clearNarrowSheet();
+      }
+    } catch (e) {}
+  }
+  function clearNarrowSheet() {
+    try {
+      win.style.left = ""; win.style.right = ""; win.style.top = ""; win.style.bottom = "";
+      win.style.width = ""; win.style.maxWidth = ""; win.style.height = ""; win.style.maxHeight = "";
+      win.style.borderRadius = "";
+    } catch (e) {}
+  }
+
   function openChat(requestedMode) {
+    // Opening the chat inside the app always re-marks the shell, so the
+    // launcher and panel sit clear of the bottom nav even if the page
+    // was reached by an SPA navigation the load-time check never saw.
+    if (IS_KOPABOOK) markInApp();
     paFetchedThisOpen = false;
     paCardsRenderedThisOpen = false;
     voiceUnsupportedNoteShownThisOpen = false;
@@ -439,6 +503,7 @@
     }
     isOpen = true;
     win.classList.add('open');
+    applyNarrowSheet();
     // The launcher becomes the big × while open and sits over the bottom
     // navigation; hide it while the window is open. The header ×
     // (#fva-chat-close) is the close control. Restored on close.
@@ -1711,6 +1776,7 @@
     hideBotTyping();
     isOpen = false;
     win.classList.remove('open');
+    clearNarrowSheet();
     btn.style.display = '';
     btn.innerHTML = '💬<span id="fva-chat-badge">0</span>';
     updateBadge();
