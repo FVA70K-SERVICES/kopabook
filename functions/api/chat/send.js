@@ -322,7 +322,13 @@ export async function onRequestPost(context) {
                   .slice(-20);
                 const aiRes = await runKopaAiChat(context, ownerAuth, { message: clean, history, sessionId, confirmProposalId });
                 const b = aiRes.body || {};
-                const answer = b.reply || b.answer || b.message || 'Ask Kopa AI could not answer just now. Please try again.';
+                // A proposal carries its own card: its reply is empty on
+                // purpose (duplicate-proposal fix, round 2), so the
+                // failure line must not fire here. An empty answer with a
+                // proposal is the correct shape, not a failure.
+                const answer = b.proposal
+                  ? (b.reply || b.answer || "")
+                  : (b.reply || b.answer || b.message || 'Ask Kopa AI could not answer just now. Please try again.');
                 result = { answer, quickReplies: [], confidence: 'high', proposal: b.proposal || null, clearChat: b.clear_chat || false };
               } catch (e) {
                 // Ask Kopa AI failure: one line, never a dump, never a
@@ -493,15 +499,21 @@ export async function onRequestPost(context) {
         }
 
         const botNow = Date.now();
-        await env.KOPABOOK_DB.prepare(
-          'INSERT INTO chat_messages (session_id, sender, message, created_at) VALUES (?, ?, ?, ?)'
-        ).bind(sessionId, 'bot', result.answer, botNow).run();
+        // An empty bot answer is never stored: proposal replies are empty
+        // on purpose (the card is the only rendering), and storing an
+        // empty bubble would deliver a blank message through the poll
+        // loop (duplicate-proposal fix, round 2).
+        if (result.answer && String(result.answer).trim()) {
+          await env.KOPABOOK_DB.prepare(
+            'INSERT INTO chat_messages (session_id, sender, message, created_at) VALUES (?, ?, ?, ?)'
+          ).bind(sessionId, 'bot', result.answer, botNow).run();
 
-        // Keep the support case record in step with the live thread.
-        if (supportCase) {
-          try {
-            await mirrorCaseMessage(env.KOPABOOK_DB, supportCase, { sender: 'bot', message: result.answer, at: botNow });
-          } catch (e) { /* the live reply already saved */ }
+          // Keep the support case record in step with the live thread.
+          if (supportCase) {
+            try {
+              await mirrorCaseMessage(env.KOPABOOK_DB, supportCase, { sender: 'bot', message: result.answer, at: botNow });
+            } catch (e) { /* the live reply already saved */ }
+          }
         }
 
         // The Ask Kopa AI side is fully automated: its messages never flag

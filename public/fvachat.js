@@ -51,6 +51,25 @@
   // the failure line is skipped: the user already has their answer.
   let replyDeliveredSeq = 0;
 
+  // ---- Staged thinking display (replaces the bare "Working on it..." note) ----
+  // While a send is working, the chat always shows a thinking bubble in
+  // the thread: three calm dots plus a plain-word step line that advances
+  // on a timer ("Working on it...", "Checking your books...", "Finding
+  // Favour's balance...", "Preparing your proposal..."). It appears
+  // synchronously in sendMessage — before the fetch starts — so chip taps
+  // and Confirm taps show it too (they all funnel through sendMessage),
+  // and it always resolves: success, error, abort and timeout all clear
+  // it, and a hard fallback timer clears it even if a code path forgets.
+  const THINK_STEP_MS = 1750;
+  const THINK_FALLBACK_MS = SEND_TIMEOUT_MS + 5000;
+  let thinkingSteps = [];
+  let thinkingStepIdx = 0;
+  let thinkingStepTimer = null;
+  let thinkingFallbackTimer = null;
+  // Sequence whose bubble the hard fallback already replaced with the
+  // one-line failure, so a late send settle cannot add a second one.
+  let thinkingFailedSeq = 0;
+
   // ---- Personal assistant (PA) profile, Ask Kopa AI side ----
   // GET /api/ai/pa returns { ok, assistant: { name, custom_name, voice, language },
   // pa_enabled, cards: [...] }. Fetched once per open in owner mode.
@@ -235,18 +254,23 @@
     return found;
   }
 
-  function prefersReducedMotion() {
-    try {
-      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    } catch (e) { return false; }
-  }
-
   function scrollMessagesToBottom(wrap) {
     if (!wrap) return;
-    if (prefersReducedMotion()) { wrap.scrollTop = wrap.scrollHeight; return; }
+    // Instant jump, then re-assert after layout settles. A proposal card
+    // (or a long reply) is taller than the messages viewport, and a smooth
+    // scroll alone can stop short, leaving the card's Confirm/Cancel
+    // buttons below the fold. The rAF re-scroll covers the paint, and the
+    // 300ms re-scroll covers late layout (fonts, cards painting in).
+    // One pending timer per wrap: a newer render replaces the older one.
+    const jump = () => { try { wrap.scrollTop = wrap.scrollHeight; } catch (e) {} };
+    jump();
+    if (typeof requestAnimationFrame === 'function') {
+      try { requestAnimationFrame(jump); } catch (e) {}
+    }
     try {
-      wrap.scrollTo({ top: wrap.scrollHeight, behavior: 'smooth' });
-    } catch (e) { wrap.scrollTop = wrap.scrollHeight; }
+      if (wrap._fvaScrollTimer) clearTimeout(wrap._fvaScrollTimer);
+      wrap._fvaScrollTimer = setTimeout(jump, 300);
+    } catch (e) {}
   }
 
   function routeSide() {
@@ -381,6 +405,10 @@
     }
     isOpen = true;
     win.classList.add('open');
+    // The launcher becomes the big × while open and sits over the bottom
+    // navigation; hide it while the window is open. The header ×
+    // (#fva-chat-close) is the close control. Restored on close.
+    btn.style.display = 'none';
     btn.innerHTML = '×<span id="fva-chat-badge">0</span>';
     unread = 0; updateBadge();
     invite.style.display = 'none';
@@ -1646,8 +1674,10 @@
 
   function closeChat() {
     stopVoiceMode();
+    hideBotTyping();
     isOpen = false;
     win.classList.remove('open');
+    btn.style.display = '';
     btn.innerHTML = '💬<span id="fva-chat-badge">0</span>';
     updateBadge();
     stopPolling();
@@ -1744,7 +1774,7 @@
       '</div>' +
       '<div id="fva-chat-input-area">' +
         '<button id="fva-emoji-btn" aria-label="Emoji">😀</button>' +
-        '<input type="text" id="fva-chat-input" placeholder="Type a message..." maxlength="2000">' +
+        '<input type="text" id="fva-chat-input" placeholder="Message" maxlength="2000">' +
         '<button id="fva-chat-send" aria-label="Send">➤</button>' +
       '</div>' +
       '<div id="fva-chat-rating" style="display:none;">' +
@@ -1865,7 +1895,11 @@
     const mySeq = ++sendSeq;
     const msgId = 'local_' + Date.now();
     appendMsg('visitor', text, Date.now(), msgId, false);
-    showBotTyping(mySeq);
+    // The thinking bubble appears synchronously here, before the fetch
+    // starts, so the user never sees silence while the AI works. Chip
+    // taps and Confirm taps funnel through sendMessage, so they show it
+    // the same way, in the same instant.
+    showBotTyping(mySeq, text);
     // Bound the send: without this the request could hang indefinitely
     // and the user would see nothing but the processing note.
     const controller = new AbortController();
@@ -1926,8 +1960,10 @@
     if (failed) {
       // The processing note always resolves, and a failure is never
       // silent: one visible line in the thread, nothing raw, no dump.
+      // (If the hard fallback already showed the line for this send,
+      // do not add a second one.)
       hideBotTyping(mySeq);
-      if (replyDeliveredSeq !== mySeq) {
+      if (replyDeliveredSeq !== mySeq && thinkingFailedSeq !== mySeq) {
         appendBotMsg(sendFailureText(), Date.now(), null);
       }
     }
@@ -2037,14 +2073,79 @@
     if (el) { el.textContent = '✓✓'; el.classList.add('read'); }
   }
 
-  function showBotTyping(seq) {
+  // Steps for the thinking bubble, derived cheaply from the message:
+  // a customer name (after to/from/for, else the first capitalised word
+  // that is not a sentence-start word) earns a "Finding <name>'s
+  // balance..." step; a payment, expense or sale earns a "Preparing your
+  // proposal..." step; anything else gets the generic steps.
+  function thinkingNameFromText(text) {
+    const raw = String(text || '');
+    const toFrom = raw.match(/\b(?:to|from|for)\s+([A-Za-z][A-Za-z'’\-]{1,30})/);
+    if (toFrom) return toFrom[1].charAt(0).toUpperCase() + toFrom[1].slice(1);
+    const stop = { Record: 1, Today: 1, Who: 1, What: 1, How: 1, Show: 1, List: 1, Check: 1, Remind: 1, Tell: 1, Give: 1, Send: 1, Please: 1, Brief: 1, Nothing: 1 };
+    const words = raw.match(/[A-Za-z][A-Za-z'’\-]{1,30}/g) || [];
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (/^[A-Z][a-z]/.test(w) && !stop[w]) return w;
+    }
+    return '';
+  }
+  function deriveThinkingSteps(text) {
+    const name = thinkingNameFromText(text);
+    const lower = String(text || '').toLowerCase();
+    const isWrite = /\b(paid|pay|payment|expense|spent|sale|sold|record|bought|buy)\b/.test(lower);
+    if (name) return ['Working on it\u2026', 'Checking your books\u2026', 'Finding ' + name + '\u2019s balance\u2026', 'Preparing your proposal\u2026', 'Preparing your reply\u2026'];
+    if (isWrite) return ['Working on it\u2026', 'Checking your books\u2026', 'Preparing your proposal\u2026', 'Preparing your reply\u2026'];
+    return ['Working on it\u2026', 'Checking your books\u2026', 'Preparing your reply\u2026'];
+  }
+  function clearThinkingTimers() {
+    if (thinkingStepTimer !== null) { clearInterval(thinkingStepTimer); thinkingStepTimer = null; }
+    if (thinkingFallbackTimer !== null) { clearTimeout(thinkingFallbackTimer); thinkingFallbackTimer = null; }
+  }
+  function restartThinkingTimers(seq) {
+    clearThinkingTimers();
+    thinkingStepTimer = setInterval(advanceThinkingStep, THINK_STEP_MS);
+    if (seq) thinkingFallbackTimer = setTimeout(() => thinkingFallback(seq), THINK_FALLBACK_MS);
+  }
+  function advanceThinkingStep() {
+    const el = body.querySelector('#fva-bot-typing');
+    if (!el) { clearThinkingTimers(); return; }
+    // Advance one plain-word step, then hold on the last step until the
+    // real reply replaces the bubble. Never loops back to the start.
+    if (thinkingStepIdx < thinkingSteps.length - 1) thinkingStepIdx++;
+    const step = thinkingSteps[thinkingStepIdx] || 'Working on it\u2026';
+    const label = el.querySelector('.fva-processing-text');
+    if (label) label.textContent = step;
+    el.setAttribute('aria-label', step);
+    const wrap = body.querySelector('#fva-chat-messages');
+    if (wrap) scrollMessagesToBottom(wrap);
+  }
+  function thinkingFallback(seq) {
+    // Hard fallback: the bubble can never hang forever, even if a code
+    // path forgets to clear it. It is replaced by the one-line failure
+    // with what to do next — never by silence.
+    if (typingSeq !== seq) return;
+    if (replyDeliveredSeq === seq) { hideBotTyping(seq); return; }
+    thinkingFailedSeq = seq;
+    hideBotTyping(seq);
+    appendBotMsg(sendFailureText(), Date.now(), null);
+  }
+
+  function showBotTyping(seq, text) {
     const wrap = body.querySelector('#fva-chat-messages');
     if (!wrap) return;
+    thinkingSteps = deriveThinkingSteps(text);
+    thinkingStepIdx = 0;
     const existing = body.querySelector('#fva-bot-typing');
     if (existing) {
-      // A newer send takes over the note: a late settle from the older
-      // send must not remove it.
+      // A newer send takes over the bubble: new steps, timers restart,
+      // and a late settle from the older send must not remove it.
       if (seq) typingSeq = seq;
+      const label = existing.querySelector('.fva-processing-text');
+      if (label) label.textContent = 'Working on it\u2026';
+      existing.setAttribute('aria-label', 'Working on it');
+      restartThinkingTimers(seq);
+      scrollMessagesToBottom(wrap);
       return;
     }
     const div = document.createElement('div');
@@ -2068,6 +2169,7 @@
     div.appendChild(dots);
     if (seq) typingSeq = seq;
     wrap.appendChild(div);
+    restartThinkingTimers(seq);
     scrollMessagesToBottom(wrap);
   }
 
@@ -2077,6 +2179,7 @@
     // the send fetch is still pending).
     if (seq && typingSeq && seq !== typingSeq) return;
     typingSeq = 0;
+    clearThinkingTimers();
     const el = body.querySelector('#fva-bot-typing');
     if (el) el.remove();
   }
@@ -2183,11 +2286,18 @@
       (data.messages || []).forEach(m => {
         if (m.id > lastMsgId) {
           lastMsgId = m.id;
-          // A reply landing through the poll ends the processing note
-          // even while the send fetch is still pending, and records
-          // which send it answers so a late send failure stays quiet.
-          if ((m.sender === 'bot' || m.sender === 'agent') && typingSeq) replyDeliveredSeq = typingSeq;
-          hideBotTyping();
+          // Only a bot/agent reply ends the thinking bubble. The
+          // visitor's own echo (and system notes) must NOT: the echo
+          // arrives within seconds while the send is still working, and
+          // clearing the bubble there left the chat silent until the
+          // send settled — the 22:09 screenshot (message sent, no
+          // working state, no reply). The reply still ends the bubble
+          // even while the send fetch is pending, and records which send
+          // it answers so a late send failure stays quiet.
+          if (m.sender === 'bot' || m.sender === 'agent') {
+            if (typingSeq) replyDeliveredSeq = typingSeq;
+            hideBotTyping();
+          }
           const existing = body.querySelectorAll('.fva-msg.visitor');
           if (m.sender === 'visitor' && existing.length) {
             const lastV = existing[existing.length - 1];

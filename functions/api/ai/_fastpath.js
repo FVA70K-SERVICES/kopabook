@@ -97,6 +97,123 @@ export function findAmounts(text) {
   return out;
 }
 
+// Amounts written as words: "five thousand", "two hundred thousand",
+// "one million five hundred thousand", "five hundred". Bounded to the
+// common forms, not a full grammar: ones, tens, hundred, thousand,
+// million, billion, with "and" allowed inside a run ("one hundred and
+// fifty thousand") and a leading "a"/"an" before a scale word ("a
+// thousand"). Returns [{ value, index, length }] like findAmounts, so
+// removeAmount can cut the same span out of the text.
+const NUMBER_WORD_ONES = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19,
+};
+const NUMBER_WORD_TENS = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60,
+  seventy: 70, eighty: 80, ninety: 90,
+};
+const NUMBER_WORD_SCALES = { hundred: 100, thousand: 1000, million: 1000000, billion: 1000000000 };
+
+function isNumberWord(w) {
+  return w === "a" || w === "an" || w === "and"
+    || Object.prototype.hasOwnProperty.call(NUMBER_WORD_ONES, w)
+    || Object.prototype.hasOwnProperty.call(NUMBER_WORD_TENS, w)
+    || Object.prototype.hasOwnProperty.call(NUMBER_WORD_SCALES, w);
+}
+
+function numberWordsValue(words) {
+  let result = 0;
+  let current = 0;
+  let seenNumber = false;
+  for (const w of words) {
+    if (w === "and") continue;
+    if (w === "a" || w === "an") { current += 1; seenNumber = true; continue; }
+    if (Object.prototype.hasOwnProperty.call(NUMBER_WORD_ONES, w)) { current += NUMBER_WORD_ONES[w]; seenNumber = true; continue; }
+    if (Object.prototype.hasOwnProperty.call(NUMBER_WORD_TENS, w)) { current += NUMBER_WORD_TENS[w]; seenNumber = true; continue; }
+    if (w === "hundred") { current = (current || 1) * 100; seenNumber = true; continue; }
+    if (Object.prototype.hasOwnProperty.call(NUMBER_WORD_SCALES, w)) {
+      result += (current || 1) * NUMBER_WORD_SCALES[w];
+      current = 0;
+      seenNumber = true;
+    }
+  }
+  if (!seenNumber) return null;
+  return result + current;
+}
+
+export function findWordAmounts(text) {
+  const t = String(text || "");
+  const out = [];
+  const tokenRe = /\b[a-z]+\b/gi;
+  const tokens = [];
+  let m;
+  while ((m = tokenRe.exec(t)) !== null) tokens.push({ word: m[0].toLowerCase(), index: m.index, length: m[0].length });
+  let i = 0;
+  while (i < tokens.length) {
+    if (!isNumberWord(tokens[i].word)) { i += 1; continue; }
+    // A run of number words: "five thousand", "one million five hundred
+    // thousand". "and" only continues a run when another number word
+    // follows it; "a"/"an" only start one before a scale word.
+    let j = i;
+    const run = [];
+    while (j < tokens.length && isNumberWord(tokens[j].word)) {
+      const w = tokens[j].word;
+      if (w === "and") {
+        if (j + 1 >= tokens.length || !isNumberWord(tokens[j + 1].word) || tokens[j + 1].word === "and") break;
+        run.push(tokens[j]);
+        j += 1;
+        continue;
+      }
+      if ((w === "a" || w === "an") && (j + 1 >= tokens.length || !Object.prototype.hasOwnProperty.call(NUMBER_WORD_SCALES, tokens[j + 1].word))) break;
+      run.push(tokens[j]);
+      j += 1;
+    }
+    if (run.length) {
+      const words = run.map((x) => x.word);
+      const value = numberWordsValue(words);
+      if (value !== null && value > 0) {
+        const first = run[0];
+        const last = run[run.length - 1];
+        out.push({ value, index: first.index, length: last.index + last.length - first.index });
+      }
+      i = j;
+    } else {
+      i += 1;
+    }
+  }
+  return out;
+}
+
+// Every amount in the text, digits and words, in order of appearance.
+// Digit amounts win their span; a word amount never overlaps one.
+// A word amount only counts when the word after it is money-shaped
+// (a currency word, "for"/"to"/"from", a time word, "cash", "and", or
+// the end of the text): "paid five thousand" is money, "paid one
+// laptop" is not, the "one" there is a quantity.
+const WORD_AMOUNT_FOLLOW = new Set([
+  ...CURRENCY_WORDS, "for", "to", "from", "today", "yesterday", "now",
+  "just", "please", "kindly", "and", "cash", "transfer",
+]);
+export function findAllAmounts(text) {
+  const t = String(text || "");
+  const digits = findAmounts(t);
+  const words = findWordAmounts(t).filter((a) => {
+    const after = t.slice(a.index + a.length).replace(/^[\s,.;:!?]+/, "");
+    if (!after) return true;
+    const next = after.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, "");
+    return WORD_AMOUNT_FOLLOW.has(next);
+  });
+  const merged = [...digits, ...words].sort((a, b) => a.index - b.index);
+  const out = [];
+  for (const a of merged) {
+    if (out.length && a.index < out[out.length - 1].index + out[out.length - 1].length) continue;
+    out.push(a);
+  }
+  return out;
+}
+
 // Remove one amount (and a currency word/symbol next to it) from the text.
 function removeAmount(text, amount) {
   let t = String(text || "");
@@ -119,12 +236,12 @@ function removeAmount(text, amount) {
 // ---------------------------------------------------------------------------
 
 const PAYMENT_VERBS = /\b(paid|pay|payment|received|receive|collected|collect|settled|settle|gave|given)\b/;
-const PAYMENT_FILLER = /\b(record|please|kindly|just|has|have|had|now|the|a|an|payment|paid|pay|received|receive|collected|collect|settled|settle|gave|given|from|to|for|of|me|us|it|that|this|today|yesterday|this morning|on)\b/g;
+const PAYMENT_FILLER = /\b(record|please|kindly|just|has|have|had|now|the|a|an|payment|paid|pay|received|receive|collected|collect|settled|settle|gave|given|from|to|for|of|me|us|it|that|this|today|yesterday|this morning|on|in full|full|fully|paid up|cleared|clear|balance|in cash|cash|transfer|pos|bank transfer|via)\b/g;
 
 export function parsePaymentMention(text) {
   const t = normalizeFastText(text);
   if (!PAYMENT_VERBS.test(t)) return null;
-  const amounts = findAmounts(t);
+  const amounts = findAllAmounts(t);
   if (!amounts.length) return null;
   // The amount is the last number in the message.
   const amount = amounts[amounts.length - 1];
@@ -136,10 +253,304 @@ export function parsePaymentMention(text) {
   rest = rest.replace(PAYMENT_FILLER, " ").replace(/\s+/g, " ").trim();
   rest = rest.replace(/^[.,;:!?]+|[.,;:!?]+$/g, "").trim();
   if (!rest) return null;
+  // First person is not a customer: "I paid 2000 for fuel" is an
+  // expense, not a payment from a customer called "I". The expense
+  // parser owns that shape.
+  if (/^(i|we)$/.test(rest)) return null;
   // A name is one to four words; anything longer is not a name.
   const words = rest.split(/\s+/);
   if (words.length > 4) return null;
   return { customer_name: titleCaseName(rest), amount: amount.value };
+}
+
+// ---------------------------------------------------------------------------
+// Shared person-like understanding: pronouns, names as they appear in the
+// message, full-balance payments, debtor reminders.
+// ---------------------------------------------------------------------------
+
+function escapeRegExp(s) {
+  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export const PRONOUN_WORDS = ["he", "him", "his", "she", "her", "hers", "they", "them", "their", "theirs"];
+
+export function isPronounWord(word) {
+  return PRONOUN_WORDS.includes(String(word || "").toLowerCase());
+}
+
+// The last customer talked about, for a pronoun (he/him/she/her/they).
+// Scans history newest-first for a debtor name from the snapshot (full
+// name first, then first name); the most recent mention wins. Returns
+// the debtor object or null. One helper, used by the payment, balance
+// and remind parsers alike.
+export function resolvePronounCustomer(history, snap) {
+  const debtors = (snap && snap.debtors) || [];
+  if (!debtors.length) return null;
+  const turns = [...(history || [])].reverse();
+  for (const turn of turns) {
+    const content = turn && typeof turn.content === "string" ? turn.content.toLowerCase() : "";
+    if (!content) continue;
+    let best = null;
+    let bestIdx = -1;
+    for (const d of debtors) {
+      const name = String(d.name || "").toLowerCase();
+      if (!name) continue;
+      const fullIdx = content.indexOf(name);
+      if (fullIdx >= 0 && fullIdx > bestIdx) { best = d; bestIdx = fullIdx; continue; }
+      const first = name.split(" ")[0];
+      if (first.length > 1) {
+        const m = content.match(new RegExp("\\b" + escapeRegExp(first) + "\\b"));
+        if (m && m.index > bestIdx) { best = d; bestIdx = m.index; }
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+// Debtors from the snapshot whose name (or first name) appears in the
+// text, in order of appearance. Names are never guessed from the words
+// around them: only a name that is actually in the snapshot counts.
+export function findDebtorsInText(text, snap) {
+  const t = normalizeFastText(text);
+  const found = [];
+  for (const d of (snap && snap.debtors) || []) {
+    const name = String(d.name || "").toLowerCase();
+    if (!name) continue;
+    const fullIdx = t.indexOf(name);
+    if (fullIdx >= 0) { found.push({ debtor: d, index: fullIdx }); continue; }
+    const first = name.split(" ")[0];
+    if (first.length > 1) {
+      const m = t.match(new RegExp("\\b" + escapeRegExp(first) + "\\b"));
+      if (m) found.push({ debtor: d, index: m.index });
+    }
+  }
+  found.sort((a, b) => a.index - b.index);
+  return found.map((f) => f.debtor);
+}
+
+export function detectDebtorTone(text) {
+  const t = normalizeFastText(text);
+  if (/\b(final|last warning|last reminder)\b/.test(t)) return "final";
+  if (/\b(firm|strong|serious|strict)\b/.test(t)) return "firm";
+  return "polite";
+}
+
+// The customer name in a remind-a-debtor sentence, with the intent words
+// stripped out. "Remind Favour how much he owes" -> "Favour";
+// "Remind Zlatan how much he owes" -> "Zlatan"; "Remind him of the
+// balance on WhatsApp" -> null (a pronoun, not a name).
+export function extractRemindName(text) {
+  const t = normalizeFastText(text);
+  const rest = t
+    .replace(/\b(remind|reminder|chase|follow up|whatsapp|send|message|draft|write|a|an|the|please|kindly|to|for|about|their|his|her|he|she|him|them|it|how|much|what|on|of|debt|balance|payment|pay|paying|owe|owes|owing|firm|strong|serious|strict|final|last warning|last reminder|polite|friendly)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
+    .trim();
+  if (!rest) return null;
+  if (rest.split(/\s+/).length > 4) return null;
+  return titleCaseName(rest);
+}
+
+// ---------------------------------------------------------------------------
+// Full-balance payments: "Favour have paid the full balance he owe now",
+// "Favour paid in full", "Favour cleared his balance", "Favour settled
+// everything he owes", "Favour paid all he owes", "Favour don pay finish".
+// The amount is the customer's outstanding balance from the snapshot:
+// never asked for, never invented. An explicit amount in the same
+// message wins ("paid 1m in full" is a payment of 1m, not of the whole
+// balance), and a sale sentence ("I sold ... he paid in full") is never
+// a debtor payment.
+// ---------------------------------------------------------------------------
+
+const FULL_BALANCE_MARKERS = /\b(full balance|complete balance|entire balance|in full|paid up|don pay finish|don clear|don settle|don pay everything)\b/;
+const FULL_BALANCE_OWE = /\b(everything|all|what)\b[^.]{0,40}\bowe(s|ing)?\b/;
+const FULL_BALANCE_CLEAR = /\b(clear|cleared|settle|settled)\b[^.]{0,30}\b(balance|debt|owe|owes|owing|everything|all)\b/;
+const FULL_BALANCE_VERBS = /\b(paid|pay|don pay|cleared|settled)\b/;
+
+export function isFullBalancePayment(text) {
+  const t = normalizeFastText(text);
+  // A sale sentence owns its own "paid in full": the buyer paid for the
+  // goods, not for an old debt.
+  if (/\b(sold|sell|sale)\b/.test(t)) return false;
+  // An explicit amount wins: the owner stated what was paid.
+  if (findAllAmounts(t).length) return false;
+  if (!FULL_BALANCE_VERBS.test(t) && !/\b(clear|settle)\b/.test(t)) return false;
+  return FULL_BALANCE_MARKERS.test(t) || FULL_BALANCE_OWE.test(t) || FULL_BALANCE_CLEAR.test(t);
+}
+
+// The customer name in a full-balance payment sentence, with the
+// payment words stripped out. "Zlatan paid the full balance he owes"
+// -> "Zlatan"; "He paid in full" -> null (a pronoun, not a name).
+export function extractFullBalanceName(text) {
+  const t = normalizeFastText(text);
+  const rest = t
+    .replace(/\b(paid|pay|have|has|had|don|clear|cleared|settle|settled|full|in|balance|complete|entire|everything|all|what|he|she|him|her|them|they|his|their|owe|owes|owing|now|today|just|please|kindly|the|a|an|for|to|of|up|finish)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
+    .trim();
+  if (!rest) return null;
+  if (rest.split(/\s+/).length > 4) return null;
+  return titleCaseName(rest);
+}
+
+// Resolve a full-balance payment against the snapshot.
+// Returns { customer_name, amount } (amount > 0, propose it),
+// { customer_name, amount: 0 } (name cleanly extracted but no balance
+// outstanding: reply the balance is already zero, never propose), or
+// null (not resolvable here: pronoun with no antecedent, or several
+// debtors named; the caller asks one short question instead).
+export function parseFullBalanceMention(text, history, snap) {
+  if (!isFullBalancePayment(text)) return null;
+  const named = findDebtorsInText(text, snap);
+  if (named.length === 1) {
+    const d = named[0];
+    return { customer_name: d.name, amount: Number(d.balance) || 0 };
+  }
+  if (named.length > 1) return null;
+  // A clean name beats a pronoun: in "Zlatan paid the full balance he
+  // owes", "he" refers to Zlatan, not to whoever was talked about
+  // before. Only a bare pronoun ("He paid in full") resolves from
+  // history.
+  const cleanName = extractFullBalanceName(text);
+  const t = normalizeFastText(text);
+  if (!cleanName && PRONOUN_WORDS.some((p) => new RegExp("\\b" + p + "\\b").test(t))) {
+    const debtor = resolvePronounCustomer(history, snap);
+    if (debtor) return { customer_name: debtor.name, amount: Number(debtor.balance) || 0 };
+    return null;
+  }
+  if (cleanName) return { customer_name: cleanName, amount: 0 };
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Remind-a-debtor: "Remind Favour how much he owes", "Remind him of the
+// balance on WhatsApp", "Send Favour a reminder", "WhatsApp Favour about
+// his balance", "Chase Favour". A self-reminder ("remind me to ...") is
+// never this; the draft flow ("draft/write a message") owns its own
+// verbs and is checked separately.
+// ---------------------------------------------------------------------------
+
+export function isDebtorRemindRequest(text) {
+  const t = normalizeFastText(text);
+  if (/\bremind\s+(me|us)\b/.test(t)) return false;
+  if (/\b(draft|write)\b/.test(t)) return false;
+  const strongVerb = /\b(remind|chase|follow up|whatsapp)\b/.test(t);
+  const remindContext = /\b(reminder|owe|owes|owing|balance|debt|pay|payment)\b/.test(t) || /\bon\s+whatsapp\b/.test(t);
+  if (!/\b(remind|chase|follow up|whatsapp|message|send)\b/.test(t)) return false;
+  // "remind/chase/whatsapp <name>" with a bare name is enough;
+  // "message/send" need a reminder context, or "draft a message to X"
+  // would be swallowed here.
+  return strongVerb || remindContext;
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot product matching: the product name comes from the snapshot's
+// product list, never from raw words around it. Case-insensitive,
+// singular/plural tolerant, word-order tolerant for multi-word names,
+// plus a bounded fuzzy match for close spellings. Returns the snapshot
+// product or null (no guess, no tie: two equally close products is
+// ambiguous, and the executor asks which one).
+// ---------------------------------------------------------------------------
+
+function productWords(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
+}
+
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+function wordsMatch(a, b) {
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return true;
+  if (a.length >= 4 && b.length >= 4 && levenshtein(a, b) <= 1) return true;
+  if (a.length >= 7 && b.length >= 7 && levenshtein(a, b) <= 2) return true;
+  return false;
+}
+
+export function matchSnapshotProduct(name, products) {
+  const want = productWords(name);
+  if (!want.length || !(products || []).length) return null;
+  const wantJoined = want.join(" ");
+  let best = null;
+  let bestScore = -1;
+  let tied = false;
+  for (const p of products) {
+    const have = productWords(p.name);
+    const haveJoined = have.join(" ");
+    let score = -1;
+    if (haveJoined === wantJoined) score = 100;
+    else if (have.length <= want.length && have.every((w) => want.some((x) => wordsMatch(w, x)))) score = 90;
+    else if (want.length === 1 && have.some((w) => wordsMatch(w, want[0]))) score = 70;
+    else if (have.length > 1 && want.length > 1) {
+      const shared = have.filter((w) => want.some((x) => wordsMatch(w, x))).length;
+      if (shared === have.length - 1 && shared >= 1) score = 60;
+    }
+    if (score > bestScore) { best = p; bestScore = score; tied = false; }
+    else if (score === bestScore && score >= 0) { tied = true; }
+  }
+  if (!best || bestScore < 0 || tied) return null;
+  return best;
+}
+
+// Snapshot-aware sale: quantity, product (exact snapshot name), customer,
+// "paid full" / "paid half" / "paid <amount>", and a stated payment
+// method, all from one sentence. Returns { kind: "action", tool, params }
+// or null when the message is not a snapshot-resolvable sale (bare chip,
+// product not in the snapshot: the pure parser and the executor own
+// those, so a product the snapshot does not carry still gets its
+// executor not-found reply with the closest real names).
+export function parseSaleSnapshot(text, history, snap, currency) {
+  const t = normalizeFastText(text);
+  if (!SALE_VERBS.test(t) || /\bexpense\b/.test(t)) return null;
+  if (!snap || !snap.products || !snap.products.length) return null;
+  const parsed = parseSaleMention(text);
+  if (!parsed || !parsed.items || !parsed.items.length) return null;
+  const items = [];
+  let total = 0;
+  for (const it of parsed.items) {
+    const match = matchSnapshotProduct(it.product, snap.products);
+    if (!match) return null;
+    items.push({ product: match.name, qty: it.qty });
+    total += (Number(match.price) || 0) * it.qty;
+  }
+  total = Math.round(total * 100) / 100;
+  const params = { items };
+  let customerName = parsed.customer_name || "";
+  if (customerName && isPronounWord(customerName.split(" ")[0])) {
+    const debtor = resolvePronounCustomer(history, snap);
+    customerName = debtor ? debtor.name : "";
+  }
+  if (customerName) params.customer_name = customerName;
+  if (parsed.amount_paid !== undefined && parsed.amount_paid !== null) {
+    params.amount_paid = parsed.amount_paid;
+  } else if (/\bpaid\s+half\b/.test(t)) {
+    params.amount_paid = Math.round((total / 2) * 100) / 100;
+  } else if (/\bpaid\b/.test(t)) {
+    params.amount_paid = total;
+  }
+  if (parsed.payment_method) params.payment_method = parsed.payment_method;
+  return { kind: "action", tool: "record_sale", params };
 }
 
 // ---------------------------------------------------------------------------
@@ -149,11 +560,39 @@ export function parsePaymentMention(text) {
 
 const SALE_VERBS = /\b(record|new|add|sold|sell|sale|sales)\b/;
 
+// Time words and filler are never part of a product or customer name:
+// "laptop now" is the product Laptop plus the word "now", never a
+// product called "laptop now".
+const SALE_TIME_WORDS = /\b(now|today|just|yesterday|recently|tonight|this morning|this afternoon|this evening)\b/g;
+
+// Payment methods the owner states in words. Only set when stated;
+// never invented.
+const SALE_METHODS = [
+  [/\bin cash\b/, "cash"],
+  [/\b(by|via)\s+transfer\b/, "transfer"],
+  [/\bbank transfer\b/, "transfer"],
+  [/\bpos\b/, "pos"],
+];
+
 export function parseSaleMention(text) {
   const t = normalizeFastText(text);
   if (!SALE_VERBS.test(t)) return null;
   let rest = t;
-  // Amount paid: "paid <amount>" or a trailing "for <amount>".
+  // Time words out first: they pollute product and customer names.
+  rest = rest.replace(SALE_TIME_WORDS, " ").replace(/\s+/g, " ").trim();
+  // Payment method, when stated ("in cash", "by transfer"). Removed
+  // before the customer and product are read.
+  let paymentMethod = null;
+  for (const [re, method] of SALE_METHODS) {
+    if (re.test(rest)) { paymentMethod = method; rest = rest.replace(re, " "); }
+  }
+  rest = rest.replace(/\s+/g, " ").trim();
+  // Amount paid: "paid <amount>" (digits or words) or a trailing
+  // "for <amount>". A "paid full"/"paid in full"/"paid half" tail is
+  // removed here but its amount is resolved by the snapshot-aware
+  // parser, which knows the total; the pure parser leaves amount_paid
+  // unset for it, and the executor defaults an unset amount to the
+  // full total.
   let amountPaid = null;
   const paidMatch = rest.match(/\bpaid\s+(\d[\d,]*\.?\d*)\s*(million|thousand|k|m)?/i);
   if (paidMatch) {
@@ -161,13 +600,36 @@ export function parseSaleMention(text) {
     if (found.length) amountPaid = found[0].value;
     rest = rest.replace(paidMatch[0], " ");
   } else {
-    const forAmount = rest.match(/\sfor\s+(\d[\d,]*\.?\d*)\s*(million|thousand|k|m)?\s*$/i);
-    if (forAmount) {
-      const found = findAmounts(forAmount[0]);
-      if (found.length) amountPaid = found[0].value;
-      rest = rest.replace(forAmount[0], " ");
+    const paidWordTail = rest.match(/\bpaid\s+([a-z]+(?:\s+[a-z]+){0,5})/i);
+    if (paidWordTail) {
+      const found = findAllAmounts(paidWordTail[1]);
+      if (found.length && found[0].index === 0) {
+        amountPaid = found[0].value;
+        rest = rest.replace(paidWordTail[0], "paid ");
+      }
+    }
+    if (amountPaid === null) {
+      const forAmount = rest.match(/\sfor\s+(\d[\d,]*\.?\d*)\s*(million|thousand|k|m)?\s*$/i);
+      if (forAmount) {
+        const found = findAmounts(forAmount[0]);
+        if (found.length) amountPaid = found[0].value;
+        rest = rest.replace(forAmount[0], " ");
+      } else {
+        const forWord = rest.match(/\sfor\s+([a-z]+(?:\s+[a-z]+){0,5})\s*$/i);
+        if (forWord) {
+          const found = findAllAmounts(forWord[1]);
+          if (found.length && found[0].index === 0) {
+            amountPaid = found[0].value;
+            rest = rest.replace(forWord[0], " ");
+          }
+        }
+      }
     }
   }
+  // Payment tail without an amount ("he paid full in cash", "she paid
+  // half", "paid"): remove it before the customer is read, or "fortune
+  // he paid full" becomes the customer name.
+  rest = rest.replace(/\b(?:he|she|they|it|i|we)?\s*paid\b.*$/, " ").replace(/\s+/g, " ").trim();
   // Customer: a trailing "to <name>" or "for <name>".
   let customerName = "";
   const toMatch = rest.match(/\bto\s+([a-z][a-z' ]+?)\s*$/);
@@ -193,8 +655,15 @@ export function parseSaleMention(text) {
       const qm = seg.match(/^(\d+(?:\.\d+)?)\s+(.+)$/);
       if (qm) {
         items.push({ product: qm[2].trim(), qty: Number(qm[1]) });
-      } else if (!/^(to|for|paid)\b/.test(seg)) {
-        items.push({ product: seg, qty: 1 });
+      } else {
+        // Word quantity: "one laptop", "two rice", "a laptop".
+        const wqm = seg.match(/^(one|two|three|four|five|six|seven|eight|nine|ten|a|an)\s+(.+)$/);
+        if (wqm) {
+          const q = wqm[1] === "a" || wqm[1] === "an" ? 1 : NUMBER_WORD_ONES[wqm[1]];
+          items.push({ product: wqm[2].trim(), qty: q });
+        } else if (!/^(to|for|paid)\b/.test(seg)) {
+          items.push({ product: seg, qty: 1 });
+        }
       }
     }
   }
@@ -206,6 +675,7 @@ export function parseSaleMention(text) {
   const params = { items };
   if (customerName) params.customer_name = titleCaseName(customerName);
   if (amountPaid !== null) params.amount_paid = amountPaid;
+  if (paymentMethod) params.payment_method = paymentMethod;
   return params;
 }
 
@@ -218,19 +688,32 @@ const EXPENSE_VERBS = /\b(record|add|spent|spend|expense|expenses|bought)\b/;
 
 export function parseExpenseMention(text) {
   const t = normalizeFastText(text);
-  if (!EXPENSE_VERBS.test(t)) return null;
+  // "I paid 2000 for fuel" is an expense, not a payment from a customer
+  // called "I": first-person "paid ... for ..." counts as an expense
+  // verb here. Any other "paid" without the word "expense" stays a
+  // payment (the guard below), so "Favour paid 5000" never lands here.
+  const firstPersonPaidFor = /\b(i|we)\s+paid\b/.test(t) && /\bfor\b/.test(t);
+  if (!EXPENSE_VERBS.test(t) && !firstPersonPaidFor) return null;
   // Must be an expense intent, not a sale or payment.
   if (SALE_VERBS.test(t) && !/\bexpense\b/.test(t)) return null;
-  if (PAYMENT_VERBS.test(t) && !/\bexpense\b/.test(t)) return null;
-  const amounts = findAmounts(t);
+  if (PAYMENT_VERBS.test(t) && !/\bexpense\b/.test(t) && !firstPersonPaidFor) return null;
+  const amounts = findAllAmounts(t);
   let amount = null;
   let rest = t;
   if (amounts.length) {
     amount = amounts[0].value;
     rest = removeAmount(t, amounts[0]);
   }
+  // The description parser is unchanged on purpose: "I spend 5000 for
+  // transport today" still records the description "i transport today"
+  // (live quirk, out of scope). Only the first-person "paid for" shape
+  // strips its subject and verb, so "I paid 2000 for fuel" records
+  // "fuel".
+  const strip = firstPersonPaidFor
+    ? /\b(record|add|spent|spend|expense|expenses|bought|paid|an|the|a|please|kindly|just|for|on|of|to|i|we)\b/g
+    : /\b(record|add|spent|spend|expense|expenses|bought|an|the|a|please|kindly|just|for|on|of|to)\b/g;
   rest = rest
-    .replace(/\b(record|add|spent|spend|expense|expenses|bought|an|the|a|please|kindly|just|for|on|of|to)\b/g, " ")
+    .replace(strip, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
@@ -358,7 +841,7 @@ export function parseDraftDebtor(text) {
   if (/\b(final|last warning|last reminder)\b/.test(t)) tone = "final";
   else if (/\b(firm|strong|serious|strict)\b/.test(t)) tone = "firm";
   let rest = t
-    .replace(/\b(draft|write|message|remind|reminder|chase|follow up|a|an|the|please|kindly|to|for|about|their|his|her|debt|balance|payment|pay|paying|owe|owes|owing|firm|strong|serious|strict|final|last warning|last reminder|polite|friendly)\b/g, " ")
+    .replace(/\b(draft|write|message|remind|reminder|chase|follow up|a|an|the|please|kindly|to|for|about|their|his|her|he|she|him|them|it|how|much|what|on|of|whatsapp|send|debt|balance|payment|pay|paying|owe|owes|owing|firm|strong|serious|strict|final|last warning|last reminder|polite|friendly)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
@@ -544,12 +1027,18 @@ export function isRecordIt(text) {
 
 // Most recent unrecorded mention in the history (last 6 user turns).
 // Returns { kind: "payment"|"sale"|"expense", ...parsed } or null.
-export function findPendingMention(history) {
+// With a snapshot, a full-balance mention ("Favour paid in full") also
+// resolves, taking its amount from the snapshot.
+export function findPendingMention(history, snap) {
   const turns = (history || []).filter((h) => h && h.role === "user" && typeof h.content === "string").slice(-6);
   for (let i = turns.length - 1; i >= 0; i--) {
     const content = turns[i].content;
     const payment = parsePaymentMention(content);
     if (payment) return { kind: "payment", ...payment };
+    if (snap) {
+      const full = parseFullBalanceMention(content, history, snap);
+      if (full && full.amount > 0) return { kind: "payment", customer_name: full.customer_name, amount: full.amount };
+    }
     const sale = parseSaleMention(content);
     if (sale && sale.items && sale.items.length) return { kind: "sale", ...sale };
     const expense = parseExpenseMention(content);
@@ -588,10 +1077,34 @@ export function classifyReadIntent(text) {
   if (includesAny(t, ["who owes", "who owe", "who dey owe", "who is owing", "who is owed", "debtors", "customers owing", "who owes me", "who owes us", "who still owes", "anyone owing", "who has not paid", "who hasn't paid", "unpaid customers"])) return "debtors";
   if (includesAny(t, ["low stock", "running low", "running out", "out of stock", "low on stock", "almost finished", "almost out"])) return "lowstock";
   if (includesAny(t, ["stock", "inventory", "how much stock", "what do we have in stock", "check stock", "stock levels", "stock level"])) return "stock";
-  if (includesAny(t, ["recent sales", "last sales", "latest sales", "sales history", "show sales", "last few sales", "recent transactions"])) return "recentsales";
-  if (includesAny(t, ["recent expenses", "last expenses", "latest expenses", "show expenses", "what did we spend", "what have we spent"])) return "recentexpenses";
-  if (includesAny(t, ["sales today", "today's sales", "todays sales", "sales so far today", "how much did we sell today", "how much we sell today", "wetin we sell today", "what did we sell today", "today sales", "sales for today"])) return "today";
+  // Product list: the snapshot already carries every product with price
+  // and stock, so this is a read, never a model call. formatStock lists
+  // them, so "show my stock" keeps answering exactly as it does today.
+  // Bare "My products" only counts as a whole message: "what is the best
+  // way to price my products?" is a pricing question, not a list request.
+  if (includesAny(t, ["list out my products", "list my products", "show me my products", "show my products", "show me the products", "list the products", "list products", "show products", "what products do i have", "what products have i", "what products", "product list", "products list"])) return "products";
+  // Customer list: the snapshot carries only the debtors (customers with
+  // a balance), so that is the list it can answer with. A full customer
+  // list needs the snapshot to carry all customers; it does not yet, and
+  // this must never invent customers to fill the gap.
+  if (includesAny(t, ["list my customers", "show my customers", "who are my customers", "list customers", "show customers", "customer list"])) return "customers";
+  // Project list (plural "projects" + list/show/what/my). A single
+  // project report ("how is the browser apk project doing") is singular
+  // "project" and stays on the project_report path below.
+  if (includesAny(t, ["what projects are do i have", "what projects do i have", "list my projects", "show my projects", "list projects", "show projects", "what projects", "projects list"])) return "projects";
+  // Bare "My <things>" as a whole message: "My products", "My customers",
+  // "My projects", "My sales", "My expenses". Anchored, so a longer
+  // question that merely mentions the noun ("what is the best way to
+  // price my products?") still falls through to the model.
+  const bareList = t.match(/^\s*my (products|customers|projects|sales|expenses)\s*[.!?]*$/);
+  if (bareList) {
+    return { products: "products", customers: "customers", projects: "projects", sales: "recentsales", expenses: "recentexpenses" }[bareList[1]];
+  }
+  if (includesAny(t, ["sales today", "today's sales", "todays sales", "sales so far today", "how much did we sell today", "how much we sell today", "wetin we sell today", "what did we sell today", "what did i sell today", "what have i sold today", "what have we sold today", "today sales", "sales for today"])) return "today";
   if (includesAny(t, ["sales this month", "sales for the month", "this month sales", "how much did we sell this month", "monthly sales", "sales month"])) return "month";
+  if (includesAny(t, ["how much did i spend this month", "how much did we spend this month", "what did i spend this month", "my spending this month", "spending this month", "expenses this month", "expenses for the month"])) return "monthexpenses";
+  if (includesAny(t, ["recent sales", "last sales", "latest sales", "sales history", "show sales", "last few sales", "recent transactions", "list my sales", "show my sales", "list sales", "sales list"])) return "recentsales";
+  if (includesAny(t, ["recent expenses", "last expenses", "latest expenses", "show expenses", "what did we spend", "what have we spent", "list my expenses", "show my expenses", "list expenses", "expenses list"])) return "recentexpenses";
   return null;
 }
 
@@ -642,6 +1155,25 @@ export function formatRecentExpenses(snap, currency) {
   return `Last expenses:\n${lines.join("\n")}`;
 }
 
+export function formatMonthExpenses(snap, currency) {
+  const total = (snap.expensesMonth && snap.expensesMonth.total) || 0;
+  const count = (snap.expensesMonth && snap.expensesMonth.count) || 0;
+  if (!count) return "No expenses yet this month.";
+  return `Expenses this month: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "expense" : "expenses"}.`;
+}
+
+export function formatProjects(snap, currency) {
+  if (!snap.projects || !snap.projects.length) return "No projects yet.";
+  const lines = snap.projects.map((p) => {
+    const t = p.totals || {};
+    const balance = t.balance !== undefined && t.balance !== null
+      ? Number(t.balance)
+      : (Number(t.totalIncome || 0) - Number(t.totalExpense || 0));
+    return `- #${p.id} ${p.name}: ${p.status}, budget ${formatMoney(p.budget, currency)}, balance ${formatMoney(balance, currency)}`;
+  });
+  return `Projects (${snap.projects.length}):\n${lines.join("\n")}`;
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator: message + history + snapshot -> fast-path result or null.
 // ---------------------------------------------------------------------------
@@ -654,11 +1186,21 @@ export function resolveFastPath(message, history, snap, currency) {
   // 1. "Record it" (and its variations): resolve the pending mention from
   // the recent turns. No mention -> one short line, not a dump.
   if (isRecordIt(text)) {
-    const pending = findPendingMention(history);
+    const pending = findPendingMention(history, snap);
     if (!pending) {
       return { kind: "reply", text: "I do not have anything to record yet. Tell me what happened, for example 'Favour paid 1000000'." };
     }
     if (pending.kind === "payment") {
+      // A pronoun in the mention ("He paid 5000") resolves to the last
+      // customer talked about; with no antecedent, ask instead of
+      // recording against a customer called "He".
+      if (pending.customer_name && isPronounWord(pending.customer_name.split(" ")[0])) {
+        const debtor = resolvePronounCustomer(history, snap);
+        if (!debtor) {
+          return { kind: "reply", text: "Who paid? Tell me the customer's name and the amount, and I will draft it for your Confirm tap." };
+        }
+        return { kind: "action", tool: "record_customer_payment", params: { customer_name: debtor.name, amount: pending.amount } };
+      }
       return { kind: "action", tool: "record_customer_payment", params: { customer_name: pending.customer_name, amount: pending.amount } };
     }
     if (pending.kind === "sale") {
@@ -667,10 +1209,65 @@ export function resolveFastPath(message, history, snap, currency) {
     return { kind: "action", tool: "add_expense", params: { amount: pending.amount, description: pending.description } };
   }
 
-  // 2. Direct payment mention: "Favour paid 1000000" -> propose it now.
+  // 2. Full-balance payment: "Favour have paid the full balance he owe
+  // now", "Favour paid in full", "Favour cleared his balance". The
+  // amount is the snapshot balance, never asked for, never invented.
+  if (isFullBalancePayment(text)) {
+    const full = parseFullBalanceMention(text, history, snap);
+    if (full && full.amount > 0) {
+      return { kind: "action", tool: "record_customer_payment", params: { customer_name: full.customer_name, amount: full.amount } };
+    }
+    if (full) {
+      return { kind: "reply", text: `${full.customer_name} has no outstanding balance, so there is nothing to record.` };
+    }
+    const named = findDebtorsInText(text, snap);
+    if (named.length > 1) {
+      return { kind: "reply", text: `More than one customer could be meant: ${named.map((d) => d.name).join(", ")}. Which one paid in full?` };
+    }
+    return { kind: "reply", text: "Who paid in full? Tell me the customer's name and I will draft it for your Confirm tap." };
+  }
+
+  // 2b. Direct payment mention: "Favour paid 1000000" -> propose it now.
+  // A pronoun ("He paid 5000") resolves to the last customer talked
+  // about; with no antecedent, one short question instead of a guess.
+  // A payment with a name but no amount and no full-balance marker
+  // ("Favour paid") asks how much, instead of falling to the model.
   const payment = parsePaymentMention(text);
   if (payment) {
+    if (isPronounWord(payment.customer_name.split(" ")[0])) {
+      const debtor = resolvePronounCustomer(history, snap);
+      if (!debtor) {
+        return { kind: "reply", text: "Who paid? Tell me the customer's name and the amount, and I will draft it for your Confirm tap." };
+      }
+      return { kind: "action", tool: "record_customer_payment", params: { customer_name: debtor.name, amount: payment.amount } };
+    }
     return { kind: "action", tool: "record_customer_payment", params: { customer_name: payment.customer_name, amount: payment.amount } };
+  }
+  // A question starting with "who" ("Who has not paid") is a read about
+  // who owes, never a payment statement: the debtors read owns it.
+  if (PAYMENT_VERBS.test(t) && !findAllAmounts(t).length && !isDebtorRemindRequest(text) && !/^\s*who\b/.test(t)) {
+    const named = findDebtorsInText(text, snap);
+    if (named.length === 1) {
+      return { kind: "reply", text: `How much did ${named[0].name} pay?` };
+    }
+    if (PRONOUN_WORDS.some((p) => new RegExp("\\b" + p + "\\b").test(t))) {
+      const debtor = resolvePronounCustomer(history, snap);
+      if (debtor) {
+        return { kind: "reply", text: `How much did ${debtor.name} pay?` };
+      }
+      return { kind: "reply", text: "Who paid, and how much?" };
+    }
+    // A name the snapshot has no balance for ("Zlatan paid"): still a
+    // payment question, never the model, never an invented amount.
+    const nameOnly = t
+      .replace(PAYMENT_FILLER, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
+      .trim();
+    if (nameOnly && !/^(i|we)$/.test(nameOnly) && nameOnly.split(/\s+/).length <= 4) {
+      return { kind: "reply", text: `How much did ${titleCaseName(nameOnly)} pay?` };
+    }
   }
 
   // 3. Send the approved debtor draft.
@@ -679,14 +1276,85 @@ export function resolveFastPath(message, history, snap, currency) {
     if (send) {
       return { kind: "action", tool: "send_debtor_message", params: { customer_name: send.customer_name, message: send.message } };
     }
-    if (/\b(it|that|this|message|reminder)\b/.test(t)) {
+    // A remind request ("Send Favour a reminder") is not a send-it: the
+    // debtor-remind step below owns it, so it must not get this reply.
+    if (/\b(it|that|this|message|reminder)\b/.test(t) && !isDebtorRemindRequest(text)) {
       return { kind: "reply", text: "I do not have a message to send yet. Tell me who to remind and I will draft it first." };
     }
   }
 
-  // 4. Balance question for one customer.
+  // 4a. Remind-a-debtor: "Remind Favour how much he owes", "Remind him
+  // of the balance on WhatsApp", "Send Favour a reminder", "WhatsApp
+  // Favour about his balance", "Chase Favour". Runs before the balance
+  // step on purpose: the balance parser would otherwise read the whole
+  // sentence as a customer name ("Remind Favour It"). One remind
+  // request produces exactly one proposal card showing the draft.
+  if (isDebtorRemindRequest(text)) {
+    const tone = detectDebtorTone(text);
+    const named = findDebtorsInText(text, snap);
+    if (named.length > 1) {
+      return { kind: "reply", text: `More than one customer could be meant: ${named.map((d) => d.name).join(", ")}. Who should I remind?` };
+    }
+    if (named.length === 1) {
+      const debtor = named[0];
+      if (!(Number(debtor.balance) > 0)) {
+        return { kind: "reply", text: `${debtor.name} has no outstanding balance, so there is no reminder to write.` };
+      }
+      const draft = buildDebtorDraft(debtor.name, debtor.balance, currency, snap.businessName, tone);
+      return {
+        kind: "action",
+        tool: "send_debtor_message",
+        params: { customer_name: debtor.name, message: draft, _fastpathDraft: true },
+      };
+    }
+    // No debtor name in the text. A clean name beats a pronoun: in
+    // "Remind Zlatan how much he owes", "he" refers to Zlatan, not to
+    // whoever was talked about before. Only a bare pronoun ("Remind him
+    // of the balance") resolves from history.
+    const cleanName = extractRemindName(text);
+    if (!cleanName && PRONOUN_WORDS.some((p) => new RegExp("\\b" + p + "\\b").test(t))) {
+      const debtor = resolvePronounCustomer(history, snap) || ((snap.debtors || []).length === 1 ? snap.debtors[0] : null);
+      if (!debtor) {
+        const owing = (snap.debtors || []).map((d) => d.name);
+        return { kind: "reply", text: owing.length > 1
+          ? `Who should I remind: ${owing.join(", ")}?`
+          : "Who should I remind? Tell me the customer's name." };
+      }
+      if (!(Number(debtor.balance) > 0)) {
+        return { kind: "reply", text: `${debtor.name} has no outstanding balance, so there is no reminder to write.` };
+      }
+      const draft = buildDebtorDraft(debtor.name, debtor.balance, currency, snap.businessName, tone);
+      return {
+        kind: "action",
+        tool: "send_debtor_message",
+        params: { customer_name: debtor.name, message: draft, _fastpathDraft: true },
+      };
+    }
+    // No debtor in the snapshot, but a clean name: let the executor do
+    // the real database lookup, which returns the proper one-line
+    // not-found reply. The name here is the cleaned extraction only,
+    // never the raw sentence, so the model never invents a name like
+    // "Remind Favour It".
+    if (cleanName) {
+      return { kind: "action", tool: "draft_debtor_message", params: { customer_name: cleanName, tone } };
+    }
+    const owing = (snap.debtors || []).map((d) => d.name);
+    return { kind: "reply", text: owing.length > 1
+      ? `Who should I remind: ${owing.join(", ")}?`
+      : "Who should I remind? Tell me the customer's name." };
+  }
+
+  // 4. Balance question for one customer (including pronouns: "how much
+  // does he owe", "what is his balance").
   const balance = parseBalanceQuery(text);
   if (balance) {
+    if (isPronounWord(balance.customer_name.split(" ")[0])) {
+      const debtor = resolvePronounCustomer(history, snap);
+      if (!debtor) {
+        return { kind: "reply", text: "Who do you mean? Tell me the customer's name and I will check their balance." };
+      }
+      return { kind: "action", tool: "get_customer_balance", params: { customer_name: debtor.name } };
+    }
     return { kind: "action", tool: "get_customer_balance", params: { customer_name: balance.customer_name } };
   }
 
@@ -743,8 +1411,12 @@ export function resolveFastPath(message, history, snap, currency) {
   }
   if (read === "today") return { kind: "reply", text: formatTodaySales(snap, currency) };
   if (read === "month") return { kind: "reply", text: formatMonthSales(snap, currency) };
+  if (read === "monthexpenses") return { kind: "reply", text: formatMonthExpenses(snap, currency) };
   if (read === "debtors") return { kind: "reply", text: formatDebtors(snap, currency) };
   if (read === "stock") return { kind: "reply", text: formatStock(snap, currency) };
+  if (read === "products") return { kind: "reply", text: formatStock(snap, currency) };
+  if (read === "customers") return { kind: "reply", text: formatDebtors(snap, currency) };
+  if (read === "projects") return { kind: "reply", text: formatProjects(snap, currency) };
   if (read === "lowstock") return { kind: "reply", text: formatLowStock(snap, currency) };
   if (read === "recentsales") return { kind: "reply", text: formatRecentSales(snap, currency) };
   if (read === "recentexpenses") return { kind: "reply", text: formatRecentExpenses(snap, currency) };
@@ -791,9 +1463,74 @@ export function resolveFastPath(message, history, snap, currency) {
     }
   }
 
+  // 10b. Bare write intent ("Record payment", "Record a sale", "Log
+  // expense"): no slots in this message, so use the recent chat. Scan
+  // the last few user turns after the last "Done. Recorded ..." line
+  // (a mention already recorded must never be resurrected) and re-parse
+  // the most recent mention of that kind with the full parsers. If
+  // nothing resolves, a payment asks one short question; a sale or
+  // expense falls through to the existing chip flow, whose executor
+  // asks its own one targeted question.
+  const bareMatch = text.match(/^\s*(record|log|save)\s+(a\s+|an\s+)?(payment|sale|expense)s?\s*[.!?]*\s*$/i);
+  if (bareMatch) {
+    const bareKind = bareMatch[3].toLowerCase();
+    const histArr = history || [];
+    // Only turns after the last "Done. Recorded ..." line: a mention
+    // already recorded must never be resurrected.
+    let startIdx = 0;
+    for (let i = histArr.length - 1; i >= 0; i--) {
+      const h = histArr[i];
+      if (h && h.role === "assistant" && typeof h.content === "string" && /Done\. Recorded (payment|sale|expense)/.test(h.content)) {
+        startIdx = i + 1;
+        break;
+      }
+    }
+    const recentUser = [];
+    for (let i = histArr.length - 1; i >= startIdx && recentUser.length < 4; i--) {
+      const h = histArr[i];
+      if (h && h.role === "user" && typeof h.content === "string") recentUser.push(h.content);
+    }
+    for (const content of recentUser) {
+      if (bareKind === "payment") {
+        const p = parsePaymentMention(content);
+        if (p) {
+          if (isPronounWord(p.customer_name.split(" ")[0])) {
+            const debtor = resolvePronounCustomer(history, snap);
+            if (debtor) return { kind: "action", tool: "record_customer_payment", params: { customer_name: debtor.name, amount: p.amount } };
+            continue;
+          }
+          return { kind: "action", tool: "record_customer_payment", params: { customer_name: p.customer_name, amount: p.amount } };
+        }
+        const full = parseFullBalanceMention(content, history, snap);
+        if (full && full.amount > 0) {
+          return { kind: "action", tool: "record_customer_payment", params: { customer_name: full.customer_name, amount: full.amount } };
+        }
+      } else if (bareKind === "sale") {
+        const snapSale = parseSaleSnapshot(content, history, snap, currency);
+        if (snapSale) return snapSale;
+        const s = parseSaleMention(content);
+        if (s && s.items && s.items.length) return { kind: "action", tool: "record_sale", params: s };
+      } else if (bareKind === "expense") {
+        const e = parseExpenseMention(content);
+        if (e && (e.amount || e.description)) return { kind: "action", tool: "add_expense", params: { amount: e.amount, description: e.description } };
+      }
+    }
+    if (bareKind === "payment") {
+      return { kind: "reply", text: "Who paid, and how much?" };
+    }
+    // Sale/expense with nothing to re-parse: fall through to the chip
+    // flow below, which asks its one targeted question.
+  }
+
   // 11. Sale mention (including the bare "Record a sale" chip and
   // "Record 2 Rice"). Expense intents are excluded here; step 12 owns them.
+  // The snapshot-aware parse runs first: it matches the product by its
+  // real name, resolves "paid full"/"paid half" from the snapshot price,
+  // and carries the exact snapshot name, so the executor never sees a
+  // polluted name like "laptop now".
   if (SALE_VERBS.test(t) && !/\bexpense\b/.test(t)) {
+    const snapSale = parseSaleSnapshot(text, history, snap, currency);
+    if (snapSale) return snapSale;
     const sale = parseSaleMention(text);
     if (sale) {
       return { kind: "action", tool: "record_sale", params: sale };

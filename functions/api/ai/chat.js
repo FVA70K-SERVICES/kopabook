@@ -553,7 +553,10 @@ ${actionSection}`;
 // Fuzzy matchers. Never guess: 0 or 2+ matches returns a clarification need.
 // ---------------------------------------------------------------------------
 async function matchProduct(db, businessId, name) {
-  const raw = String(name || "").trim();
+  // Defence in depth: the fast path strips time words before matching,
+  // but the model path can still ask for "laptop now". A time word is
+  // never part of a product name, so drop it before matching.
+  const raw = cleanProductQuery(name);
   // Numeric id fast-path.
   if (/^\d+$/.test(raw)) {
     let r;
@@ -593,8 +596,67 @@ async function matchProduct(db, businessId, name) {
     id: p.id, name: p.name, price: Number(p.unit_price) || 0, unit: p.unit || "piece", stock: Number(p.stock) || 0,
   }));
   // Prefer an exact (case-insensitive) name hit when several fuzzy matches exist.
-  const exact = rows.filter((p) => p.name.toLowerCase() === String(name).trim().toLowerCase());
+  const exact = rows.filter((p) => p.name.toLowerCase() === raw.toLowerCase());
   return exact.length === 1 ? [exact[0]] : rows;
+}
+
+// Time words and filler are never part of a product name. "laptop now"
+// is the product Laptop plus the word "now".
+function cleanProductQuery(name) {
+  const raw = String(name || "").trim();
+  const cleaned = raw
+    .replace(/\b(now|today|just|yesterday|recently|tonight|this morning|this afternoon|this evening)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || raw;
+}
+
+// The closest real product names to a name that was not found, best
+// first, up to three. Used by the not-found clarifications so the owner
+// is offered real names to pick from instead of a bare rejection. When
+// nothing is close, the first names in catalogue order are still more
+// useful than silence.
+async function closestProductNames(db, businessId, name, limit = 3) {
+  let rows = [];
+  try {
+    const rs = await db.prepare(
+      `SELECT name FROM products WHERE business_id = ? AND is_active = 1 LIMIT 100`
+    ).bind(businessId).all();
+    rows = (rs.results || []).map((r) => String(r.name)).filter(Boolean);
+  } catch (e) {
+    return [];
+  }
+  if (!rows.length) return [];
+  const wanted = String(name || "").toLowerCase().trim();
+  const score = (candidate) => {
+    const c = candidate.toLowerCase();
+    if (!wanted) return 0;
+    if (c === wanted) return 100;
+    if (c.includes(wanted) || wanted.includes(c)) return 80;
+    const cw = c.split(/\s+/);
+    const ww = wanted.split(/\s+/);
+    const shared = cw.filter((x) => ww.some((y) => namesSimilar(x, y))).length;
+    if (shared) return 50 + shared * 10;
+    if (namesSimilar(c, wanted)) return 40;
+    return 0;
+  };
+  return rows
+    .map((n) => ({ name: n, s: score(n) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, limit)
+    .map((x) => x.name);
+}
+
+// One short not-found line that lists the closest real product names
+// when there are any, so the owner can pick one. Never invents a name.
+async function productNotFoundLine(db, businessId, requested) {
+  const clean = cleanProductQuery(requested);
+  const closest = await closestProductNames(db, businessId, clean);
+  if (!closest.length) return `I could not find "${clean}" in your products. Check the name and try again.`;
+  const list = closest.length === 1
+    ? closest[0]
+    : closest.slice(0, -1).join(", ") + ", or " + closest[closest.length - 1];
+  return `I could not find "${clean}" in your products. Did you mean ${list}?`;
 }
 
 async function matchCustomer(db, businessId, name) {
@@ -688,7 +750,7 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
     const qty = Number(it.qty || it.quantity || 1);
     if (!Number.isFinite(qty) || qty <= 0) return { ok: false, clarification: `How many "${it.product}"? I need a valid quantity.` };
     const matches = await matchProduct(db, auth.business.id, it.product || "");
-    if (!matches.length) return { ok: false, clarification: `I could not find "${it.product}" in your products. Check the name and try again.` };
+    if (!matches.length) return { ok: false, clarification: await productNotFoundLine(db, auth.business.id, it.product || "") };
     if (matches.length > 1) return { ok: false, clarification: `"${it.product}" matches more than one product: ${matches.map((p) => p.name).join(", ")}. Which one do you mean?` };
     const p = matches[0];
     if (p.stock < qty) return { ok: false, clarification: `Not enough stock for ${p.name}. You have ${p.stock} ${p.unit} left.` };
@@ -1991,7 +2053,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
         const qty = Number(it.qty || it.quantity || 1);
         if (!Number.isFinite(qty) || qty <= 0) return stop("How many \"" + (it.product || "") + "\"? I need a valid quantity.");
         const matches = await matchProduct(db, businessId, it.product || "");
-        if (!matches.length) return stop("I could not find \"" + (it.product || "") + "\" in this business's products. Check the name and try again.");
+        if (!matches.length) return stop(await productNotFoundLine(db, businessId, it.product || ""));
         if (matches.length > 1) return stop("\"" + (it.product || "") + "\" matches more than one product: " + matches.map((p) => p.name).join(", ") + ". Which one do you mean?");
         const p = matches[0];
         if (p.stock < qty) return stop("Not enough stock for " + p.name + ". You have " + p.stock + " " + p.unit + " left.");
@@ -2814,7 +2876,10 @@ async function handleReminderDone(db, auth, businessId, sessionKey, message, cur
          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
       ).bind(proposalId, businessId, auth.user.id, sessionKey, "mark_reminder_done", JSON.stringify({ reminder_id: target.id, title: target.title }), `Mark reminder "${target.title}" as done.`, toSqliteDate(createdAt), expiresStr).run();
       reminderProposal = { id: proposalId, tool: "mark_reminder_done", summary: `Mark reminder "${target.title}" as done.`, lines: [`Mark reminder "${target.title}" as done.`], expires_at: expiresStr };
-      reminderReply = proposalText.intro + "\n" + reminderProposal.lines.join("\n") + "\n" + proposalText.closing;
+      // One rendering only: the proposal card shows the lines. The reply
+      // stays empty so the same proposal is never also pasted as a chat
+      // bubble (duplicate-proposal fix, round 2).
+      reminderReply = "";
     } catch (e) {
       reminderReply = "I could not prepare that for confirmation just now. Your reminder is untouched. Try again.";
     }
@@ -3066,8 +3131,9 @@ export async function runKopaAiChat(context, auth, body) {
           await clearPendingWarnings(db, businessId, sessionKey, "answered");
           const replaceProposal = await createAiProposal(db, businessId, auth.user.id, sessionKey, "save_memory", wParams, pendingWarning.summary, [pendingWarning.summary]);
           try { await audit(context, auth, "ai.proposal.create", "ai_pending_proposal", replaceProposal.id, { tool: "save_memory", supersedes: pendingWarning.summary }); } catch (e) { /* audit must never break the proposal */ }
-          const replaceReply = proposalText.intro + "\n" + replaceProposal.lines.join("\n") + "\n" + proposalText.closing;
-          return { status: 200, body: { ok: true, reply: sanitizeTone(replaceReply), answer: sanitizeTone(replaceReply), actions_taken: [], fallback: false, proposal: replaceProposal } };
+          // One rendering only: the proposal card carries the lines; the
+          // reply stays empty (duplicate-proposal fix, round 2).
+          return { status: 200, body: { ok: true, reply: "", answer: "", actions_taken: [], fallback: false, proposal: replaceProposal } };
         } else if (warnAnswer === "safer" || warnAnswer === "original") {
           await clearPendingWarnings(db, businessId, sessionKey, "answered");
           if (warnAnswer === "original" && pendingWarning.kind === "memory_price") {
@@ -3083,8 +3149,9 @@ export async function runKopaAiChat(context, auth, body) {
           const chosenLines = warnAnswer === "safer" ? (wSafer.lines || []) : (() => { try { return JSON.parse(pendingWarning.lines || "[]"); } catch (e) { return [pendingWarning.summary]; } })();
           const chosenProposal = await createAiProposal(db, businessId, auth.user.id, sessionKey, pendingWarning.tool, chosenParams, chosenSummary, chosenLines);
           try { await audit(context, auth, "ai.proposal.create", "ai_pending_proposal", chosenProposal.id, { tool: pendingWarning.tool, warning_kind: pendingWarning.kind, warning_answer: warnAnswer }); } catch (e) { /* audit must never break the proposal */ }
-          const chosenReply = proposalText.intro + "\n" + chosenProposal.lines.join("\n") + "\n" + proposalText.closing;
-          return { status: 200, body: { ok: true, reply: sanitizeTone(chosenReply), answer: sanitizeTone(chosenReply), actions_taken: [], fallback: false, proposal: chosenProposal } };
+          // One rendering only: the proposal card carries the lines; the
+          // reply stays empty (duplicate-proposal fix, round 2).
+          return { status: 200, body: { ok: true, reply: "", answer: "", actions_taken: [], fallback: false, proposal: chosenProposal } };
         } else {
           await clearPendingWarnings(db, businessId, sessionKey, "superseded");
           // Fall through: a new, unrelated request replaces the warning.
@@ -3279,7 +3346,7 @@ export async function runKopaAiChat(context, auth, body) {
         // dry-run validates the draft against chat history, without
         // logging an action or handing out a WhatsApp link yet.
         result = isWriteTool && action.tool === "send_debtor_message"
-          ? await exec(db, auth, action.params, currency, history, { dryRun: true, userMessage: message })
+          ? await exec(db, auth, action.params, currency, history, { dryRun: true, userMessage: message, skipDraftCheck: !!(action.params && action.params._fastpathDraft) })
           : isWriteTool
             ? await exec(context, db, auth, action.params, currency, { dryRun: true, userMessage: message })
             : action.tool === "draft_debtor_message"
@@ -3358,6 +3425,15 @@ export async function runKopaAiChat(context, auth, body) {
             `UPDATE ai_pending_proposals SET status = 'superseded', resolved_at = ? WHERE business_id = ? AND session_key = ? AND status = 'pending'`
           ).bind(toSqliteDate(createdAt), businessId, sessionKey).run();
           let storedParams = action.params || {};
+          // The fast-path marker is a dispatch hint only: the proposal the
+          // Confirm tap executes must carry clean params, exactly as the
+          // model path stores them. The proposal card itself is the
+          // approval for a fast-path draft; the executor's draft check is
+          // unchanged for every other action.
+          if (storedParams._fastpathDraft !== undefined) {
+            storedParams = { ...storedParams };
+            delete storedParams._fastpathDraft;
+          }
           if (action.tool === "send_debtor_message") {
             try {
               const draftMatches = await matchCustomer(db, businessId, action.params.customer_name || action.params.customerName || "");
@@ -3377,9 +3453,13 @@ export async function runKopaAiChat(context, auth, body) {
         try {
           await audit(context, auth, "ai.proposal.create", "ai_pending_proposal", proposalId, { tool: action.tool });
         } catch (e) { /* audit must never break the proposal */ }
-        const proposalReply = proposalText.intro + "\n" + result.proposal.lines.join("\n") + "\n" + proposalText.closing;
+        // One rendering only: the proposal card shows the lines. The reply
+        // and answer stay empty so the same proposal is never also pasted
+        // as a chat bubble (duplicate-proposal fix, round 2). The waiting
+        // reply above is untouched: it is a waiting message, not the
+        // proposal text, and its card is deduped by id.
         return { status: 200, body: {
-          ok: true, reply: sanitizeTone(proposalReply), answer: sanitizeTone(proposalReply), actions_taken: [], fallback: false,
+          ok: true, reply: "", answer: "", actions_taken: [], fallback: false,
           proposal: { id: proposalId, tool: action.tool, summary: result.proposal.summary, lines: result.proposal.lines, expires_at: expiresStr },
           usage: usageObj(),
         } };

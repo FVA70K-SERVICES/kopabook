@@ -93,7 +93,7 @@ html[data-theme="dark"] #fva-chat-invite {
 #fva-chat-header .status { font-size: 12px; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
 #fva-chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; }
 #fva-chat-close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
-#fva-chat-body { min-height: 0; }
+#fva-chat-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 #fva-chat-messages { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--fv-panel); }
 .fva-msg { box-sizing: border-box; max-width: min(85%, 100%); min-width: 0; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.45; word-wrap: break-word; overflow-wrap: anywhere; animation: fva-msg-in 0.22s ease-out; }
 .fva-msg.agent { background: var(--fv-agent-bg); color: var(--fv-ink); border: 1px solid var(--fv-line); align-self: flex-start; border-bottom-left-radius: 4px; }
@@ -110,6 +110,10 @@ html[data-theme="dark"] #fva-chat-invite {
 .fva-msg.typing .tdot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--fv-muted); margin: 0; animation: fva-bounce 1.2s infinite; }
 .fva-msg.typing .tdot:nth-child(2) { animation-delay: 0.2s; }
 .fva-msg.typing .tdot:nth-child(3) { animation-delay: 0.4s; }
+/* Staged thinking display: calm dots, gentle opacity pulse only — no
+   bounce, no glow, no sparkle. The step line advances on a timer. */
+@keyframes fva-think-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+.fva-msg.typing.fva-processing .tdot { animation: fva-think-pulse 1.6s ease-in-out infinite; }
 /* Prominent processing note: readable text, not just three dots, so the
    user can see the request is being worked on and has a reason to wait.
    Same bubble family as a bot message; 44px-friendly height, clear
@@ -138,6 +142,16 @@ html[data-theme="dark"] #fva-chat-invite {
 @media (max-width: 480px) {
   #fva-chat-window { right: 16px; bottom: 88px; }
   #fva-chat-btn { right: 16px; bottom: 16px; }
+  /* Open on a narrow phone: the window becomes a full sheet, so no page
+     behind it can show sliced through it and the launcher (hidden while
+     open) cannot cover the bottom navigation. The window ends above the
+     nav; the header × is the close control. The body.kb-in-app selector
+     outranks the app shell's own #fva-chat-window offsets. */
+  #fva-chat-window.open,
+  body.kb-in-app #fva-chat-window.open {
+    left: 0; right: 0; top: env(safe-area-inset-top, 0px); bottom: 88px;
+    width: auto; max-width: none; height: auto; max-height: none; border-radius: 0;
+  }
   /* Narrow phones: the AI composer carries voice, speech, emoji and send
      buttons, so the input gets squeezed. Tighten the row's padding and
      gaps (every touch target stays 40px) to give the input room. */
@@ -202,8 +216,16 @@ html[data-theme="dark"] #fva-chat-invite {
 
 /* Merged in-app chat: two doors (Ask Kopa AI / Kopa Support), one thread */
 #fva-mode-tabs {
-  display: flex; gap: 8px; padding: 10px 12px 0; background: var(--fv-panel);
+  display: flex; flex: 0 0 auto; gap: 8px; padding: 10px 12px 0; background: var(--fv-panel);
+  border-bottom: 1px solid var(--fv-line);
 }
+/* The tab row is a normal in-flow row above the scrollable messages area:
+   it never shrinks below its content height, so its pills can never be
+   squeezed onto the messages, and its bottom edge is a real line, so a
+   bubble clipped at the top of the scrolled thread reads as scrolled —
+   never as hidden behind a pill. The other chrome rows never shrink
+   either: only #fva-chat-messages flexes. */
+#fva-support-status, #fva-support-tools, #fva-door-picker { flex: 0 0 auto; }
 #fva-mode-tabs button {
   flex: 1; padding: 9px 6px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--fv-brand); background: var(--fv-agent-bg);
@@ -454,6 +476,7 @@ html[data-theme="dark"] #fva-chat-invite {
 @media (prefers-reduced-motion: reduce) {
   .fva-msg, .fva-mode-note, .fva-proposal-card, .fva-pa-card, #fva-chat-invite { animation: none !important; }
   .fva-msg.typing .tdot { animation: none !important; transform: none !important; opacity: 1 !important; }
+  .fva-msg.typing.fva-processing .tdot { animation: none !important; opacity: 1 !important; }
   #fva-voice-btn.listening { animation: none !important; transform: none !important; opacity: 1 !important; }
   #fva-chat-messages { scroll-behavior: auto !important; }
   #fva-chat-btn, .fva-star, .fva-quick-btn, .fva-proposal-btn, #fva-voice-btn { transition: none !important; }
