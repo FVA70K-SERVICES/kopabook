@@ -31,6 +31,26 @@
   let doorPickerShown = false;
   const renderedProposalIds = new Set();
 
+  // ---- Send reliability (Ask Kopa AI / Kopa Support) ----
+  // POST /api/chat/send is synchronous: the server awaits the model round
+  // trip inside the request (worst case ~38s on the model path, ~1-2s on
+  // the deterministic fast path). The widget therefore bounds every send
+  // at 45s and never leaves a failure silent: any timeout, network error,
+  // non-OK status or ok:false response ends with one visible line in the
+  // thread, and the processing note is always removed.
+  const SEND_TIMEOUT_MS = 45000;
+  const SEND_FAILURE_AI = 'Kopa AI could not answer just now. Your books are safe. Try again.';
+  const SEND_FAILURE_SUPPORT = 'Kopa Support could not answer just now. Try again, or ask for a person.';
+  // Generation counter for sends: each sendMessage gets a sequence number
+  // and the processing note records which send it belongs to, so a late
+  // settle from an older send can never remove a newer send's note.
+  let sendSeq = 0;
+  let typingSeq = 0;
+  // Sequence of the send whose reply the poll loop has already delivered.
+  // If the send fetch later fails after the reply is already on screen,
+  // the failure line is skipped: the user already has their answer.
+  let replyDeliveredSeq = 0;
+
   // ---- Personal assistant (PA) profile, Ask Kopa AI side ----
   // GET /api/ai/pa returns { ok, assistant: { name, custom_name, voice, language },
   // pa_enabled, cards: [...] }. Fetched once per open in owner mode.
@@ -1842,9 +1862,15 @@
       activeProposal = null;
     }
     userSendCount++;
+    const mySeq = ++sendSeq;
     const msgId = 'local_' + Date.now();
     appendMsg('visitor', text, Date.now(), msgId, false);
-    showBotTyping();
+    showBotTyping(mySeq);
+    // Bound the send: without this the request could hang indefinitely
+    // and the user would see nothing but the processing note.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+    let failed = false;
     try {
       const payload = { sessionId, sender: 'visitor', message: text, siteId: SITE_ID };
       // Confirm tap: a structured id, not the word "Confirm". The server
@@ -1856,36 +1882,60 @@
       const res = await fetch(API + '/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
-      const data = await res.json();
-      hideBotTyping();
-      // Mark our message as read when bot replies (bot saw it)
-      if (data.ok) markRead(msgId);
-      if (data.botReply && data.botReply.quickReplies && data.botReply.quickReplies.length) {
-        showQuickReplies(data.botReply.quickReplies);
+      // A non-JSON error body (for example a bare 500 page) must not turn
+      // into a silent catch: treat it as a failed send, like ok:false.
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.ok === false) {
+        failed = true;
+      } else {
+        // The send round trip finished: the reply is stored server-side
+        // and arrives in the thread through the poll loop (or is already
+        // in data.botReply). Either way the processing note is done.
+        hideBotTyping(mySeq);
+        // Mark our message as read when bot replies (bot saw it)
+        if (data.ok) markRead(msgId);
+        if (data.botReply && data.botReply.quickReplies && data.botReply.quickReplies.length) {
+          showQuickReplies(data.botReply.quickReplies);
+        }
+        if (data.botReply && data.botReply.escalate) {
+          supportState = Object.assign({}, supportState || {}, { needsHuman: true });
+          renderModeTabs(); updateHeaderPersona();
+        }
+        // Handle action buttons (e.g. WhatsApp order link)
+        if (data.botReply && data.botReply.action) {
+          showActionButton(data.botReply.action);
+        }
+        // Speak the bot reply on the send path in voice mode. The poll path
+        // speaks the same text by message id and by text, so it is not repeated.
+        if (data.botReply && data.botReply.answer) {
+          maybeSpeakBotText(data.botReply.answer);
+        }
+        // Confirmation proposal card for a write action proposed by Ask Kopa AI.
+        // Confirm is a structured tap: the button sends confirmProposalId
+        // with the proposal id. Cancel stays an ordinary chat message
+        // "Cancel"; cancelling records nothing.
+        if (data.botReply && data.botReply.proposal) {
+          renderProposalCard(data.botReply.proposal);
+        }
       }
-      if (data.botReply && data.botReply.escalate) {
-        supportState = Object.assign({}, supportState || {}, { needsHuman: true });
-        renderModeTabs(); updateHeaderPersona();
+    } catch (e) { failed = true; }
+    finally { clearTimeout(timeoutId); }
+    if (failed) {
+      // The processing note always resolves, and a failure is never
+      // silent: one visible line in the thread, nothing raw, no dump.
+      hideBotTyping(mySeq);
+      if (replyDeliveredSeq !== mySeq) {
+        appendBotMsg(sendFailureText(), Date.now(), null);
       }
-      // Handle action buttons (e.g. WhatsApp order link)
-      if (data.botReply && data.botReply.action) {
-        showActionButton(data.botReply.action);
-      }
-      // Speak the bot reply on the send path in voice mode. The poll path
-      // speaks the same text by message id and by text, so it is not repeated.
-      if (data.botReply && data.botReply.answer) {
-        maybeSpeakBotText(data.botReply.answer);
-      }
-      // Confirmation proposal card for a write action proposed by Ask Kopa AI.
-      // Confirm is a structured tap: the button sends confirmProposalId
-      // with the proposal id. Cancel stays an ordinary chat message
-      // "Cancel"; cancelling records nothing.
-      if (data.botReply && data.botReply.proposal) {
-        renderProposalCard(data.botReply.proposal);
-      }
-    } catch (e) { hideBotTyping(); }
+    }
+  }
+
+  function sendFailureText() {
+    if (IS_KOPABOOK && isOwnerMode() && chatMode === 'support') return SEND_FAILURE_SUPPORT;
+    return SEND_FAILURE_AI;
   }
 
   function renderProposalCard(p) {
@@ -1987,18 +2037,46 @@
     if (el) { el.textContent = '✓✓'; el.classList.add('read'); }
   }
 
-  function showBotTyping() {
+  function showBotTyping(seq) {
     const wrap = body.querySelector('#fva-chat-messages');
-    if (!wrap || body.querySelector('#fva-bot-typing')) return;
+    if (!wrap) return;
+    const existing = body.querySelector('#fva-bot-typing');
+    if (existing) {
+      // A newer send takes over the note: a late settle from the older
+      // send must not remove it.
+      if (seq) typingSeq = seq;
+      return;
+    }
     const div = document.createElement('div');
     div.id = 'fva-bot-typing';
-    div.className = 'fva-msg bot typing';
-    div.innerHTML = '<span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>';
+    div.className = 'fva-msg bot typing fva-processing';
+    div.setAttribute('role', 'status');
+    div.setAttribute('aria-live', 'polite');
+    div.setAttribute('aria-label', 'Working on it');
+    const label = document.createElement('span');
+    label.className = 'fva-processing-text';
+    label.textContent = 'Working on it\u2026';
+    div.appendChild(label);
+    const dots = document.createElement('span');
+    dots.className = 'fva-processing-dots';
+    dots.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 3; i++) {
+      const d = document.createElement('span');
+      d.className = 'tdot';
+      dots.appendChild(d);
+    }
+    div.appendChild(dots);
+    if (seq) typingSeq = seq;
     wrap.appendChild(div);
     scrollMessagesToBottom(wrap);
   }
 
-  function hideBotTyping() {
+  function hideBotTyping(seq) {
+    // A sequence only removes the note it owns; no argument forces
+    // removal (the poll loop uses that when a reply lands, even while
+    // the send fetch is still pending).
+    if (seq && typingSeq && seq !== typingSeq) return;
+    typingSeq = 0;
     const el = body.querySelector('#fva-bot-typing');
     if (el) el.remove();
   }
@@ -2105,6 +2183,10 @@
       (data.messages || []).forEach(m => {
         if (m.id > lastMsgId) {
           lastMsgId = m.id;
+          // A reply landing through the poll ends the processing note
+          // even while the send fetch is still pending, and records
+          // which send it answers so a late send failure stays quiet.
+          if ((m.sender === 'bot' || m.sender === 'agent') && typingSeq) replyDeliveredSeq = typingSeq;
           hideBotTyping();
           const existing = body.querySelectorAll('.fva-msg.visitor');
           if (m.sender === 'visitor' && existing.length) {

@@ -3,6 +3,11 @@
 
 const AI_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
+// Workers AI has no timeout of its own: a hung run used to hang the whole
+// support reply with it. 10s, then fail fast and return null so the caller
+// falls back to the knowledge rules instead of leaving the user waiting.
+export const AI_TIMEOUT_MS = 10000;
+
 function buildSystemPrompt(siteConfig, ownerCtx, history) {
   const botName = siteConfig.botName || 'Kopa Bot';
   const business = siteConfig.businessName || 'KopaBook';
@@ -67,11 +72,25 @@ export async function getAIResponse(message, { env, siteConfig, ownerCtx, histor
     const systemPrompt = buildSystemPrompt(siteConfig, ownerCtx, history);
     const messages = buildMessages(history, message, systemPrompt);
 
-    const response = await env.AI.run(AI_MODEL, {
+    // Timed race: a hung Workers AI call fails fast (null) instead of
+    // hanging the support reply. The attached catch swallows a late
+    // rejection from the losing run so it never surfaces as unhandled.
+    const runPromise = env.AI.run(AI_MODEL, {
       messages,
       max_tokens: 300,
       temperature: 0.7,
     });
+    runPromise.catch(() => {});
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Workers AI timed out')), AI_TIMEOUT_MS);
+    });
+    let response;
+    try {
+      response = await Promise.race([runPromise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
 
     let answer = '';
     if (typeof response === 'string') {
@@ -82,7 +101,7 @@ export async function getAIResponse(message, { env, siteConfig, ownerCtx, histor
       return null;
     }
 
-    answer = answer.trim();
+    answer = answer.trim().slice(0, 1000);
     if (!answer || answer.length < 5) return null;
 
     // Detect if AI wants to escalate

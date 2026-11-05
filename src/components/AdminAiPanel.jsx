@@ -656,7 +656,7 @@ export default function AdminAiPanel() {
     setInput("");
     setBusy(true);
     try {
-      const data = await api.post("/api/admin/ai/chat", { message: text, history }, { timeoutMs: 100000 });
+      const data = await api.post("/api/admin/ai/chat", { message: text, history }, { timeoutMs: 45000 });
       const additions = [];
       let replyMsg = null;
       if (data && data.reply) {
@@ -696,9 +696,9 @@ export default function AdminAiPanel() {
           id: nextId("assistant"),
           kind: "text",
           role: "assistant",
-          content:
-            "Sorry, something went wrong. " +
-            (e && e.message ? e.message : "Please try again."),
+          // One clean line, never the raw error: the raw message can
+          // carry request internals and reads as a dump to the owner.
+          content: "Admin AI could not answer just now. Try again, or ask me to brief you.",
         },
       ]);
     } finally {
@@ -897,6 +897,12 @@ export default function AdminAiPanel() {
         }
         .admin-ai-typing-dot:nth-child(2) { animation-delay: 0.2s; }
         .admin-ai-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        .admin-ai-processing-text {
+          font-size: 14px;
+          font-weight: 600;
+          line-height: 1.45;
+          color: var(--ink);
+        }
         .admin-ai-mic-btn.listening {
           animation: admin-ai-mic-pulse 1.4s ease-in-out infinite;
         }
@@ -1216,15 +1222,23 @@ export default function AdminAiPanel() {
               ...assistantBubbleStyle,
               display: "flex",
               alignItems: "center",
-              gap: 6,
+              gap: 8,
               padding: "12px 16px",
-              minHeight: 20,
+              minHeight: 44,
             }}
-            aria-label="Admin AI is typing"
+            role="status"
+            aria-live="polite"
+            aria-label="Admin AI is working on it"
           >
-            <span className="admin-ai-typing-dot" />
-            <span className="admin-ai-typing-dot" />
-            <span className="admin-ai-typing-dot" />
+            <span className="admin-ai-processing-text">Working on it…</span>
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+              aria-hidden="true"
+            >
+              <span className="admin-ai-typing-dot" />
+              <span className="admin-ai-typing-dot" />
+              <span className="admin-ai-typing-dot" />
+            </span>
           </div>
         ) : null}
       </div>

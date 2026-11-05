@@ -32,15 +32,16 @@ import {
   onRequestPatch as updateProjectEndpoint,
   onRequestDelete as deleteProjectEndpoint,
 } from "../projects/[id].js";
+import { resolveFastPath } from "./_fastpath.js";
 
 const GEMINI_MODEL = "gemini-3.7-flash";
-// Raised 2026-11-02 from 20000: log capture showed gemini-paid aborted at
-// the 20s ceiling on Admin AI (large system prompt, reasoning model), so a
-// single provider call never got a chance to finish. 45s per provider, with
-// the Admin AI frontend ceiling raised to 100s, so even a two-provider call
-// (90s worst case) can still finish inside the frontend ceiling instead of
-// timing out at 30s.
-const PROVIDER_TIMEOUT_MS = 45000;
+// Cut 2026-11-05 from 45000: the 45s ceiling let one failing model call
+// hang the chat for up to 180s (two providers, one retry each) before the
+// resting dump. The deterministic fast path now answers every common
+// intent with no model call, so the model is only for open questions; a
+// failed model call must fail fast instead. 15s per attempt, retry only
+// on 429/5xx, two providers: worst case about 30s per model call.
+const PROVIDER_TIMEOUT_MS = 15000;
 // Two paid Gemini slots, the ONLY model providers for every Kopa bot.
 // Fortune confirmed 2026-11-02 that the Gemini keys already held are paid
 // API keys, so both are paid providers, not a free chain: GEMINI_PAID_API_KEY
@@ -53,8 +54,16 @@ const PROVIDER_TIMEOUT_MS = 45000;
 // Env var names only: GEMINI_PAID_API_KEY, GEMINI_API_KEY, Pages dashboard
 // secrets, never in code, chat, files, logs, or any endpoint response.
 const GEMINI_PAID_MODEL = GEMINI_MODEL;
-const STANDARD_MAX_OUTPUT_TOKENS = 2048;
+// Raised 2026-11-05 from 2048: gemini-3.7-flash is a reasoning model and
+// spends part of its output budget thinking. With a 2048 cap the visible
+// answer can come back empty, which generateText treats as a provider
+// failure and the chat answered with the resting dump. 4096 leaves room
+// for thinking plus the answer, matching the advanced cap.
+const STANDARD_MAX_OUTPUT_TOKENS = 4096;
 const ADVANCED_MAX_OUTPUT_TOKENS = 4096;
+// The ONLY reply when the model cannot be reached. One line, no snapshot
+// dump: the full business snapshot must never be pasted into chat.
+const MODEL_UNAVAILABLE_LINE = "Kopa AI could not reach the AI just now. Your books are fine. Try again, or ask me for today's sales or who owes you.";
 const STATIC_CACHE_TTL_MS = 600000; // 10 minutes, static knowledge only
 const RETRY_BACKOFF_MS = 300;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -992,7 +1001,7 @@ async function execSetReminder(context, db, auth, params, currency, opts) {
   return { ok: true, summary: `Reminder set: "${text}" for ${remindAt} (UTC).` };
 }
 
-async function execGetCustomerBalance(db, auth, params, currency) {
+async function execGetCustomerBalance(context, db, auth, params, currency) {
   const name = String(params.customer_name || params.customerName || "").trim();
   if (!name) return { ok: false, clarification: "Which customer's balance do you want to check?" };
   const matches = await matchCustomer(db, auth.business.id, name);
@@ -2081,7 +2090,10 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
       // and 4000 is the stated price). If the only amounts are quantities,
       // there is no stated price to compare.
       const qtyNumbers = new Set(resolved.map((r) => r.qty));
-      const statedAmounts = amountsIn(userMessage).filter((n) => !qtyNumbers.has(n));
+      // Numbers that are part of a product name (the 5 in "Rice 5kg") are
+      // a size or weight, not a stated price, so they must not count here.
+      const nameNumbers = new Set(resolved.flatMap((r) => amountsIn(r.requested)));
+      const statedAmounts = amountsIn(userMessage).filter((n) => !qtyNumbers.has(n) && !nameNumbers.has(n));
       const distinctStated = [...new Set(statedAmounts)];
       if (distinctStated.length === 1 && distinctStated[0] !== total && amountPaid === null && !/paid/i.test(String(userMessage || ""))) {
         const stated = distinctStated[0];
@@ -2351,7 +2363,7 @@ const CLEAR_CHAT_RE = /^\s*(?:please\s+)?(?:clear chat|clear the chat|clear this
 // Yoruba: beeni, eeni, o dara. Igbo: ee.
 // Pidgin cancel: cancel am, no do am. Hausa cancel: a'a, aa, bari.
 // Yoruba cancel: rara, ko si. Igbo cancel: mba.
-const CHAT_CONFIRM_WORDS_RE = /^\s*(?:yes|yeah|yep|confirm|confirmed|go ahead|ok|okay|proceed|do it|sure|yes please|correct|that is right|that's right|na so|oya na|i|eh|to|beeni|eeni|o dara|ee)\s*[.!?]*\s*$/;
+const CHAT_CONFIRM_WORDS_RE = /^\s*(?:yes|yeah|yep|confirm|confirmed|go ahead|ok|okay|proceed|do it|record it|record that|record am|record this|sure|yes please|correct|that is right|that's right|na so|oya na|i|eh|to|beeni|eeni|o dara|ee)\s*[.!?]*\s*$/;
 const CANCEL_RE = /^\s*(?:no|cancel|cancel that|stop|don't|do not|never mind|forget it|leave it|cancel am|no do am|a'a|aa|bari|rara|ko si|mba)\s*[.!?]*\s*$/;
 
 function normalizeIntentText(text) {
@@ -2737,6 +2749,80 @@ function parseAction(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Reminder helpers, shared by the deterministic fast path (all tiers)
+// and the PA block below. A reminder is never marked done by chat words:
+// the owner's words only select it, a proposal is stored, and only a
+// Confirm tap on the proposal card marks it done. Nothing is updated here.
+// ---------------------------------------------------------------------------
+async function listDueReminders(db, businessId) {
+  let pendingReminders = [];
+  try {
+    const rr = await db.prepare(
+      `SELECT id, title, remind_at FROM bot_reminders WHERE business_id = ? AND status = 'pending' ORDER BY remind_at ASC LIMIT 50`
+    ).bind(businessId).all();
+    pendingReminders = (rr && rr.results) || [];
+  } catch (e) { pendingReminders = []; }
+  const nowStr = toSqliteDate(new Date());
+  const due = pendingReminders.filter((r) => String(r.remind_at || "") <= nowStr);
+  if (!pendingReminders.length) return "No reminders set.";
+  if (!due.length) {
+    const next = pendingReminders[0];
+    return `No reminders are due right now. Next: "${next.title}" at ${next.remind_at}.`;
+  }
+  return `Reminders due (${due.length}):\n` + due.map((r) => `- ${r.title} (due ${r.remind_at})`).join("\n");
+}
+
+async function handleReminderDone(db, auth, businessId, sessionKey, message, currency, proposalText) {
+  let pendingReminders = [];
+  try {
+    const rr = await db.prepare(
+      `SELECT id, title, remind_at FROM bot_reminders WHERE business_id = ? AND status = 'pending' ORDER BY remind_at ASC LIMIT 50`
+    ).bind(businessId).all();
+    pendingReminders = (rr && rr.results) || [];
+  } catch (e) { pendingReminders = []; }
+  const nowStr = toSqliteDate(new Date());
+  const dueReminders = pendingReminders.filter((r) => String(r.remind_at || "") <= nowStr);
+  const matched = pendingReminders.filter((r) => reminderTitleMatches(r.title, message));
+  let reminderReply = null;
+  let target = null;
+  if (matched.length === 1) target = matched[0];
+  else if (matched.length > 1) {
+    reminderReply = "More than one reminder matches that. Which one is done?\n" + matched.map((r) => "- " + r.title).join("\n");
+  } else if (dueReminders.length === 1) {
+    target = dueReminders[0];
+  } else if (dueReminders.length > 1) {
+    reminderReply = "These reminders are due. Which one is done?\n" + dueReminders.map((r) => "- " + r.title).join("\n");
+  } else {
+    reminderReply = "I do not have a due reminder to mark as done.";
+  }
+  let reminderProposal = null;
+  if (target) {
+    // Same proposal shape as the ACTION path: supersede any older pending
+    // proposal for this session, store this one with a 10-minute expiry,
+    // and ask for a Confirm tap. Execution runs only through the confirm
+    // tap path, via mark_reminder_done.
+    const proposalId = "prop_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const createdAt = new Date();
+    const expiresStr = toSqliteDate(new Date(createdAt.getTime() + PROPOSAL_TTL_MS));
+    try {
+      await ensurePendingProposals(db);
+      await db.prepare(
+        `UPDATE ai_pending_proposals SET status = 'superseded', resolved_at = ? WHERE business_id = ? AND session_key = ? AND status = 'pending'`
+      ).bind(toSqliteDate(createdAt), businessId, sessionKey).run();
+      await db.prepare(
+        `INSERT INTO ai_pending_proposals (id, business_id, user_id, session_key, tool, params, summary, status, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+      ).bind(proposalId, businessId, auth.user.id, sessionKey, "mark_reminder_done", JSON.stringify({ reminder_id: target.id, title: target.title }), `Mark reminder "${target.title}" as done.`, toSqliteDate(createdAt), expiresStr).run();
+      reminderProposal = { id: proposalId, tool: "mark_reminder_done", summary: `Mark reminder "${target.title}" as done.`, lines: [`Mark reminder "${target.title}" as done.`], expires_at: expiresStr };
+      reminderReply = proposalText.intro + "\n" + reminderProposal.lines.join("\n") + "\n" + proposalText.closing;
+    } catch (e) {
+      reminderReply = "I could not prepare that for confirmation just now. Your reminder is untouched. Try again.";
+    }
+  }
+  return { reply: reminderReply, proposal: reminderProposal };
+}
+
+// ---------------------------------------------------------------------------
 // Main handler.
 // ---------------------------------------------------------------------------
 export async function runKopaAiChat(context, auth, body) {
@@ -3032,7 +3118,6 @@ export async function runKopaAiChat(context, auth, body) {
 
     // Rich live snapshot, injected into every request.
     const snap = await buildSnapshot(db, auth);
-    const snapshotFallbackText = snapshotText(snap, currency);
 
     // Count the question before the AI call so failures still respect the cap.
     await db.prepare(
@@ -3041,6 +3126,41 @@ export async function runKopaAiChat(context, auth, body) {
     ).bind(String(businessId), day).run();
     const newUsed = usedToday + 1;
     const countedUsage = { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay };
+
+    // Deterministic fast path (all tiers, no model call). Common intents
+    // are answered from the live snapshot, or turned into an ACTION that
+    // flows through the same dry-run / guardrail / proposal dispatch
+    // below, so tier, role, cap and guardrail checks still apply and a
+    // Confirm tap is still required before anything is recorded. Read
+    // intents work on every plan, including Free. The PA block below is
+    // now the fallback for Solo/Pro when the fast path does not match.
+    let fastPathAction = null;
+    const fastPath = resolveFastPath(message, history, snap, currency);
+    if (fastPath) {
+      if (fastPath.kind === "reply") {
+        return { status: 200, body: { ok: true, reply: fastPath.text, answer: fastPath.text, actions_taken: [], fallback: false, usage: countedUsage } };
+      }
+      if (fastPath.kind === "briefing") {
+        const briefing = await buildBriefing(db, auth, snap, currency);
+        return { status: 200, body: { ok: true, reply: briefing, answer: briefing, actions_taken: [], fallback: false, usage: countedUsage } };
+      }
+      if (fastPath.kind === "eod") {
+        const eod = await buildEodSummary(db, auth, snap, currency);
+        return { status: 200, body: { ok: true, reply: eod, answer: eod, actions_taken: [], fallback: false, usage: countedUsage } };
+      }
+      if (fastPath.kind === "reminders") {
+        const reminderText = await listDueReminders(db, businessId);
+        return { status: 200, body: { ok: true, reply: reminderText, answer: reminderText, actions_taken: [], fallback: false, usage: countedUsage } };
+      }
+      if (fastPath.kind === "reminder_done") {
+        const done = await handleReminderDone(db, auth, businessId, sessionKey, message, currency, proposalText);
+        return { status: 200, body: { ok: true, reply: done.reply, answer: done.reply, actions_taken: [], fallback: false, usage: countedUsage, proposal: done.proposal } };
+      }
+      // kind === "action": fall through with a synthetic ACTION line, so
+      // the existing parseAction + dispatch below runs unchanged and no
+      // model call is made for it.
+      fastPathAction = fastPath;
+    }
 
     // PA deterministic intents (Solo and Pro only). These run in the normal
     // counted flow, after the question is counted and before any model
@@ -3058,57 +3178,12 @@ export async function runKopaAiChat(context, auth, body) {
         const eod = await buildEodSummary(db, auth, snap, currency);
         return { status: 200, body: { ok: true, reply: eod, answer: eod, actions_taken: [], fallback: false, usage: countedUsage } };
       }
-      // Reminder done (best version): a proposal first, like every other
-      // write. The owner's words only select the reminder; only a Confirm
-      // tap on the proposal card marks it done. Nothing is updated here.
+      // Reminder done: the shared helper builds the proposal (all
+      // tiers). The fast path above already handled this intent; this
+      // branch is the fallback for Solo/Pro when it did not match.
       if (/reminder/i.test(message) && /(done|mark|complete|finished)/i.test(message)) {
-        let pendingReminders = [];
-        try {
-          const rr = await db.prepare(
-            `SELECT id, title, remind_at FROM bot_reminders WHERE business_id = ? AND status = 'pending' ORDER BY remind_at ASC LIMIT 50`
-          ).bind(businessId).all();
-          pendingReminders = (rr && rr.results) || [];
-        } catch (e) { pendingReminders = []; }
-        const nowStr = toSqliteDate(new Date());
-        const dueReminders = pendingReminders.filter((r) => String(r.remind_at || "") <= nowStr);
-        const matched = pendingReminders.filter((r) => reminderTitleMatches(r.title, message));
-        let reminderReply = null;
-        let target = null;
-        if (matched.length === 1) target = matched[0];
-        else if (matched.length > 1) {
-          reminderReply = "More than one reminder matches that. Which one is done?\n" + matched.map((r) => "- " + r.title).join("\n");
-        } else if (dueReminders.length === 1) {
-          target = dueReminders[0];
-        } else if (dueReminders.length > 1) {
-          reminderReply = "These reminders are due. Which one is done?\n" + dueReminders.map((r) => "- " + r.title).join("\n");
-        } else {
-          reminderReply = "I do not have a due reminder to mark as done.";
-        }
-        let reminderProposal = null;
-        if (target) {
-          // Same proposal shape as the ACTION path: supersede any older
-          // pending proposal for this session, store this one with a
-          // 10-minute expiry, and ask for a Confirm tap. Execution runs
-          // only through the confirm tap path, via mark_reminder_done.
-          const proposalId = "prop_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-          const createdAt = new Date();
-          const expiresStr = toSqliteDate(new Date(createdAt.getTime() + PROPOSAL_TTL_MS));
-          try {
-            await ensurePendingProposals(db);
-            await db.prepare(
-              `UPDATE ai_pending_proposals SET status = 'superseded', resolved_at = ? WHERE business_id = ? AND session_key = ? AND status = 'pending'`
-            ).bind(toSqliteDate(createdAt), businessId, sessionKey).run();
-            await db.prepare(
-              `INSERT INTO ai_pending_proposals (id, business_id, user_id, session_key, tool, params, summary, status, created_at, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
-            ).bind(proposalId, businessId, auth.user.id, sessionKey, "mark_reminder_done", JSON.stringify({ reminder_id: target.id, title: target.title }), `Mark reminder "${target.title}" as done.`, toSqliteDate(createdAt), expiresStr).run();
-            reminderProposal = { id: proposalId, tool: "mark_reminder_done", summary: `Mark reminder "${target.title}" as done.`, lines: [`Mark reminder "${target.title}" as done.`], expires_at: expiresStr };
-            reminderReply = proposalText.intro + "\n" + reminderProposal.lines.join("\n") + "\n" + proposalText.closing;
-          } catch (e) {
-            reminderReply = "I could not prepare that for confirmation just now. Your reminder is untouched. Try again.";
-          }
-        }
-        return { status: 200, body: { ok: true, reply: reminderReply, answer: reminderReply, actions_taken: [], fallback: false, usage: countedUsage, proposal: reminderProposal } };
+        const done = await handleReminderDone(db, auth, businessId, sessionKey, message, currency, proposalText);
+        return { status: 200, body: { ok: true, reply: done.reply, answer: done.reply, actions_taken: [], fallback: false, usage: countedUsage, proposal: done.proposal } };
       }
     }
 
@@ -3131,20 +3206,24 @@ export async function runKopaAiChat(context, auth, body) {
     const sys = systemPrompt(snap, currency, tier, memorySection, assistant);
 
     // Graceful degradation: the app must never break because AI is down.
-    if (!aiProviderAvailable(context.env)) {
-      const reply = `Kopa AI is not connected yet, but here is what your books say.\n${snapshotFallbackText}`;
-      return { status: 200, body: { ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } } };
-    }
-
+    // A failed model call says so in one line. The full business snapshot
+    // is never pasted into chat as a reply.
     let modelText;
-    try {
-      const messages = [{ role: "system", content: sys }];
-      for (const h of history) messages.push({ role: h.role, content: h.content.slice(0, 1000) });
-      messages.push({ role: "user", content: message });
-      modelText = await generateText(context.env, messages);
-    } catch (e) {
-      const reply = `Kopa AI is resting at the moment, but your books are fine.\n${snapshotFallbackText}`;
+    if (fastPathAction) {
+      modelText = "ACTION: " + JSON.stringify({ tool: fastPathAction.tool, params: fastPathAction.params });
+    } else if (!aiProviderAvailable(context.env)) {
+      const reply = MODEL_UNAVAILABLE_LINE;
       return { status: 200, body: { ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } } };
+    } else {
+      try {
+        const messages = [{ role: "system", content: sys }];
+        for (const h of history.slice(-8)) messages.push({ role: h.role, content: h.content.slice(0, 500) });
+        messages.push({ role: "user", content: message });
+        modelText = await generateText(context.env, messages);
+      } catch (e) {
+        const reply = MODEL_UNAVAILABLE_LINE;
+        return { status: 200, body: { ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } } };
+      }
     }
 
     // Agentic path: the model asked to DO something.
@@ -3325,14 +3404,20 @@ export async function runKopaAiChat(context, auth, body) {
         } };
       }
 
-      // Confirmation in Kopa's voice, with real numbers.
+      // Confirmation in Kopa's voice, with real numbers. Capped at 8s:
+      // the action already ran, so a slow model must never hold up the
+      // answer. On timeout or failure the plain summary is used.
       let reply;
       try {
-        reply = await generateText(context.env, [
+        const generated = await Promise.race([
+          generateText(context.env, [
             { role: "system", content: `You are ${assistant.name}, the warm, plain KopaBook business assistant for Nigerian shop owners. The user asked you to do something and you just did it. Write a short, natural confirmation (2-3 sentences max) using ONLY the facts given. Never add numbers that are not in the facts.` },
             { role: "user", content: `User request: ${message}\nWhat was done: ${result.summary}\nWrite the confirmation now.` },
-          ], { maxOutputTokens: 400 });
-        reply = String(reply);
+          ], { maxOutputTokens: 400 }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+        ]);
+        if (!generated) throw new Error("empty");
+        reply = String(generated);
         if (!reply) throw new Error("empty");
       } catch (e) {
         reply = "Done. " + result.summary;

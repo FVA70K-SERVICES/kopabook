@@ -12,6 +12,23 @@ import { getAIResponse, shouldUseAI } from './bot-ai.js';
 import { maybeAutoClearChat, clearExpiredMergedChat } from './_auto_clear.js';
 import { caseForSupportMessage, mirrorCaseMessage } from './_cases.js';
 
+// Support-path bounds. The verified-owner support path is deterministic
+// (handleFollowUp, then D1 knowledge, then the hardcoded knowledge, then
+// one fixed fallback), so it never calls a model and never dumps. The two
+// failure modes left were a hung D1 knowledge load and an uncaught throw
+// in that path, both of which used to surface as a bare 500 with no bot
+// reply. D1_KNOWLEDGE_TIMEOUT_MS caps the D1 load; on timeout or error
+// the hardcoded knowledge answers instead. KOPA_SUPPORT_FAILURE_LINE is
+// the one-line reply when even that cannot run.
+export const D1_KNOWLEDGE_TIMEOUT_MS = 5000;
+export const KOPA_SUPPORT_FAILURE_LINE = 'Kopa Support could not answer just now. Please try again in a bit, or tap Talk to human for a person from the FVA70K team.';
+const KOPA_SUPPORT_FALLBACK = {
+  answer: 'I am Kopa Bot. I can help with KopaBook itself: pricing, features like sales and stock, how to start, or a problem you are having. Tell me which one you need, or tap Talk to human for a person from the FVA70K team.',
+  quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human'],
+  escalate: false,
+  confidence: 'low'
+};
+
 // D1-backed bot knowledge: the bot's BRAIN. Rows in `bot_knowledge` win over
 // the hardcoded fallback, so new features can be taught without a deploy.
 let KNOWLEDGE_CACHE = { at: 0, rows: [] };
@@ -64,21 +81,33 @@ function matchKnowledge(message, entries) {
   return null;
 }
 
-async function getKopaBookResponse(message, db) {
-  // D1 knowledge first (fresh), hardcoded second (fallback)
-  const d1rows = await loadD1Knowledge(db);
+export async function getKopaBookResponse(message, db) {
+  // D1 knowledge first (fresh), hardcoded second (fallback). The D1 load
+  // is raced against a 5s timeout: a hung D1 must never hang the support
+  // reply, it just falls back to the hardcoded knowledge below.
+  let d1rows = [];
+  try {
+    const load = loadD1Knowledge(db);
+    load.catch(() => {});
+    let timer = null;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve([]), D1_KNOWLEDGE_TIMEOUT_MS);
+    });
+    try {
+      d1rows = await Promise.race([load, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  } catch (e) {
+    d1rows = [];
+  }
   const hit = matchKnowledge(message, d1rows) || matchKnowledge(message, KOPABOOK_KNOWLEDGE);
   if (hit) return hit;
   // No match - one deterministic fallback, never a random clarifier.
   // Random clarifiers hid every gap: the same question got a different
   // generic reply each time, so a retest could look fixed when it was not.
   // WARM_CLARIFIERS is kept exported for compatibility but is no longer used here.
-  return {
-    answer: 'I am Kopa Bot. I can help with KopaBook itself: pricing, features like sales and stock, how to start, or a problem you are having. Tell me which one you need, or tap Talk to human for a person from the FVA70K team.',
-    quickReplies: ['Pricing', 'Features', 'How to start', 'Talk to human'],
-    escalate: false,
-    confidence: 'low'
-  };
+  return { ...KOPA_SUPPORT_FALLBACK, quickReplies: [...KOPA_SUPPORT_FALLBACK.quickReplies] };
 }
 
 async function getSiteMemory(env, siteId) {
@@ -296,6 +325,9 @@ export async function onRequestPost(context) {
                 const answer = b.reply || b.answer || b.message || 'Ask Kopa AI could not answer just now. Please try again.';
                 result = { answer, quickReplies: [], confidence: 'high', proposal: b.proposal || null, clearChat: b.clear_chat || false };
               } catch (e) {
+                // Ask Kopa AI failure: one line, never a dump, never a
+                // silent hang. (The Ask Kopa AI engine itself is fixed
+                // separately; this catch only shapes the reply here.)
                 result = {
                   answer: 'Ask Kopa AI is resting at the moment. Your records are safe. Please try again in a bit, or switch to Kopa Support if you need a person.',
                   quickReplies: [],
@@ -318,8 +350,21 @@ export async function onRequestPost(context) {
               // continue the guide, not fall into the knowledge fallback.
               // This runs only in support mode, never in AI mode, and never
               // on a Confirm tap, so 'Yes' still never confirms a proposal.
-              if (!confirmProposalId) result = handleFollowUp(clean, recentMessages, siteConfig);
-              if (!result) result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
+              // Wrapped so a failure here answers with one line instead of
+              // a bare 500 with no bot reply. Routing unchanged: follow-up,
+              // then knowledge, then the fixed fallback inside
+              // getKopaBookResponse.
+              try {
+                if (!confirmProposalId) result = handleFollowUp(clean, recentMessages, siteConfig);
+                if (!result) result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
+              } catch (e) {
+                result = {
+                  answer: KOPA_SUPPORT_FAILURE_LINE,
+                  quickReplies: ['Talk to human'],
+                  escalate: false,
+                  confidence: 'low'
+                };
+              }
               if (result && result.answer === PUBLIC_LOCKDOWN_ANSWER) {
                 result = {
                   answer: BUSINESS_ACTION_POINTER,
@@ -415,8 +460,17 @@ export async function onRequestPost(context) {
         // Try order flow first, then booking flow, then knowledge
         if (!verifiedOwner) result = result || handleOrderMessage(clean, memory, sessionId, plan);
         if (!result && !verifiedOwner) result = handleBookingMessage(clean, memory, sessionId, plan);
-        // KopaBook-specific knowledge (D1 brain + builtin fallback)
-        if (!result && !verifiedOwner && siteConfig.isKopaBook) result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
+        // KopaBook-specific knowledge (D1 brain + builtin fallback).
+        // A failure here falls back to the same one deterministic answer
+        // getKopaBookResponse returns on no match, never a 500 with no
+        // bot reply and never a dump.
+        if (!result && !verifiedOwner && siteConfig.isKopaBook) {
+          try {
+            result = await getKopaBookResponse(clean, env.KOPABOOK_DB);
+          } catch (e) {
+            result = { ...KOPA_SUPPORT_FALLBACK, quickReplies: [...KOPA_SUPPORT_FALLBACK.quickReplies] };
+          }
+        }
         if (!result) {
           const botResult = getBotResponse(clean, siteConfig);
           result = {

@@ -110,6 +110,17 @@ html[data-theme="dark"] #fva-chat-invite {
 .fva-msg.typing .tdot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--fv-muted); margin: 0; animation: fva-bounce 1.2s infinite; }
 .fva-msg.typing .tdot:nth-child(2) { animation-delay: 0.2s; }
 .fva-msg.typing .tdot:nth-child(3) { animation-delay: 0.4s; }
+/* Prominent processing note: readable text, not just three dots, so the
+   user can see the request is being worked on and has a reason to wait.
+   Same bubble family as a bot message; 44px-friendly height, clear
+   contrast in both themes via --fv-ink. The dots stay, inside the note. */
+.fva-msg.typing.fva-processing {
+  gap: 8px; min-height: 44px;
+  font-size: 14px; font-weight: 600; line-height: 1.45; color: var(--fv-ink);
+}
+.fva-processing-text { overflow-wrap: anywhere; }
+.fva-processing-dots { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.fva-msg.typing .fva-processing-dots .tdot { margin: 0; }
 @keyframes fva-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.55; } 30% { transform: translateY(-6px); opacity: 1; } }
 #fva-typing { font-size: 13px; color: var(--fv-muted); font-style: italic; padding: 0 16px 8px; display: none; background: var(--fv-panel); }
 #fva-typing.show { display: block; }
@@ -127,6 +138,10 @@ html[data-theme="dark"] #fva-chat-invite {
 @media (max-width: 480px) {
   #fva-chat-window { right: 16px; bottom: 88px; }
   #fva-chat-btn { right: 16px; bottom: 16px; }
+  /* Narrow phones: the AI composer carries voice, speech, emoji and send
+     buttons, so the input gets squeezed. Tighten the row's padding and
+     gaps (every touch target stays 40px) to give the input room. */
+  #fva-chat-input-area { padding: 10px 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); gap: 6px; }
 }
 
 /* v2 features */
