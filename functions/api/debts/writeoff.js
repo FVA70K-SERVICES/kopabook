@@ -1,5 +1,6 @@
 // POST /api/debts/writeoff — clear a debtor's balance as a bad debt
 import { json, getAuthContext, requireAuth, audit } from "../_utils";
+import { recordHistory } from "../_history.js";
 
 export async function onRequestPost(context) {
   try {
@@ -34,6 +35,20 @@ export async function onRequestPost(context) {
       .run();
 
     await audit(context, auth, "debt.writeoff", "customer", Number(customerId), { amount: prevBalance });
+    // WORLD-BEST (merge, History stream §6e, adapted: this file's balance
+    // is prevBalance; the name needs a lookup).
+    const woNameRow = await db.prepare(`SELECT name FROM customers WHERE id = ? AND business_id = ? LIMIT 1`).bind(Number(customerId), auth.business.id).first();
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "debt",
+      entityType: "customer",
+      entityId: Number(customerId),
+      summary: `Wrote off ${auth.business.currency} ${Number(prevBalance).toLocaleString("en-US")} owed by ${woNameRow?.name || "customer"} as bad debt`,
+      amount: Number(prevBalance),
+    });
     return json({ ok: true, writtenOff: prevBalance }, 200);
   } catch (error) {
     return json({ ok: false, message: "Could not write off debt.", error: String(error) }, 500);

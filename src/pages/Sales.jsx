@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fmt, todayISO } from "../lib/api";
 import { waLink, receiptText } from "../lib/whatsapp";
-import { receiptCardUrl, shareCard } from "../lib/shareCards";
+import { receiptCardUrl, shareCard, downloadCard, dataUrlToBlob } from "../lib/shareCards";
+import StatementPrint from "../components/StatementPrint";
+import { requestStatementPrint } from "../lib/statement";
+import { contactSavePatch, buildContactLines } from "../lib/receiptContacts";
+import { sendEmailReceipt, sendTelegramReceipt, getTelegramBotStatus, telegramClientUrl } from "../lib/receiptSends";
 import MessageSale from "../components/MessageSale";
 import { ShipmentModal, ShipmentsTab } from "../components/Shipments";
 
@@ -27,7 +31,17 @@ export default function SalesPage({ session }) {
   const [dateFilter, setDateFilter] = useState(todayISO());
   const [shipFor, setShipFor] = useState(null);
   const [receiptPhone, setReceiptPhone] = useState("");
+  const [receiptEmail, setReceiptEmail] = useState("");
+  const [receiptTelegram, setReceiptTelegram] = useState("");
   const [bizName, setBizName] = useState("");
+  const [brand, setBrand] = useState({ name: "", color: "#166534", tagline: "" });
+  const [doneMethods, setDoneMethods] = useState([]);
+  const [doneCustomerId, setDoneCustomerId] = useState(null);
+  const [doneContactBlank, setDoneContactBlank] = useState({ phone: true, email: true, telegram: true });
+  const [sendNote, setSendNote] = useState("");
+  const [sending, setSending] = useState("");
+  const [telegramBot, setTelegramBot] = useState(null);
+  const [doneHasChatId, setDoneHasChatId] = useState(false);
   const salePanelRef = useRef(null);
 
   useEffect(() => {
@@ -40,8 +54,15 @@ export default function SalesPage({ session }) {
       if (modes.length) setPayments([{ mode: modes[0].name, amount: "" }]);
     }).catch(() => {});
     api.get("/api/business").then((d) => {
-      setBizName(d.business?.name || "");
-      setBrand({ name: d.business?.name || "", color: d.business?.brand_color || "#166534", tagline: d.business?.tagline || "" });
+      const b = d.business || {};
+      setBizName(b.name || "");
+      setBrand({
+        name: b.name || "",
+        color: b.brand_color || "#166534",
+        tagline: b.tagline || "",
+        contactLines: buildContactLines(b),
+        footer: b.receipt_footer || "",
+      });
     }).catch(() => {});
   }, []);
 
@@ -149,6 +170,18 @@ export default function SalesPage({ session }) {
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
   const paid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+  // WORLD-BEST (merge): change may only come from the cash portion of the
+  // tender (proposal 12.3). The server refuses the sale when cash is short;
+  // this warning shows it before the tap, and the button stays disabled
+  // until it is fixed. A mode is cash when its kind is 'cash', or (before
+  // migration 0061 runs) when its name is 'cash'.
+  const changeDue = Math.max(0, Math.round((paid - total) * 100) / 100);
+  const cashPaid = payModes.length === 0 ? changeDue : payments.reduce((s, p) => {
+    const mode = payModes.find((m) => m.name === p.mode);
+    const isCash = mode ? (mode.kind ? mode.kind === "cash" : mode.name.toLowerCase() === "cash") : p.mode.toLowerCase() === "cash";
+    return s + (isCash ? (Number(p.amount) || 0) : 0);
+  }, 0);
+  const cashShort = changeDue > 0 && cashPaid < changeDue;
 
   function setPay(i, k, v) {
     setPayments((ps) => ps.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
@@ -180,8 +213,34 @@ export default function SalesPage({ session }) {
           .map((p) => ({ mode: p.mode, amount: Number(p.amount) })),
       });
       setDone(d);
-      setDoneItems(cart.map((l) => ({ qty: l.qty, name: l.name, unitPrice: fmt(l.unitPrice), unit: l.unit || (l.serviceId ? "service" : "piece") })));
+      setDoneItems(cart.map((l) => ({
+        qty: l.qty, name: l.name,
+        unitPrice: fmt(l.unitPrice),
+        lineTotal: fmt(Math.round(l.unitPrice * l.qty * 100) / 100),
+        unit: l.unit || (l.serviceId ? "service" : "piece"),
+      })));
       setDoneCustomer(pickedCustomer ? pickedCustomer.name : newName);
+      setDoneMethods(payments.filter((pay) => Number(pay.amount) > 0).map((pay) => ({ mode: pay.mode, amount: fmt(Number(pay.amount)) })));
+      setDoneCustomerId(pickedCustomer ? pickedCustomer.id : null);
+      setDoneContactBlank({
+        phone: !pickedCustomer?.phone,
+        email: !pickedCustomer?.email,
+        telegram: !pickedCustomer?.telegram,
+      });
+      setReceiptPhone(pickedCustomer?.phone || "");
+      setReceiptEmail(pickedCustomer?.email || "");
+      setReceiptTelegram(pickedCustomer?.telegram || "");
+      setSendNote("");
+      setTelegramBot(null);
+      setDoneHasChatId(false);
+      if (pickedCustomer) {
+        api.get(`/api/receipts/sale?id=${d.saleId}`).then((r) => {
+          setDoneHasChatId(Boolean(r.customer?.hasTelegramChatId));
+          if (r.customer?.email && !receiptEmail) setReceiptEmail(r.customer.email);
+          if (r.customer?.telegram && !receiptTelegram) setReceiptTelegram(r.customer.telegram);
+        }).catch(() => {});
+      }
+      getTelegramBotStatus().then(setTelegramBot).catch(() => {});
       setCart([]); setCustomerPick(""); setCustomerName("");
       setPayments([{ mode: payModes[0]?.name || "Cash", amount: "" }]);
       const pd = await api.get("/api/products"); setProducts(pd.products);
@@ -189,50 +248,194 @@ export default function SalesPage({ session }) {
     setSaving(false);
   }
 
+  // ---- Sale recorded (done) view helpers ----
+  function doneReceiptText() {
+    return receiptText({
+      saleNumber: done.saleNumber,
+      total: fmt(done.total),
+      items: doneItems,
+      businessName: bizName,
+      balanceDue: done.balanceDue > 0 ? fmt(done.balanceDue) : null,
+      paid: fmt(done.paid),
+      change: done.change > 0 ? fmt(done.change) : null,
+      paidByMethod: doneMethods.length ? doneMethods : null,
+      contactLines: brand.contactLines || [],
+    });
+  }
+
+  function doneCardUrl() {
+    return receiptCardUrl({
+      saleNumber: done.saleNumber,
+      date: new Date().toLocaleDateString(),
+      items: doneItems,
+      total: fmt(done.total),
+      paid: fmt(done.paid),
+      paidByMethod: doneMethods.map((m) => ({ mode: m.mode, amount: m.amount })),
+      change: done.change > 0 ? fmt(done.change) : null,
+      balanceDue: done.balanceDue > 0 ? fmt(done.balanceDue) : null,
+      customerName: doneCustomer || null,
+      contactLines: brand.contactLines || [],
+      footer: brand.footer || "",
+    }, brand);
+  }
+
+  // Save a contact filled in here to the picked customer, but only when
+  // that field was blank before. Never overwrites. Walk-in: no customer,
+  // so nothing is saved and no customer is created.
+  async function saveDoneContacts() {
+    if (!doneCustomerId) return;
+    const patch = contactSavePatch(doneContactBlank, {
+      phone: receiptPhone, email: receiptEmail, telegram: receiptTelegram,
+    });
+    if (!Object.keys(patch).length) return;
+    try { await api.patch(`/api/customer-profile?id=${doneCustomerId}`, patch); } catch { /* never block the send */ }
+  }
+
+  function resetDone() {
+    setDone(null);
+    setDoneItems([]);
+    setDoneCustomer("");
+    setDoneMethods([]);
+    setDoneCustomerId(null);
+    setReceiptPhone("");
+    setReceiptEmail("");
+    setReceiptTelegram("");
+    setSendNote("");
+    setSending("");
+  }
+
+  async function sendByEmail() {
+    if (!receiptEmail.trim()) return;
+    setSending("email");
+    setSendNote("");
+    try {
+      await saveDoneContacts();
+      const r = await sendEmailReceipt({
+        saleId: done.saleId, email: receiptEmail.trim(),
+        saleNumber: done.saleNumber, businessName: bizName, text: doneReceiptText(),
+      });
+      setSendNote(r.via === "server" ? "Receipt email sent." : r.note || "Your mail app will open.");
+      if (r.via === "mailto" && r.url) window.open(r.url, "_blank", "noopener");
+    } catch (e) {
+      setSendNote(e.message || "Could not send the email.");
+    }
+    setSending("");
+  }
+
+  async function sendByTelegram() {
+    setSending("telegram");
+    setSendNote("");
+    try {
+      await saveDoneContacts();
+      let photoBlob = null;
+      try { photoBlob = dataUrlToBlob(doneCardUrl()); } catch { photoBlob = null; }
+      const r = await sendTelegramReceipt({
+        saleId: done.saleId, saleNumber: done.saleNumber, businessName: bizName,
+        text: doneReceiptText(), photoBlob,
+        customerTelegram: receiptTelegram.trim(), hasChatId: doneHasChatId,
+      });
+      if (r.via === "bot") {
+        setSendNote(r.photoError || "Receipt sent on Telegram.");
+      } else {
+        if (r.needsOnboarding && r.startUrl) {
+          setSendNote(`Start @${r.botUsername || "the bot"} on Telegram first, then tap send.`);
+        }
+        window.open(r.url, "_blank", "noopener");
+      }
+    } catch (e) {
+      setSendNote(e.message || "Could not send on Telegram.");
+    }
+    setSending("");
+  }
+
   if (done) {
+    const waUrl = waLink(receiptPhone, doneReceiptText());
+    const tgUrl = telegramClientUrl({ customerTelegram: receiptTelegram.trim(), text: doneReceiptText() });
+    const canEmail = receiptEmail.trim().length > 0;
+    const canTelegramBot = Boolean(telegramBot?.configured && doneHasChatId);
     return (
       <>
         <div className="page-head"><h1>Sale recorded</h1></div>
-        <div className="card narrow" style={{ margin: "0 auto", textAlign: "center" }}>
-          <div style={{ fontSize: 48 }}>✅</div>
-          <h2>{done.saleNumber}</h2>
-          <p className="money" style={{ fontSize: 28 }}>{fmt(done.total)}</p>
+        <div className="card narrow" style={{ margin: "0 auto", textAlign: "center", maxWidth: 480 }}>
+          <div
+            aria-hidden="true"
+            style={{
+              width: 72, height: 72, borderRadius: "50%", margin: "8px auto 12px",
+              background: brand.color || "#166534", display: "flex",
+              alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 12.5l5 5L20 6.5" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h2 style={{ margin: "0 0 4px" }}>{done.saleNumber}</h2>
+          <p className="money" style={{ fontSize: 28, margin: "0 0 4px" }}>{fmt(done.total)}</p>
           {done.balanceDue > 0
             ? <p className="debt-amt">Balance of {fmt(done.balanceDue)} recorded as debt.</p>
             : <p style={{ color: "var(--brand-dark)" }}>Fully paid. Stock updated.</p>}
           {done.change > 0 && (
             <p style={{ color: "var(--muted)", marginTop: 4 }}>Change to give: <strong>{fmt(done.change)}</strong></p>
           )}
+          {doneMethods.length > 0 && (
+            <p style={{ color: "var(--muted)", marginTop: 4 }}>
+              Paid by {doneMethods.map((m) => `${m.mode} ${m.amount}`).join(" + ")}
+            </p>
+          )}
+
+          <h3 style={{ textAlign: "left", margin: "20px 0 8px" }}>Send receipt</h3>
+          <a className="btn btn-secondary btn-block" style={{ marginTop: 8, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center" }}
+            target="_blank" rel="noreferrer" href={waUrl}
+            onClick={() => { saveDoneContacts(); }}>
+            WhatsApp{receiptPhone ? ` · ${receiptPhone}` : ""}
+          </a>
+          <button className="btn btn-secondary btn-block" style={{ marginTop: 8, minHeight: 44 }}
+            disabled={!canEmail || sending === "email"} onClick={sendByEmail}>
+            {sending === "email" ? "Sending..." : `Email${receiptEmail ? ` · ${receiptEmail}` : ""}`}
+          </button>
+          {!canEmail && <p className="hint" style={{ textAlign: "left", margin: "4px 0 0" }}>Add the customer's email to send by email.</p>}
+          <button className="btn btn-secondary btn-block" style={{ marginTop: 8, minHeight: 44 }}
+            disabled={sending === "telegram"} onClick={sendByTelegram}>
+            {sending === "telegram" ? "Sending..." : `Telegram${receiptTelegram ? ` · @${receiptTelegram.replace(/^@/, "")}` : ""}${canTelegramBot ? " · bot" : ""}`}
+          </button>
+          {telegramBot?.configured && !doneHasChatId && receiptTelegram && (
+            <p className="hint" style={{ textAlign: "left", margin: "4px 0 0" }}>
+              Start @{telegramBot.username} on Telegram, then tap send.
+            </p>
+          )}
+          {sendNote && <p className="hint" style={{ textAlign: "left", margin: "8px 0 0" }}>{sendNote}</p>}
+
           <div className="field" style={{ marginTop: 12, textAlign: "left" }}>
             <label htmlFor="sale-receipt-phone">Customer WhatsApp number (optional)</label>
-            <input id="sale-receipt-phone" value={receiptPhone} onChange={(e) => setReceiptPhone(e.target.value)} placeholder="080..." />
+            <input id="sale-receipt-phone" value={receiptPhone} onChange={(e) => setReceiptPhone(e.target.value)} placeholder="080..." inputMode="tel" />
           </div>
-          <a className="btn btn-secondary btn-block" style={{ marginTop: 8 }}
-            target="_blank" rel="noreferrer"
-            href={waLink(receiptPhone, receiptText({
-              saleNumber: done.saleNumber,
-              total: fmt(done.total),
-              items: doneItems,
-              businessName: bizName,
-              balanceDue: done.balanceDue > 0 ? fmt(done.balanceDue) : null,
-            }))}>
-            Send receipt on WhatsApp
-          </a>
-          <button className="btn btn-secondary btn-block" style={{ marginTop: 8 }} onClick={() => {
-            const url = receiptCardUrl({
-              saleNumber: done.saleNumber,
-              date: new Date().toLocaleDateString(),
-              items: doneItems,
-              total: fmt(done.total),
-              paid: fmt(done.paid),
-              balanceDue: done.balanceDue > 0 ? fmt(done.balanceDue) : null,
-              customerName: doneCustomer || null,
-            }, brand);
+          <div className="field" style={{ textAlign: "left" }}>
+            <label htmlFor="sale-receipt-email">Customer email (optional)</label>
+            <input id="sale-receipt-email" type="email" value={receiptEmail} onChange={(e) => setReceiptEmail(e.target.value)} placeholder="customer@example.com" inputMode="email" />
+          </div>
+          <div className="field" style={{ textAlign: "left" }}>
+            <label htmlFor="sale-receipt-telegram">Customer Telegram handle (optional)</label>
+            <input id="sale-receipt-telegram" value={receiptTelegram} onChange={(e) => setReceiptTelegram(e.target.value)} placeholder="@username" />
+          </div>
+
+          <h3 style={{ textAlign: "left", margin: "20px 0 8px" }}>Share</h3>
+          <button className="btn btn-secondary btn-block" style={{ marginTop: 8, minHeight: 44 }} onClick={() => {
+            const url = doneCardUrl();
             shareCard(url, { title: "Receipt " + done.saleNumber, filename: `receipt-${done.saleNumber}.png` });
           }}>
             Share receipt card (image)
           </button>
-          <button className="btn btn-primary btn-block" style={{ marginTop: 8 }} onClick={() => setDone(null)}>New sale</button>
+          <button className="btn btn-secondary btn-block" style={{ marginTop: 8, minHeight: 44 }} onClick={() => {
+            downloadCard(doneCardUrl(), `receipt-${done.saleNumber}.png`);
+          }}>
+            Download receipt image
+          </button>
+          <button className="btn btn-primary btn-block" style={{ marginTop: 12, minHeight: 44 }} onClick={resetDone}>New sale</button>
+          <p className="hint" style={{ marginTop: 8 }}>
+            <a href={`/app/receipt/sale/${done.saleId}`} target="_blank" rel="noreferrer">Open printable receipt</a>
+            {" · "}
+            <a href={tgUrl} target="_blank" rel="noreferrer">Open Telegram chat</a>
+          </p>
         </div>
       </>
     );
@@ -254,7 +457,8 @@ export default function SalesPage({ session }) {
       {view === "history" ? (
         <>
           <div className="toolbar">
-            <input type="date" className="search" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+            <input type="date" className="search" value={dateFilter} aria-label="Sales date" onChange={(e) => setDateFilter(e.target.value)} />
+            <button className="btn btn-secondary btn-sm" onClick={requestStatementPrint} disabled={history.length === 0}>Print statement</button>
           </div>          <div className="table-wrap">
             <table className="data">
               <thead><tr><th>Sale</th><th>Customer</th><th>Total</th><th>Paid</th><th>Change</th><th>Balance</th><th>Time</th><th></th></tr></thead>
@@ -297,6 +501,23 @@ export default function SalesPage({ session }) {
             </table>
             {history.length === 0 && <p className="empty">No sales on this date.</p>}
           </div>
+            <div className="print-only">
+              <StatementPrint
+                business={{ name: bizName }}
+                title="Sales statement"
+                period={dateFilter}
+                lines={[...history].reverse().map((s) => ({
+                  date: String(s.created_at || "").slice(0, 10),
+                  description: `Sale ${s.sale_number} — ${s.customer_name || "Walk-in"}`,
+                  amount: Number(s.total_amount || 0),
+                }))}
+                totals={[
+                  { label: "Total sales", amount: history.reduce((sum, s) => sum + Number(s.total_amount || 0), 0) },
+                  { label: "Total paid", amount: history.reduce((sum, s) => sum + Number(s.amount_paid || 0), 0) },
+                  { label: "Total balance owed", amount: history.reduce((sum, s) => sum + Number(s.balance_due || 0), 0) },
+                ]}
+              />
+            </div>
         </>
       ) : view === "shipments" ? (
         <ShipmentsTab />
@@ -311,7 +532,7 @@ export default function SalesPage({ session }) {
           <div>
             {catalog === "products" ? (
               <>
-                <input className="search" style={{ width: "100%", marginBottom: 12 }} placeholder="Search products to add..."
+                <input className="search" style={{ width: "100%", marginBottom: 12 }} placeholder="Search products to add..." aria-label="Search products to add"
                   value={search} onChange={(e) => setSearch(e.target.value)} />
                 <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
                   {filtered.map((p) => (
@@ -329,7 +550,7 @@ export default function SalesPage({ session }) {
               </>
             ) : (
               <>
-                <input className="search" style={{ width: "100%", marginBottom: 12 }} placeholder="Search services to add..."
+                <input className="search" style={{ width: "100%", marginBottom: 12 }} placeholder="Search services to add..." aria-label="Search services to add"
                   value={search} onChange={(e) => setSearch(e.target.value)} />
                 <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
                   {serviceFiltered.map((s) => (
@@ -397,7 +618,7 @@ export default function SalesPage({ session }) {
                         </select>
                       </div>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <input type="number" min="0" step="0.01" value={p.amount} onChange={(e) => setPay(i, "amount", e.target.value)}
+                        <input type="number" min="0" step="0.01" value={p.amount} aria-label="Payment amount" onChange={(e) => setPay(i, "amount", e.target.value)}
                           placeholder="Amount paid" aria-label="Payment amount" />
                         {payments.length > 1 && (
                           <button className="btn btn-secondary btn-sm" onClick={() => removePay(i)} aria-label="Remove payment">✕</button>
@@ -407,9 +628,10 @@ export default function SalesPage({ session }) {
                   ))}
                   <button className="btn btn-secondary btn-sm" onClick={addPay}>+ Split payment</button>
                   {paid > 0 && <p className="hint" style={{ margin: "6px 0 0" }}>Paid so far: <strong>{fmt(paid)}</strong></p>}
+                  {cashShort && <div className="alert alert-error" style={{ marginTop: 8 }}>Change of {fmt(changeDue)} is more than the cash received ({fmt(cashPaid)}). Take more cash or reduce the tender.</div>}
                 </div>
                 {balance > 0 && <div className="alert alert-error" style={{ marginBottom: 12 }}>Balance of {fmt(balance)} will be recorded as debt for {customerPick === "new" ? (customerName.trim() || "the new buyer") : (customers.find((c) => String(c.id) === String(customerPick))?.name || "the customer")}.</div>}
-                <button className="btn btn-primary btn-block" disabled={saving} onClick={complete}>
+                <button className="btn btn-primary btn-block" disabled={saving || cashShort} onClick={complete}>
                   {saving ? "Saving..." : `Complete sale · ${fmt(total)}`}
                 </button>
               </>

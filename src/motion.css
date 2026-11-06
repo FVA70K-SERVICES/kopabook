@@ -1,0 +1,56 @@
+/* WORLD-BEST (Dashboard stream) — motion.css.
+   Fortune's explicit override: professional motion only, for the Dashboard
+   and the sale screens listed in the proposal (section 11). Nothing else
+   in this file moves. The receipt card and the printed receipt have no
+   motion at all. Button press feedback stays as it is in styles.css.
+   Card entrance: fade in + rise 8px over 200ms, staggered 40ms, first
+   load only (the animation runs once when the card mounts, never on
+   every render). Number count-up is driven by the useCountUp hook in
+   Dashboard.jsx and always ends on the full figure. Screen transitions:
+   150ms fade between Dashboard views via .page-fade. Pull-to-refresh:
+   a small spinner plus a short "Updated" note.
+   prefers-reduced-motion turns ALL of the above off instantly. */
+
+@keyframes kb-card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dash-card-enter {
+  animation: kb-card-in 200ms ease both;
+}
+
+@keyframes kb-page-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.page-fade {
+  animation: kb-page-fade 150ms ease;
+}
+
+@keyframes kb-ptr-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ptr-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid var(--line);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: kb-ptr-spin 0.8s linear infinite;
+}
+
+.ptr-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-card-enter,
+  .page-fade,
+  .ptr-spinner {
+    animation: none;
+  }
+}

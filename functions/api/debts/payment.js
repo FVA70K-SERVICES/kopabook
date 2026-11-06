@@ -1,5 +1,6 @@
 // POST /api/debts/payment — record a debt repayment
 import { json, getAuthContext, requireAuth, audit } from "../_utils";
+import { recordHistory } from "../_history.js";
 
 export async function onRequestPost(context) {
   try {
@@ -50,6 +51,19 @@ export async function onRequestPost(context) {
       .run();
 
     await audit(context, auth, "debt.payment", "customer", Number(customerId), { amount: applied, change });
+    // WORLD-BEST (merge, History stream §6c).
+    const custRow = await context.env.KOPABOOK_DB.prepare(`SELECT name FROM customers WHERE id = ? AND business_id = ? LIMIT 1`).bind(Number(customerId), auth.business.id).first();
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "payment",
+      entityType: "customer",
+      entityId: Number(customerId),
+      summary: `Recorded payment of ${auth.business.currency} ${Number(applied).toLocaleString("en-US")} from ${custRow?.name || "customer"}${newBalance > 0 ? ` — ${auth.business.currency} ${Number(newBalance).toLocaleString("en-US")} still owed` : " — debt fully cleared"}`,
+      amount: Number(applied),
+    });
     return json({ ok: true, newBalance, applied, change }, 201);
   } catch (error) {
     return json({ ok: false, message: "Could not record payment.", error: String(error) }, 500);

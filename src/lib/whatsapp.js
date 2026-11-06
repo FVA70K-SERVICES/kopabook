@@ -20,17 +20,33 @@ export function waLink(phone, text) {
 }
 
 // Plain-text sale receipt. Pass amounts pre-formatted with fmt() from api.js.
-// items is optional: [{ qty, name, unitPrice }] (unitPrice pre-formatted too).
-export function receiptText({ saleNumber, total, items, businessName, balanceDue }) {
+// items is optional: [{ qty, name, unitPrice, unit, lineTotal }] (amounts
+// pre-formatted too; lineTotal is the qty x unit price line total).
+// Optional extras (all backward compatible): paidByMethod [{mode, amount}]
+// or paid (formatted total paid), change (formatted), contactLines (array
+// of business contact strings, owner-chosen channels only).
+export function receiptText({ saleNumber, total, items, businessName, balanceDue, paid, change, paidByMethod, contactLines }) {
   const lines = [];
   if (businessName) lines.push(businessName);
+  if (Array.isArray(contactLines)) {
+    for (const ln of contactLines.filter(Boolean)) lines.push(String(ln));
+  }
   lines.push(saleNumber ? `Receipt ${saleNumber}` : "Receipt");
   if (Array.isArray(items) && items.length) {
     lines.push("");
-    for (const it of items) lines.push(`${it.qty}${it.unit ? " " + it.unit : ""} x ${it.name} - ${it.unitPrice}`);
+    for (const it of items) {
+      const label = `${it.qty}${it.unit ? " " + it.unit : ""} x ${it.name} - ${it.unitPrice}${it.unit ? " / " + it.unit : ""}`;
+      lines.push(it.lineTotal && it.lineTotal !== it.unitPrice ? `${label} = ${it.lineTotal}` : label);
+    }
   }
   lines.push("");
   lines.push(`Total: ${total}`);
+  if (Array.isArray(paidByMethod) && paidByMethod.length) {
+    for (const p of paidByMethod) lines.push(`Paid (${p.mode || "Cash"}): ${p.amount}`);
+  } else if (paid) {
+    lines.push(`Paid: ${paid}`);
+  }
+  if (change) lines.push(`Change given: ${change}`);
   if (balanceDue) {
     lines.push(`Balance due: ${balanceDue}`);
     lines.push("Please pay the balance soon. Thank you.");

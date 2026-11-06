@@ -1,0 +1,73 @@
+/* KopaBook accessibility baseline (world-best upgrade, gaps stream).
+   Loaded from main.jsx, after styles.css, so these rules add to the
+   design system without touching it.
+   - Large-text mode: html[data-text="large"], set from Settings and saved
+     in localStorage. It lifts the base size and the text that carries
+     meaning, and lets the wrapping grids do their work, so the layout
+     stays intact at 375px: cards stack, buttons wrap, nothing is cut off.
+   - Focus: a strong outline on EVERY interactive element, not just links
+     and buttons. The base stylesheet already outlines links and buttons;
+     this extends the same 3px brand outline to inputs, selects, text
+     areas, summaries, and anything tabbable.
+   - Colour alone: no status relies on colour alone. Status text always
+     carries its word ("Low stock", "Paid", "Overdue"), and status pills
+     also carry a visible border, so the meaning survives without colour.
+   - Print: a statement prints clean, with a plain border and no shadow. */
+
+html[data-text="large"] {
+  font-size: 112.5%;
+}
+
+html[data-text="large"] body {
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+html[data-text="large"] .btn {
+  font-size: 16px;
+}
+
+html[data-text="large"] input,
+html[data-text="large"] select,
+html[data-text="large"] textarea {
+  font-size: 18px;
+}
+
+html[data-text="large"] .metric-card strong {
+  font-size: 30px;
+}
+
+html[data-text="large"] table.data {
+  font-size: 15px;
+}
+
+html[data-text="large"] .hint,
+html[data-text="large"] .empty {
+  font-size: 16px;
+}
+
+/* Strong keyboard focus on every interactive element. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Status is never colour alone: the word carries the meaning, and the
+   pill also carries a visible border so it reads without colour. */
+.pill {
+  border: 1px solid currentColor;
+}
+
+/* A statement prints clean. */
+@media print {
+  .statement-card {
+    box-shadow: none;
+    border: 1px solid #999;
+  }
+}

@@ -1,4 +1,9 @@
 // GET /api/reports — date-range summaries (Starter feature)
+// WORLD-BEST (merge, soft void): every sales query excludes voided sales —
+// voiding now keeps the row (status 'voided') instead of deleting it, so the
+// totals, best sellers, profit trend, slow movers and payment breakdown must
+// not count voided sales. Additive filter only; no query shape, tier gate or
+// response field changes.
 import { json, getAuthContext, requireAuth } from "./_utils";
 import { getBusinessOwnerTier } from "./billing";
 
@@ -30,7 +35,7 @@ export async function onRequestGet(context) {
 
     const daily = await db.prepare(
       `SELECT date(created_at) AS day, COUNT(*) AS sales_count, COALESCE(SUM(total_amount), 0) AS sales_total
-       FROM sales WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?
+       FROM sales WHERE business_id = ? AND (status IS NULL OR status != 'voided') AND date(created_at) BETWEEN ? AND ?
        GROUP BY day ORDER BY day ASC`
     ).bind(bid, from, to).all();
 
@@ -39,7 +44,7 @@ export async function onRequestGet(context) {
        FROM sale_items si
        INNER JOIN sales s ON s.id = si.sale_id
        INNER JOIN products p ON p.id = si.product_id
-       WHERE s.business_id = ? AND date(s.created_at) BETWEEN ? AND ?
+       WHERE s.business_id = ? AND (s.status IS NULL OR s.status != 'voided') AND date(s.created_at) BETWEEN ? AND ?
        GROUP BY p.id ORDER BY revenue DESC LIMIT 10`
     ).bind(bid, from, to).all();
 
@@ -53,8 +58,8 @@ export async function onRequestGet(context) {
 
     const totals = await db.prepare(
       `SELECT
-         (SELECT COALESCE(SUM(total_amount), 0) FROM sales WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?) AS sales_total,
-         (SELECT COUNT(*) FROM sales WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?) AS sales_count,
+         (SELECT COALESCE(SUM(total_amount), 0) FROM sales WHERE business_id = ? AND (status IS NULL OR status != 'voided') AND date(created_at) BETWEEN ? AND ?) AS sales_total,
+         (SELECT COUNT(*) FROM sales WHERE business_id = ? AND (status IS NULL OR status != 'voided') AND date(created_at) BETWEEN ? AND ?) AS sales_count,
          (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE business_id = ? AND incurred_on BETWEEN ? AND ?) AS expense_total`
     ).bind(bid, from, to, bid, from, to, bid, from, to).first();
 
@@ -69,7 +74,7 @@ export async function onRequestGet(context) {
          COALESCE(SUM(si.quantity * si.cost_snapshot), 0) AS cost
        FROM sale_items si
        INNER JOIN sales s ON s.id = si.sale_id
-       WHERE s.business_id = ? AND date(s.created_at) BETWEEN ? AND ?
+       WHERE s.business_id = ? AND (s.status IS NULL OR s.status != 'voided') AND date(s.created_at) BETWEEN ? AND ?
        GROUP BY period ORDER BY period ASC`
     ).bind(bid, from, to).all();
 
@@ -79,7 +84,7 @@ export async function onRequestGet(context) {
        FROM sale_items si
        INNER JOIN sales s ON s.id = si.sale_id
        INNER JOIN products p ON p.id = si.product_id
-       WHERE s.business_id = ? AND date(s.created_at) BETWEEN ? AND ?
+       WHERE s.business_id = ? AND (s.status IS NULL OR s.status != 'voided') AND date(s.created_at) BETWEEN ? AND ?
        GROUP BY p.id ORDER BY revenue DESC LIMIT 10`
     ).bind(bid, from, to).all();
     const bestSellersByQty = await db.prepare(
@@ -87,7 +92,7 @@ export async function onRequestGet(context) {
        FROM sale_items si
        INNER JOIN sales s ON s.id = si.sale_id
        INNER JOIN products p ON p.id = si.product_id
-       WHERE s.business_id = ? AND date(s.created_at) BETWEEN ? AND ?
+       WHERE s.business_id = ? AND (s.status IS NULL OR s.status != 'voided') AND date(s.created_at) BETWEEN ? AND ?
        GROUP BY p.id ORDER BY qty DESC LIMIT 10`
     ).bind(bid, from, to).all();
 
@@ -100,7 +105,7 @@ export async function onRequestGet(context) {
          AND NOT EXISTS (
            SELECT 1 FROM sale_items si
            INNER JOIN sales s ON s.id = si.sale_id
-           WHERE si.product_id = p.id AND s.business_id = ? AND date(s.created_at) BETWEEN ? AND ?
+           WHERE si.product_id = p.id AND s.business_id = ? AND (s.status IS NULL OR s.status != 'voided') AND date(s.created_at) BETWEEN ? AND ?
          )
        ORDER BY stock DESC LIMIT 20`
     ).bind(bid, bid, from, to).all();
@@ -110,7 +115,7 @@ export async function onRequestGet(context) {
       `SELECT COALESCE(payment_method, 'cash') AS method, COUNT(*) AS count,
          COALESCE(SUM(total_amount), 0) AS total
        FROM sales
-       WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?
+       WHERE business_id = ? AND (status IS NULL OR status != 'voided') AND date(created_at) BETWEEN ? AND ?
        GROUP BY payment_method ORDER BY total DESC`
     ).bind(bid, from, to).all();
 

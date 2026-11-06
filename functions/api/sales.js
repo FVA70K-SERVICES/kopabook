@@ -4,6 +4,14 @@
 // All writes for one sale run in a single D1 batch so a sale is atomic:
 // it either records completely or not at all.
 import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate } from "./_utils";
+// WORLD-BEST (Dashboard stream): credit, debt and change guards. The
+// discount gate below is unchanged; the client-side cash-change warning
+// lives in the Current-sale screen (round-3 region) and is NOT edited here.
+import {
+  loadModeRows, splitTender, checkCashChange,
+  checkCreditPermission, checkCreditLimit, loadCustomerCredit,
+} from "./_creditRules.js";
+import { recordHistory } from "./_history.js";
 
 export async function onRequestGet(context) {
   try {
@@ -15,12 +23,18 @@ export async function onRequestGet(context) {
     const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200);
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
+    // WORLD-BEST (merge, soft void): voided sales are corrections, not
+    // sales, so the list excludes them by default — the same rows the old
+    // hard-delete void removed from view. Pass ?includeVoided=1 to see
+    // them (the voided row still carries its receipt and history).
+    const includeVoided = url.searchParams.get("includeVoided") === "1";
 
     let sql = `SELECT s.*, c.name AS customer_name
                FROM sales s
                LEFT JOIN customers c ON c.id = s.customer_id
                WHERE s.business_id = ?`;
     const params = [auth.business.id];
+    if (!includeVoided) sql += ` AND (s.status IS NULL OR s.status != 'voided')`;
     if (from) { sql += ` AND date(s.created_at) >= ?`; params.push(from); }
     if (to) { sql += ` AND date(s.created_at) <= ?`; params.push(to); }
     sql += ` ORDER BY s.id DESC LIMIT ?`;
@@ -135,10 +149,22 @@ export async function onRequestPost(context) {
 
     // Overpayment guard: amount paid is capped at the subtotal so balance_due
     // can never go negative. Any excess comes back as change.
+    // WORLD-BEST: credit-kind tender (kind 'credit', or a mode named
+    // 'credit' before migration 0061) is a promise, not money in: it does
+    // NOT count as paid, so that portion becomes balance due. Change is
+    // computed from the non-credit tender only, and may only come from the
+    // cash portion of it (checked below).
+    const modeRows = await loadModeRows(db, auth.business.id);
+    const tender = splitTender(payments, modeRows);
     const tendered = Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100;
-    const paid = Math.min(tendered, subtotal);
-    const change = Math.round((tendered - paid) * 100) / 100;
+    const paid = Math.min(tender.nonCreditTender, subtotal);
+    const change = Math.round((tender.nonCreditTender - paid) * 100) / 100;
     const balanceDue = Math.round((subtotal - paid) * 100) / 100;
+    // Change may only come from cash received.
+    const changeError = checkCashChange(change, tender.cashTendered, auth.business.currency);
+    if (changeError) {
+      return json({ ok: false, message: changeError }, 400);
+    }
     if (balanceDue > 0 && !customerId && !customerName) {
       return json({ ok: false, message: "Unpaid balance needs a customer. Add or select one." }, 400);
     }
@@ -178,6 +204,25 @@ export async function onRequestPost(context) {
         .bind(custId)
         .first();
       prevLedgerBalance = lastLedger ? Number(lastLedger.balance_after) : 0;
+    }
+
+    // WORLD-BEST: credit guards (server-side; the sale form may warn
+    // earlier, but the server decides). A balance due needs a caller who
+    // may sell on credit, and must fit the customer's credit limit:
+    // NULL = no limit set (allowed, as today), 0 = no credit at all,
+    // above 0 = cap on existing outstanding + this balance.
+    if (balanceDue > 0) {
+      const perm = await checkCreditPermission(db, auth.business.id, auth.user.id, auth.business.role);
+      if (!perm.allowed) {
+        return json({ ok: false, message: perm.message }, 403);
+      }
+      if (custId) {
+        const cust = await loadCustomerCredit(db, custId);
+        const limitError = checkCreditLimit(cust, prevLedgerBalance, balanceDue, auth.business.currency);
+        if (limitError) {
+          return json({ ok: false, message: limitError }, 400);
+        }
+      }
     }
 
     // Every write for this sale goes in ONE batch: all or nothing. The sale
@@ -274,6 +319,52 @@ export async function onRequestPost(context) {
     const saleId = batchResults[headerIdx].meta.last_row_id;
 
     await audit(context, auth, "sale.create", "sale", saleId, { saleNumber, total: subtotal });
+    // WORLD-BEST (merge, History stream §6a): one plain line per sale.
+    // Amount is the sale total (never cost). A partly-paid sale writes
+    // three rows (sale + payment + debt), which is what the History page
+    // and the running balance need. recordHistory never throws.
+    const custRow = custId
+      ? await db.prepare(`SELECT name FROM customers WHERE id = ? AND business_id = ? LIMIT 1`).bind(custId, auth.business.id).first()
+      : null;
+    const buyer = custRow?.name || trimmedName || "Walk-in";
+    const itemBits = lines.map((l) => `${l.qty} ${(l.product || l.service)?.name || "item"}`).join(", ");
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "sale",
+      entityType: "sale",
+      entityId: saleId,
+      summary: `Sold ${itemBits} to ${buyer} — ${auth.business.currency} ${subtotal.toLocaleString("en-US")}${balanceDue > 0 ? ` (${auth.business.currency} ${balanceDue.toLocaleString("en-US")} unpaid)` : ""}`,
+      amount: subtotal,
+    });
+    if (paid > 0) {
+      await recordHistory(context.env, {
+        businessId: auth.business.id,
+        actorId: auth.user.id,
+        actorName: auth.user.fullName,
+        actorRole: auth.business.role,
+        type: "payment",
+        entityType: "sale",
+        entityId: saleId,
+        summary: `Recorded payment of ${auth.business.currency} ${paid.toLocaleString("en-US")} from ${buyer} (sale ${saleNumber})`,
+        amount: paid,
+      });
+    }
+    if (balanceDue > 0) {
+      await recordHistory(context.env, {
+        businessId: auth.business.id,
+        actorId: auth.user.id,
+        actorName: auth.user.fullName,
+        actorRole: auth.business.role,
+        type: "debt",
+        entityType: "sale",
+        entityId: saleId,
+        summary: `Recorded debt of ${auth.business.currency} ${balanceDue.toLocaleString("en-US")} for ${buyer} (sale ${saleNumber})`,
+        amount: balanceDue,
+      });
+    }
     return json({ ok: true, saleId, saleNumber, total: subtotal, paid, change, balanceDue }, 201);
   } catch (error) {
     return json({ ok: false, message: "Could not record sale: " + String(error && error.message || error), error: String(error) }, 500);

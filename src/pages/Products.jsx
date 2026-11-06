@@ -16,12 +16,15 @@ export default function ProductsPage({ session }) {
   const [saving, setSaving] = useState(false);
   const [adjusting, setAdjusting] = useState(null);
   const [adjustQty, setAdjustQty] = useState("");
-  const [adjustNote, setAdjustNote] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [historyFor, setHistoryFor] = useState(null);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // WORLD-BEST: Stock adjustment history — start
+  const [adjustRows, setAdjustRows] = useState([]);
+  // WORLD-BEST: Stock adjustment history — end
 
   async function openHistory(p) {
     setHistoryFor(p); setHistoryRows([]); setHistoryLoading(true);
@@ -29,6 +32,12 @@ export default function ProductsPage({ session }) {
       const d = await api.get(`/api/products/${p.id}/movements`);
       setHistoryRows(d.movements || []);
     } catch (e) { setError(e.message); }
+    // WORLD-BEST: Stock adjustment history — start
+    try {
+      const a = await api.get(`/api/products/${p.id}/adjust`);
+      setAdjustRows(a.adjustments || []);
+    } catch (e) { setAdjustRows([]); }
+    // WORLD-BEST: Stock adjustment history — end
     setHistoryLoading(false);
   }
 
@@ -122,15 +131,19 @@ export default function ProductsPage({ session }) {
     catch (e) { setError(e.message); }
   }
 
+  // WORLD-BEST: Stock adjustment with a reason — start
   async function adjust(p) {
     const delta = Number(adjustQty);
-    if (!delta) return;
+    if (!delta) { setError("Enter a quantity change, for example 10 or -3."); return; }
+    if (!adjustReason.trim()) { setError("A reason is required for every stock adjustment. Say what changed and why."); return; }
     try {
-      await api.post("/api/stock/adjust", { productId: p.id, quantityDelta: delta, note: adjustNote || "Manual adjustment" });
-      setAdjusting(null); setAdjustQty(""); setAdjustNote("");
+      await api.post(`/api/products/${p.id}/adjust`, { delta, reason: adjustReason.trim() });
+      setAdjusting(null); setAdjustQty(""); setAdjustReason("");
+      setError("");
       load(q);
     } catch (e) { setError(e.message); }
   }
+  // WORLD-BEST: Stock adjustment with a reason — end
 
   return (
     <>
@@ -140,7 +153,7 @@ export default function ProductsPage({ session }) {
       </div>
 
       <div className="toolbar">
-        <input className="search" placeholder="Search products..." value={q}
+        <input className="search" placeholder="Search products..." aria-label="Search products" value={q}
           onChange={(e) => { setQ(e.target.value); load(e.target.value); }} />
       </div>
 
@@ -168,7 +181,7 @@ export default function ProductsPage({ session }) {
                     <td>{low ? <span className="pill pill-gold">Low stock</span> : <span className="pill pill-green">OK</span>}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       {canManage && <>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setAdjusting(p.id)}>Stock</button>{" "}
+                        <button className="btn btn-secondary btn-sm" onClick={() => setAdjusting(p.id)}>Adjust stock</button>{" "}
                         <button className="btn btn-secondary btn-sm" onClick={() => openHistory(p)}>History</button>{" "}
                         <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Edit</button>{" "}
                         {["owner", "partner"].includes(session.business?.role) && (
@@ -235,18 +248,20 @@ export default function ProductsPage({ session }) {
         </div>
       )}
 
+      {/* WORLD-BEST: Stock adjustment with a reason — start */}
       {adjusting && (
         <div className="modal-back" onClick={() => setAdjusting(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={() => setAdjusting(null)}>✕</button>
             <h2>Adjust stock</h2>
-            <p style={{ color: "var(--muted)" }}>Use a positive number to add stock, negative to remove.</p>
+            <p style={{ color: "var(--muted)" }}>Use a positive number to add stock, negative to remove. The old count stays in history; this adds a new row.</p>
             <div className="field"><label htmlFor="adjust-qty">Quantity change (in {(products.find((p) => p.id === adjusting) || {}).unit || "piece"})</label><input id="adjust-qty" type="number" step="0.01" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder="e.g. 10 or -3" /></div>
-            <div className="field"><label htmlFor="adjust-note">Note</label><input id="adjust-note" value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="Reason for adjustment" /></div>
+            <div className="field"><label htmlFor="adjust-reason">Reason *</label><input id="adjust-reason" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} placeholder="e.g. Counted shelf, 3 damaged" /></div>
             <button className="btn btn-primary btn-block" onClick={() => adjust(products.find((p) => p.id === adjusting))}>Apply adjustment</button>
           </div>
         </div>
       )}
+      {/* WORLD-BEST: Stock adjustment with a reason — end */}
 
       {historyFor && (
         <div className="modal-back" onClick={() => setHistoryFor(null)}>
@@ -281,6 +296,28 @@ export default function ProductsPage({ session }) {
                 </tbody>
               </table>
             )}
+            {/* WORLD-BEST: Stock adjustment history — start */}
+            <h3 style={{ marginTop: 16 }}>Adjustments with a reason</h3>
+            {adjustRows.length === 0 ? (
+              <p className="empty">No adjustments with a reason yet.</p>
+            ) : (
+              <table className="data" style={{ margin: 0 }}>
+                <thead><tr><th>Date</th><th>Change</th><th>Reason</th><th>By</th></tr></thead>
+                <tbody>
+                  {adjustRows.map((a) => (
+                    <tr key={a.id}>
+                      <td><small>{a.created_at?.slice(0, 16).replace("T", " ")}</small></td>
+                      <td className="money" style={{ color: Number(a.delta) < 0 ? "var(--danger)" : "var(--brand-dark)" }}>
+                        {Number(a.delta) > 0 ? "+" : ""}{a.delta}
+                      </td>
+                      <td><small>{a.reason}</small></td>
+                      <td><small>{a.created_by_name || "—"}</small></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {/* WORLD-BEST: Stock adjustment history — end */}
             <button className="btn btn-secondary btn-block" style={{ marginTop: 12 }} onClick={() => setHistoryFor(null)}>Close</button>
           </div>
         </div>

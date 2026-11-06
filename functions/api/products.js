@@ -1,6 +1,10 @@
 // /api/products — GET list, POST create
+// History (world-best upgrade): creating a product writes a history
+// event (type "stock"). Best-effort only: it never throws and never
+// blocks the product create.
 import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate, normalizeUnit } from "./_utils";
 import { LIMITS, TIER_NAMES, getBusinessOwnerTier } from "./billing";
+import { recordHistory } from "./_history";
 
 export async function onRequestGet(context) {
   try {
@@ -145,6 +149,20 @@ export async function onRequestPost(context) {
     }
 
     await audit(context, auth, "product.create", "product", productId, { name });
+
+    // History: a new product entering the business is a stock event.
+    // Amount is null: the price is not money moved.
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "stock",
+      entityType: "product",
+      entityId: productId,
+      summary: `Added product ${String(name).trim()} — ${auth.business.currency} ${price.toLocaleString("en-US")}${opening > 0 ? `, opening stock ${opening}` : ""}`,
+      amount: null,
+    });
 
     return json({ ok: true, productId }, 201);
   } catch (error) {

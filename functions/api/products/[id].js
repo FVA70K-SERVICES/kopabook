@@ -1,5 +1,6 @@
 // /api/products/[id] — PATCH update, DELETE archive
 import { json, getAuthContext, requireAuth, requirePerm, audit, normalizeUnit } from "../_utils";
+import { recordHistory } from "../_history.js";
 
 async function getProduct(context, auth, id) {
   return context.env.KOPABOOK_DB.prepare(
@@ -80,6 +81,20 @@ export async function onRequestPatch(context) {
     }
 
     await audit(context, auth, "product.update", "product", id, body);
+    // WORLD-BEST (merge, History stream §6h, adapted: the price comes
+    // from the request body when it is set, else the stored row).
+    const newPrice = body.unitPrice !== undefined ? Number(body.unitPrice) : Number(product.unit_price);
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "stock",
+      entityType: "product",
+      entityId: id,
+      summary: `Updated product ${product.name}${Number.isFinite(newPrice) ? ` — ${auth.business.currency} ${newPrice.toLocaleString("en-US")}` : ""}`,
+      amount: null,
+    });
     return json({ ok: true });
   } catch (error) {
     return json({ ok: false, message: "Could not update product.", error: String(error) }, 500);
@@ -106,6 +121,18 @@ export async function onRequestDelete(context) {
       .run();
 
     await audit(context, auth, "product.archive", "product", id, { name: product.name });
+    // WORLD-BEST (merge): an archive leaves a trace like any other change.
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "stock",
+      entityType: "product",
+      entityId: id,
+      summary: `Archived product ${product.name}`,
+      amount: null,
+    });
     return json({ ok: true });
   } catch (error) {
     return json({ ok: false, message: "Could not archive product.", error: String(error) }, 500);

@@ -2,6 +2,7 @@
 // Flat route (query param) instead of /api/customers/[id] for reliable
 // Cloudflare Pages Functions routing.
 import { json, getAuthContext, requireAuth, audit } from "./_utils";
+import { recordHistory } from "./_history.js";
 
 async function getCustomer(context, id, businessId) {
   return context.env.KOPABOOK_DB.prepare(
@@ -88,6 +89,29 @@ export async function onRequestPatch(context) {
     const body = await context.request.json().catch(() => ({}));
     const fields = [];
     const params = [];
+    // Email is optional; a grossly invalid value is refused, never stored.
+    if (body.email !== undefined) {
+      const v = String(body.email).trim();
+      if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+        return json({ ok: false, message: "Enter a valid email address, or leave it blank." }, 400);
+      }
+      fields.push(`email = ?`);
+      params.push(v || null);
+    }
+    // Credit limit: blank = no limit set, 0 = no credit. Owner/partner
+    // only (the CustomerDetail page hides the field for other roles; the
+    // server enforces it here too).
+    if (body.credit_limit !== undefined) {
+      if (auth.business.role !== "owner" && auth.business.role !== "partner") {
+        return json({ ok: false, message: "Only the owner or a partner can set a credit limit." }, 403);
+      }
+      const raw = String(body.credit_limit).trim();
+      if (raw !== "" && (Number.isNaN(Number(raw)) || Number(raw) < 0)) {
+        return json({ ok: false, message: "Credit limit must be a number, 0 or more." }, 400);
+      }
+      fields.push(`credit_limit = ?`);
+      params.push(raw === "" ? null : Number(raw));
+    }
     for (const [key, col] of [["name", "name"], ["phone", "phone"], ["notes", "notes"], ["tags", "tags"], ["telegram", "telegram"]]) {
       if (body[key] !== undefined) {
         const v = String(body[key]).trim();
@@ -103,7 +127,20 @@ export async function onRequestPatch(context) {
     ).bind(...params).run();
 
     await audit(context, auth, "customer.update", "customer", id, body);
-    return json({ ok: true });
+    // WORLD-BEST (merge, History stream §6g).
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "customer",
+      entityType: "customer",
+      entityId: id,
+      summary: `Updated customer ${customer.name}`,
+      amount: null,
+    });
+    const updated = await getCustomer(context, id, auth.business.id);
+    return json({ ok: true, customer: updated });
   } catch (error) {
     return json({ ok: false, message: "Could not update customer.", error: String(error) }, 500);
   }
@@ -143,6 +180,18 @@ export async function onRequestDelete(context) {
     await db.prepare(`DELETE FROM customers WHERE id = ?`).bind(id).run();
 
     await audit(context, auth, "customer.delete", "customer", id, { name: customer.name });
+    // WORLD-BEST (merge, History stream §6g).
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "customer",
+      entityType: "customer",
+      entityId: id,
+      summary: `Removed customer ${customer.name}`,
+      amount: null,
+    });
     return json({ ok: true });
   } catch (error) {
     return json({ ok: false, message: "Could not delete customer.", error: String(error) }, 500);

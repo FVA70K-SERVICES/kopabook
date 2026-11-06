@@ -12,6 +12,20 @@ function isDue(lastRemindedAt) {
   return days >= DUE_DAYS;
 }
 
+// WORLD-BEST (Dashboard stream): v1 overdue badge, not automation. A debt
+// counts as overdue when its last activity (latest ledger entry) is more
+// than overdueDays ago. overdueDays is owner-set in Settings → Rules and
+// defaults to 7. Reminders still go out by hand only.
+function isOverdueDebt(lastActivity, overdueDays) {
+  if (!lastActivity) return false;
+  const days = Number(overdueDays === null || overdueDays === undefined ? 7 : overdueDays);
+  const raw = String(lastActivity);
+  const iso = raw.length === 10 ? `${raw}T00:00:00Z` : `${raw.replace(" ", "T")}${raw.includes("Z") ? "" : "Z"}`;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return false;
+  return (Date.now() - at.getTime()) / 86400000 > days;
+}
+
 export default function DebtsPage({ session }) {
   const [data, setData] = useState({ total: 0, count: 0, debtors: [] });
   const [loading, setLoading] = useState(true);
@@ -59,7 +73,7 @@ export default function DebtsPage({ session }) {
 
   useEffect(() => {
     api.get("/api/business")
-      .then((d) => setBiz({ name: d.business?.name || "", reminderTemplate: d.business?.reminder_template || "" }))
+      .then((d) => setBiz({ name: d.business?.name || "", reminderTemplate: d.business?.reminder_template || "", overdueDays: d.business?.overdue_days ?? 7 }))
       .catch(() => {});
   }, []);
 
@@ -239,10 +253,12 @@ export default function DebtsPage({ session }) {
             <tbody>
               {data.debtors.map((d) => {
                 const due = isDue(d.last_reminded_at);
+                // WORLD-BEST: overdue badge (v1, not automation).
+                const overdue = isOverdueDebt(d.last_activity, biz.overdueDays);
                 return (
                   <>
                   <tr key={d.id}>
-                    <td><a href={`/app/customers/${d.id}`} onClick={(e) => { e.preventDefault(); nav(`/app/customers/${d.id}`); }} style={{ fontWeight: 700 }}>{d.name}</a></td>
+                    <td><a href={`/app/customers/${d.id}`} onClick={(e) => { e.preventDefault(); nav(`/app/customers/${d.id}`); }} style={{ fontWeight: 700 }}>{d.name}</a>{overdue && <span className="pill pill-red" style={{ marginLeft: 6 }}>Overdue</span>}</td>
                     <td>{d.phone || "—"}</td>
                     <td className="money debt-amt">{fmt(d.outstanding)}</td>
                     <td><small>{d.last_activity?.slice(0, 10)}</small></td>

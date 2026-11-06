@@ -1,12 +1,22 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
+import './motion.css'
+import './a11y.css'
+import './print.css'
 import App from './App.jsx'
 import { initTheme } from './lib/theme'
 
 // Apply the saved theme before first paint (the index.html inline script
 // usually beats this; this is the fallback).
 initTheme()
+
+// WORLD-BEST: Accessibility — apply the saved text size before first paint.
+try {
+  if (localStorage.getItem("kopabook-text-size") === "large") {
+    document.documentElement.dataset.text = "large";
+  }
+} catch { /* no saved choice; normal text */ }
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -84,7 +84,8 @@ export function orgTypeFor(key) {
 // holds even if a type's list is edited later.
 export function modulesForType(key) {
   const mods = orgTypeFor(key).modules;
-  return mods.includes("projects") ? mods : [...mods, "projects"];
+  const withProjects = mods.includes("projects") ? mods : [...mods, "projects"];
+  return withProjects.includes("history") ? withProjects : [...withProjects, "history"];
 }
 
 // Sidebar grouping: section label -> module keys in display order.
@@ -98,7 +99,7 @@ export const NAV_GROUPS = [
   { label: "Customers", modules: ["customers", "debts"] },
   { label: "Stock", modules: ["suppliers", "import", "expenses"] },
   { label: "Hotels", modules: ["hotels"] },
-  { label: "Insights", modules: ["messages", "reports", "activity"] },
+  { label: "Insights", modules: ["messages", "reports", "history", "activity"] },
   { label: "Tools", modules: ["notebook", "calculator", "projects"] },
   { label: "Setup", modules: ["staff", "settings"] },
 ];
@@ -239,6 +240,7 @@ export const NAV_MODULES = {
   "/app/reports": "reports",
   "/app/staff": "staff",
   "/app/activity": "activity",
+  "/app/history": "history",
   "/app/notebook": "notebook",
   "/app/calculator": "calculator",
   "/app/settings": "settings",
@@ -251,14 +253,14 @@ export const ROLE_MODULES = {
   partner: null,
   // Everyone keeps the staff page for their own shift clock; management
   // sections inside it are owner/partner only.
-  manager: ["dashboard", "sales", "services", "products", "suppliers", "import", "expenses", "customers", "hotels", "debts", "projects", "messages", "reports", "staff", "notebook", "calculator"],
-  accountant: ["dashboard", "expenses", "projects", "reports", "customers", "messages", "staff", "notebook", "calculator"],
-  cashier: ["dashboard", "sales", "services", "products", "customers", "debts", "messages", "staff", "notebook", "calculator"],
-  storekeeper: ["dashboard", "products", "suppliers", "import", "messages", "staff", "notebook", "calculator"],
-  attendant: ["dashboard", "sales", "services", "products", "customers", "debts", "messages", "staff", "notebook", "calculator"],
-  hotel_manager: ["dashboard", "hotels", "customers", "debts", "projects", "expenses", "messages", "reports", "staff", "notebook", "calculator"],
-  receptionist: ["dashboard", "hotels", "customers", "messages", "staff", "notebook", "calculator"],
-  housekeeper: ["dashboard", "hotels", "staff", "notebook", "calculator"],
+  manager: ["dashboard", "sales", "services", "products", "suppliers", "import", "expenses", "customers", "hotels", "debts", "projects", "messages", "reports", "history", "staff", "notebook", "calculator"],
+  accountant: ["dashboard", "expenses", "projects", "reports", "history", "customers", "messages", "staff", "notebook", "calculator"],
+  cashier: ["dashboard", "history", "sales", "services", "products", "customers", "debts", "messages", "staff", "notebook", "calculator"],
+  storekeeper: ["dashboard", "history", "products", "suppliers", "import", "messages", "staff", "notebook", "calculator"],
+  attendant: ["dashboard", "history", "sales", "services", "products", "customers", "debts", "messages", "staff", "notebook", "calculator"],
+  hotel_manager: ["dashboard", "hotels", "customers", "debts", "projects", "expenses", "messages", "reports", "history", "staff", "notebook", "calculator"],
+  receptionist: ["dashboard", "history", "hotels", "customers", "messages", "staff", "notebook", "calculator"],
+  housekeeper: ["dashboard", "history", "hotels", "staff", "notebook", "calculator"],
 };
 
 export function modulesForRole(role) {

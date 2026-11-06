@@ -1,5 +1,9 @@
 // /api/expenses — GET list, POST create
+// History (world-best upgrade): recording and removing an expense writes
+// a history event (type "expense"). The write is best-effort: it never
+// throws and never blocks the expense itself.
 import { json, getAuthContext, requireAuth, requirePerm, audit } from "./_utils";
+import { recordHistory } from "./_history";
 
 export async function onRequestGet(context) {
   try {
@@ -83,6 +87,22 @@ export async function onRequestPost(context) {
       .run();
 
     await audit(context, auth, "expense.create", "expense", result.meta.last_row_id, { amount: amt });
+    // History: one plain line, amount in business currency.
+    const catName = catId
+      ? (await context.env.KOPABOOK_DB.prepare(`SELECT name FROM expense_categories WHERE id = ? LIMIT 1`).bind(catId).first())?.name
+      : null;
+    const label = (note ? String(note).trim() : "") || catName || categoryName || "Expense";
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "expense",
+      entityType: "expense",
+      entityId: result.meta.last_row_id,
+      summary: `Recorded expense: ${label} — ${auth.business.currency} ${amt.toLocaleString("en-US")}`,
+      amount: amt,
+    });
     return json({ ok: true, expenseId: result.meta.last_row_id }, 201);
   } catch (error) {
     return json({ ok: false, message: "Could not record expense.", error: String(error) }, 500);
@@ -105,13 +125,26 @@ export async function onRequestDelete(context) {
 
     const db = context.env.KOPABOOK_DB;
     const row = await db.prepare(
-      `SELECT id, amount FROM expenses WHERE id = ? AND business_id = ? LIMIT 1`
+      `SELECT id, amount, note FROM expenses WHERE id = ? AND business_id = ? LIMIT 1`
     ).bind(id, auth.business.id).first();
     if (!row) return json({ ok: false, message: "Expense not found." }, 404);
 
     await db.prepare(`DELETE FROM expenses WHERE id = ?`).bind(id).run();
 
     await audit(context, auth, "expense.delete", "expense", id, { amount: row.amount });
+    // History keeps the record that an expense was removed (the history
+    // row itself is never deleted).
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "expense",
+      entityType: "expense",
+      entityId: id,
+      summary: `Removed expense of ${auth.business.currency} ${Number(row.amount).toLocaleString("en-US")}${row.note ? ` (${String(row.note).trim()})` : ""}`,
+      amount: Number(row.amount),
+    });
     return json({ ok: true });
   } catch (error) {
     return json({ ok: false, message: "Could not delete expense.", error: String(error) }, 500);

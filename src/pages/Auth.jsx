@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, nav } from "../lib/api";
 import Logo from "../components/Logo";
 import HumanCheck, { FVA_VERIFY_SITEKEY } from "../components/HumanCheck";
+import LanguageSwitcher from "../components/LanguageSwitcher";
 
 function EyeIcon() {
   return (
@@ -45,6 +46,11 @@ export function LoginPage() {
         <div style={{ textAlign: "center", marginTop: 40 }}>
           <a href="/" className="brand" aria-label="KopaBook home"><Logo /></a>
         </div>
+        {/* WORLD-BEST: Language switcher — start (signed-out: localStorage only, no server call until signed in) */}
+        <div className="form-card" style={{ marginBottom: 12 }}>
+          <LanguageSwitcher persist={false} />
+        </div>
+        {/* WORLD-BEST: Language switcher — end */}
         <div className="form-card">
           <h1>Welcome back</h1>
           <p className="hint">Sign in to your KopaBook business.</p>

@@ -120,3 +120,77 @@ export function resetPasswordEmail({ resetUrl, businessName, userName }) {
     </div>`;
   return { subject, text, html };
 }
+
+// Receipt email: same visual style as resetPasswordEmail (white card,
+// green header rule, KopaBook footer). Amounts arrive pre-formatted.
+//   receiptEmail({ businessName, saleNumber, date, items, subtotal,
+//     discount, total, paidByMethod, change, balanceDue, dueDate, footer })
+// items: [{ name, qty, unit, unitPrice, lineTotal }] (formatted strings).
+// paidByMethod: [{ mode, amount }] (formatted strings).
+export function receiptEmail({ businessName, saleNumber, date, items, subtotal, discount, total, paidByMethod, change, balanceDue, dueDate, footer }) {
+  const biz = String(businessName || "My Business").trim();
+  const subject = `Receipt ${saleNumber || ""} — ${biz}`.trim();
+  const itemLines = (Array.isArray(items) ? items : []).map((it) => {
+    const qty = `${it.qty || 0}${it.unit ? " " + it.unit : ""}`;
+    return { label: `${qty} x ${it.name || "Item"} — ${it.unitPrice || ""}${it.unit ? " / " + it.unit : ""}`, amount: it.lineTotal || "" };
+  });
+  const textLines = [biz, saleNumber ? `Receipt ${saleNumber}` : "Receipt"];
+  if (date) textLines.push(date);
+  textLines.push("");
+  for (const it of itemLines) textLines.push(`${it.label} = ${it.amount}`);
+  textLines.push("");
+  if (subtotal && subtotal !== total) textLines.push(`Subtotal: ${subtotal}`);
+  if (discount && !/^[^0-9]*0(\.00)?$/.test(String(discount))) textLines.push(`Discount: ${discount}`);
+  textLines.push(`Total: ${total}`);
+  if (Array.isArray(paidByMethod)) for (const p of paidByMethod) textLines.push(`Paid (${p.mode || "Cash"}): ${p.amount}`);
+  if (change) textLines.push(`Change given: ${change}`);
+  if (balanceDue) {
+    textLines.push(`Balance due: ${balanceDue}`);
+    if (dueDate) textLines.push(`Due date: ${dueDate}`);
+  } else {
+    textLines.push("Paid in full. Thank you for buying from us.");
+  }
+  if (footer) { textLines.push(""); textLines.push(String(footer)); }
+  textLines.push("Powered by KopaBook");
+  const text = textLines.join("\n");
+
+  const row = (label, value, strong) => `
+    <tr>
+      <td style="padding: 6px 0; color: #374151; font-size: 15px;">${escapeHtml(label)}</td>
+      <td style="padding: 6px 0; text-align: right; color: #111827; font-size: 15px; ${strong ? "font-weight: 700;" : ""}">${escapeHtml(value)}</td>
+    </tr>`;
+  const itemRows = itemLines.map((it) => `
+    <tr>
+      <td style="padding: 8px 0; color: #111827; font-size: 15px; border-bottom: 1px solid #f3f4f6;">${escapeHtml(it.label)}</td>
+      <td style="padding: 8px 0; text-align: right; color: #111827; font-size: 15px; font-weight: 600; border-bottom: 1px solid #f3f4f6; white-space: nowrap;">${escapeHtml(it.amount)}</td>
+    </tr>`).join("");
+  const paidRows = (Array.isArray(paidByMethod) ? paidByMethod : []).map((p) => row(`Paid (${p.mode || "Cash"})`, p.amount)).join("");
+  const balanceBlock = balanceDue
+    ? row("Balance due", balanceDue, true) + (dueDate ? row("Due date", dueDate) : "")
+    : `<p style="color: #15803d; font-size: 15px; font-weight: 600; margin: 12px 0 0;">Paid in full. Thank you!</p>`;
+  const html = `
+    <div style="font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f3f6f3; padding: 32px 16px;">
+      <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e5e7eb;">
+        <div style="padding: 24px 24px 16px; text-align: center; border-bottom: 3px solid #166534;">
+          <div style="color: #14532d; font-size: 22px; font-weight: 800;">${escapeHtml(biz)}</div>
+          <div style="color: #6b7280; font-size: 14px; margin-top: 4px;">Receipt ${escapeHtml(saleNumber || "")}${date ? ` · ${escapeHtml(date)}` : ""}</div>
+        </div>
+        <div style="padding: 20px 28px 8px;">
+          <table style="width: 100%; border-collapse: collapse;">${itemRows}</table>
+          <table style="width: 100%; border-collapse: collapse; margin-top: 12px;">
+            ${subtotal && subtotal !== total ? row("Subtotal", subtotal) : ""}
+            ${discount ? row("Discount", discount) : ""}
+            ${row("TOTAL", total, true)}
+            ${paidRows}
+            ${change ? row("Change given", change) : ""}
+            ${balanceBlock}
+          </table>
+          ${footer ? `<p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 20px 0 0; text-align: center;">${escapeHtml(footer)}</p>` : ""}
+        </div>
+        <div style="background: #f9fafb; padding: 16px 28px; border-top: 1px solid #e5e7eb;">
+          <p style="color: #9ca3af; font-size: 12px; margin: 0; line-height: 1.6;">Powered by KopaBook<br><a href="https://kopabook.com" style="color: #166534;">kopabook.com</a></p>
+        </div>
+      </div>
+    </div>`;
+  return { subject, text, html };
+}

@@ -1,5 +1,6 @@
 // POST /api/debts/add — record a debt by hand (money lent, goods on credit, etc.)
 import { json, getAuthContext, requireAuth, audit } from "../_utils";
+import { recordHistory } from "../_history.js";
 
 export async function onRequestPost(context) {
   try {
@@ -51,6 +52,21 @@ export async function onRequestPost(context) {
       .run();
 
     await audit(context, auth, "debt.add", "customer", custId, { amount: amt, note: note || null });
+    // WORLD-BEST (merge, History stream §6d, adapted: this file's id is
+    // custId; the name comes from the request or a lookup).
+    const custNameRow = await db.prepare(`SELECT name FROM customers WHERE id = ? AND business_id = ? LIMIT 1`).bind(custId, auth.business.id).first();
+    const debtName = customerName ? String(customerName).trim() : (custNameRow?.name || "customer");
+    await recordHistory(context.env, {
+      businessId: auth.business.id,
+      actorId: auth.user.id,
+      actorName: auth.user.fullName,
+      actorRole: auth.business.role,
+      type: "debt",
+      entityType: "customer",
+      entityId: custId,
+      summary: `Recorded debt of ${auth.business.currency} ${Number(amt).toLocaleString("en-US")} for ${debtName}${note ? ` (${String(note).trim()})` : ""}`,
+      amount: Number(amt),
+    });
     return json({ ok: true, customerId: custId, newBalance }, 201);
   } catch (error) {
     return json({ ok: false, message: "Could not record debt.", error: String(error) }, 500);

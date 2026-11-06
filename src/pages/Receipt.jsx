@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, fmt, nav } from "../lib/api";
 import { waLink, receiptText } from "../lib/whatsapp";
+import "../print.css";
+import { buildContactLines, dueDateISO } from "../lib/receiptContacts";
+import { sendEmailReceipt, sendTelegramReceipt, getTelegramBotStatus, telegramClientUrl } from "../lib/receiptSends";
+import { dataUrlToBlob } from "../lib/shareCards";
 
 // Printable receipts, sized for Nigerian thermal printers (58mm / 80mm).
 // Opened outside the app Layout so printing outputs only the receipt.
@@ -12,7 +16,13 @@ function money(n) {
 function ReceiptShell({ width, children }) {
   return (
     <div className="receipt-screen">
-      <div className="receipt-toolbar noprint">
+      {/* WORLD-BEST (merge, fit): the base .receipt-toolbar is sticky with a
+          transparent background, so the Back/Print buttons floated over the
+          receipt text while scrolling (fit: overlap at every width). The
+          toolbar is static here instead — it scrolls away with the page and
+          never covers content. styles.css is owned by round 3, so the fix
+          lives in this file, not in the stylesheet. */}
+      <div className="receipt-toolbar noprint" style={{ position: "static" }}>
         <button className="btn btn-secondary btn-sm" onClick={() => window.history.back()}>← Back</button>
         <button className="btn btn-primary btn-sm" onClick={() => window.print()}>🖨️ Print</button>
       </div>
@@ -32,7 +42,7 @@ function ReceiptHeader({ business }) {
       <div className="r-biz">{business.name || "My Business"}</div>
       {business.tagline && <div className="r-sub">{business.tagline}</div>}
       {business.receipt_address && <div className="r-sub">{business.receipt_address}</div>}
-      {business.receipt_phone && <div className="r-sub">Tel: {business.receipt_phone}</div>}
+      {buildContactLines(business).map((ln) => <div key={ln} className="r-sub">{ln}</div>)}
       <div className="r-line">{"-".repeat(32)}</div>
     </div>
   );
@@ -110,13 +120,13 @@ function drawReceiptCanvas({ business, sale, items, payments }) {
   gap(4);
   if (business.tagline) wrapped(business.tagline, F_SMALL, "center");
   if (business.receipt_address) wrapped(business.receipt_address, F_SMALL, "center");
-  if (business.receipt_phone) center("Tel: " + business.receipt_phone, F_SMALL);
+  buildContactLines(business).forEach((ln) => wrapped(ln, F_SMALL, "center"));
   gap(6);
   dash();
   gap(6);
 
-  // Title + meta
-  center("SALES RECEIPT", F_BOLD);
+  // Title + meta (invoice view when a balance is due)
+  center(Number(sale.balance_due) > 0 ? "INVOICE" : "SALES RECEIPT", F_BOLD);
   gap(8);
   const date = (sale.created_at || "").slice(0, 16).replace("T", " ");
   text("Receipt: " + (sale.sale_number || "#" + sale.id), F_BODY, "left");
@@ -160,10 +170,16 @@ function drawReceiptCanvas({ business, sale, items, payments }) {
     push({ kind: "row", left: `Paid (${p.mode || "Cash"})`, right: money(p.amount), font: F_BODY });
     gap(4);
   });
+  if (Number(sale.change_given) > 0) {
+    push({ kind: "row", left: "Change given", right: money(sale.change_given), font: F_BODY });
+    gap(4);
+  }
   if (Number(sale.balance_due) > 0) {
     gap(2);
     push({ kind: "row", left: "Balance due", right: money(sale.balance_due), font: F_BOLD });
     gap(4);
+    const dd = dueDateISO(sale.created_at, business.overdue_days ?? 7);
+    if (dd) { push({ kind: "row", left: "Due date", right: dd, font: F_BODY }); gap(4); }
   }
   gap(2);
   dash();
@@ -246,8 +262,13 @@ export function SaleReceiptPage({ saleId }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [waPhone, setWaPhone] = useState("");
+  const [emailAddr, setEmailAddr] = useState("");
+  const [telegramHandle, setTelegramHandle] = useState("");
   const [imgBusy, setImgBusy] = useState(false);
   const [imgMsg, setImgMsg] = useState("");
+  const [sendNote, setSendNote] = useState("");
+  const [sending, setSending] = useState("");
+  const [telegramBot, setTelegramBot] = useState(null);
 
   useEffect(() => {
     if (saleId === "0") {
@@ -267,8 +288,14 @@ export function SaleReceiptPage({ saleId }) {
       return;
     }
     api.get(`/api/receipts/sale?id=${saleId}`)
-      .then((d) => { setData(d); setWaPhone(d.sale?.customer_phone || ""); })
+      .then((d) => {
+        setData(d);
+        setWaPhone(d.sale?.customer_phone || "");
+        setEmailAddr(d.customer?.email || "");
+        setTelegramHandle(d.customer?.telegram || "");
+      })
       .catch((e) => setError(e.message));
+    getTelegramBotStatus().then(setTelegramBot).catch(() => {});
   }, [saleId]);
 
   if (error) return <div className="receipt-screen"><div className="alert alert-error">{error}</div></div>;
@@ -279,18 +306,66 @@ export function SaleReceiptPage({ saleId }) {
   const date = (sale.created_at || "").slice(0, 16).replace("T", " ");
   const imgName = `kopabook-receipt-${sale.sale_number || sale.id}.png`;
 
+  const paidByMethod = (payments.length ? payments : [{ amount: sale.amount_paid, mode: sale.payment_method }])
+    .map((p) => ({ mode: p.mode || "Cash", amount: money(p.amount) }));
   const waText = receiptText({
     saleNumber: sale.sale_number,
     total: money(sale.total_amount),
     businessName: business.name,
     balanceDue: Number(sale.balance_due) > 0 ? money(sale.balance_due) : null,
+    paid: money(sale.amount_paid),
+    change: Number(sale.change_given) > 0 ? money(sale.change_given) : null,
+    paidByMethod,
+    contactLines: buildContactLines(business),
     items: (items || []).map((it) => ({
       qty: it.quantity,
       name: it.product_name || "Item",
       unitPrice: money(it.unit_price),
+      lineTotal: money(it.line_total),
       unit: it.product_unit || undefined,
     })),
   });
+
+  async function sendByEmail() {
+    if (!emailAddr.trim()) return;
+    setSending("email");
+    setSendNote("");
+    try {
+      const r = await sendEmailReceipt({
+        saleId: sale.id, email: emailAddr.trim(),
+        saleNumber: sale.sale_number, businessName: business.name, text: waText,
+      });
+      setSendNote(r.via === "server" ? "Receipt email sent." : r.note || "Your mail app will open.");
+      if (r.via === "mailto" && r.url) window.open(r.url, "_blank", "noopener");
+    } catch (e) {
+      setSendNote(e.message || "Could not send the email.");
+    }
+    setSending("");
+  }
+
+  async function sendByTelegram() {
+    setSending("telegram");
+    setSendNote("");
+    try {
+      let photoBlob = null;
+      try { photoBlob = await makeImageBlob(); } catch { photoBlob = null; }
+      const r = await sendTelegramReceipt({
+        saleId: sale.id, saleNumber: sale.sale_number, businessName: business.name,
+        text: waText, photoBlob,
+        customerTelegram: telegramHandle.trim(),
+        hasChatId: Boolean(data.customer?.hasTelegramChatId),
+      });
+      if (r.via === "bot") {
+        setSendNote(r.photoError || "Receipt sent on Telegram.");
+      } else {
+        if (r.needsOnboarding) setSendNote(`Start @${r.botUsername || "the bot"} on Telegram first, then tap send.`);
+        window.open(r.url, "_blank", "noopener");
+      }
+    } catch (e) {
+      setSendNote(e.message || "Could not send on Telegram.");
+    }
+    setSending("");
+  }
 
   async function makeImageBlob() {
     const canvas = drawReceiptCanvas({ business, sale, items, payments });
@@ -354,16 +429,65 @@ export function SaleReceiptPage({ saleId }) {
 
   const canCopy = typeof ClipboardItem !== "undefined" && !!navigator.clipboard?.write;
 
+  const isInvoice = Number(sale.balance_due) > 0;
+  const dueDate = isInvoice ? dueDateISO(sale.created_at, business.overdue_days ?? 7) : null;
   return (
     <ReceiptShell width={width}>
-      <div className="noprint" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      {data.canViewProfit && data.profit !== null && data.profit !== undefined && (
+        <p className="noprint" style={{ textAlign: "center", margin: "0 0 12px", color: "var(--muted)" }}>
+          Profit on this sale: <strong>{money(data.profit)}</strong> <span style={{ fontSize: 13 }}>(owner and staff who can see profit only — never on the receipt)</span>
+        </p>
+      )}
+      <div className="noprint" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <input
+          value={emailAddr}
+          aria-label="Customer email"
+          onChange={(e) => setEmailAddr(e.target.value)}
+          placeholder="Customer email"
+          type="email"
+          inputMode="email"
+          style={{ flex: 1, minWidth: 180, minHeight: 44, fontSize: 16 }}
+        />
+        <button className="btn btn-secondary btn-sm" style={{ minHeight: 44 }} disabled={!emailAddr.trim() || sending === "email"} onClick={sendByEmail}>
+          {sending === "email" ? "Sending..." : "Send by email"}
+        </button>
+      </div>
+      <div className="noprint" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <input
+          value={telegramHandle}
+          aria-label="Customer Telegram username"
+          onChange={(e) => setTelegramHandle(e.target.value)}
+          placeholder="Customer Telegram @username"
+          style={{ flex: 1, minWidth: 180, minHeight: 44, fontSize: 16 }}
+        />
+        <button className="btn btn-secondary btn-sm" style={{ minHeight: 44 }} disabled={sending === "telegram"} onClick={sendByTelegram}>
+          {sending === "telegram" ? "Sending..." : "Send on Telegram"}
+        </button>
+      </div>
+      {telegramBot?.configured && !data.customer?.hasTelegramChatId && telegramHandle && (
+        <p className="hint noprint" style={{ textAlign: "center", marginBottom: 12 }}>
+          Start @{telegramBot.username} on Telegram, then tap send.
+        </p>
+      )}
+      {sendNote && (
+        <p className="hint noprint" style={{ textAlign: "center", marginBottom: 12 }}>{sendNote}</p>
+      )}
+      {/* WORLD-BEST (merge, fit): this row had no flex-wrap and the input had
+          no min-width, so at 320px the input would not shrink and the
+          "Share on WhatsApp" link was pushed 21px past the right edge
+          (document scrollWidth 326 > 320). The row wraps now and the input
+          holds a 170px minimum, so it takes the full line instead of being
+          squeezed to 49px (the 11-digit number needs 94px). All three
+          contact inputs are 44px tall (they were 21px inside the 13px
+          receipt paper). */}
+      <div className="noprint" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <input
           value={waPhone}
+          aria-label="Customer WhatsApp number"
           onChange={(e) => setWaPhone(e.target.value)}
           placeholder="Customer WhatsApp number (080...)"
-          aria-label="Customer WhatsApp number"
           inputMode="tel"
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 170, minHeight: 44, fontSize: 16 }}
         />
         <a className="btn btn-secondary btn-sm" target="_blank" rel="noreferrer" href={waLink(waPhone, waText)}>
           Share on WhatsApp
@@ -386,7 +510,12 @@ export function SaleReceiptPage({ saleId }) {
         <p className="hint noprint" style={{ textAlign: "center", marginBottom: 12 }}>{imgMsg}</p>
       )}
       <ReceiptHeader business={business} />
-      <div className="r-center r-title">SALES RECEIPT</div>
+      <div className="r-center r-title">{isInvoice ? "INVOICE" : "SALES RECEIPT"}</div>
+      {sale.status === "voided" && (
+        <div className="r-center" style={{ fontWeight: 700, marginBottom: 8 }}>
+          VOIDED — this sale was cancelled
+        </div>
+      )}
       <Row label={`Receipt: ${sale.sale_number || "#" + sale.id}`} value={date} />
       {sale.customer_name && <Row label="Customer" value={sale.customer_name} />}
       <div className="r-line">{"-".repeat(32)}</div>
@@ -407,7 +536,9 @@ export function SaleReceiptPage({ saleId }) {
       {(payments.length ? payments : [{ amount: sale.amount_paid, mode: sale.payment_method }]).map((p, i) => (
         <Row key={i} label={`Paid (${p.mode || "Cash"})`} value={money(p.amount)} />
       ))}
+      {Number(sale.change_given) > 0 && <Row label="Change given" value={money(sale.change_given)} />}
       {Number(sale.balance_due) > 0 && <Row label="Balance due" value={money(sale.balance_due)} bold />}
+      {isInvoice && dueDate && <Row label="Due date" value={dueDate} />}
       <ReceiptFooter business={business} />
     </ReceiptShell>
   );

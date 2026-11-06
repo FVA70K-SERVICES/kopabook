@@ -1,0 +1,179 @@
+/* KopaBook print styles — History / Statements (world-best upgrade).
+ *
+ * Print-to-PDF via the browser (window.print() -> "Save as PDF"). No
+ * library, no paid service, works offline. Imported by
+ * src/components/StatementPrint.jsx so every statement user gets it;
+ * the coordinator may move this import to src/main.jsx at merge.
+ *
+ * Screen: .print-only is hidden; the app looks exactly as before.
+ * Print: the app chrome disappears and only the statement prints,
+ * black on white, one line item never split across pages.
+ */
+
+.print-only {
+  display: none;
+}
+
+/* --- Statement document (screen preview + print) --- */
+.statement-print {
+  background: #fff;
+  color: #000;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  max-width: 720px;
+  margin: 0 auto;
+}
+.statement-head {
+  text-align: center;
+  margin-bottom: 16px;
+}
+.statement-biz {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.statement-title {
+  font-size: 17px;
+  font-weight: 700;
+  margin-top: 10px;
+}
+.statement-sub {
+  font-size: 13px;
+  color: #444;
+}
+.statement-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+.statement-table th,
+.statement-table td {
+  border-bottom: 1px solid #ccc;
+  padding: 7px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.statement-table th {
+  border-bottom: 2px solid #000;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.statement-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.statement-table tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.statement-opening td {
+  color: #444;
+}
+.statement-totals {
+  margin: 12px 0 12px auto;
+  max-width: 320px;
+}
+.statement-total-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid #ddd;
+}
+.statement-total-row span:last-child {
+  white-space: nowrap;
+  font-weight: 600;
+}
+.statement-closing {
+  border-bottom: 2px solid #000;
+  border-top: 2px solid #000;
+  font-weight: 800;
+  font-size: 15px;
+}
+.statement-footer {
+  margin-top: 20px;
+  padding-top: 10px;
+  border-top: 1px solid #000;
+  font-size: 12px;
+  color: #444;
+  text-align: center;
+}
+
+@page {
+  margin: 14mm 12mm;
+  /* Page numbers where the browser supports @page margin boxes. */
+  @bottom-center {
+    content: "Page " counter(page);
+    font-size: 11px;
+    color: #555;
+  }
+}
+
+@media print {
+  /* Hide all app chrome on every print: nav, sidebar, buttons, filters,
+     chat launcher. The Receipt page keeps working: it is outside the
+     app Layout and its toolbar already uses .noprint. */
+  .app .sidebar,
+  .app .mobilebar,
+  .app .menu-btn,
+  .sidebar,
+  .mobilebar,
+  .menu-btn,
+  .noprint,
+  .no-print,
+  .toolbar,
+  .btn,
+  button,
+  input,
+  select,
+  textarea,
+  #fva-chat-btn,
+  #fva-chat-window,
+  #fva-chat-invite,
+  #fva-chat-launcher,
+  .app-lock-screen,
+  .skip-link {
+    display: none !important;
+  }
+  /* The app shell must not leave its own background or padding behind. */
+  .app,
+  .app .main,
+  .main,
+  body,
+  #root {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  /* Statement printing (body.kb-printing-statement, set by
+     requestStatementPrint() before window.print()): hide every direct
+     child of the main column except the .print-only statement. The
+     statement is rendered as a direct child of #main by every page
+     that offers "Print statement", so this hides the page head,
+     filters, tables and pagination and leaves only the statement.
+     Other print flows (receipts, project reports) do not set the class
+     and are unaffected. */
+  body.kb-printing-statement .app .main > *:not(.print-only) {
+    display: none !important;
+  }
+  body.kb-printing-statement .print-only {
+    display: block !important;
+  }
+  .statement-print {
+    max-width: none;
+    font-size: 12pt;
+  }
+  .statement-print .statement-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .statement-print .statement-totals,
+  .statement-print .statement-footer {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* Receipt pages keep their own layout; this file never touches
+     .receipt-paper, so thermal receipts print exactly as before. */
+}

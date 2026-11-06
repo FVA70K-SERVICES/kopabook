@@ -23,6 +23,7 @@ const HotelsPage = lazy(() => import("./pages/Hotels"));
 import DebtsPage from "./pages/Debts";
 const MessagesPage = lazy(() => import("./pages/Messages"));
 const ReportsPage = lazy(() => import("./pages/Reports"));
+const HistoryPage = lazy(() => import("./pages/History"));
 const StaffPage = lazy(() => import("./pages/Staff"));
 const ProjectsPage = lazy(() => import("./pages/Projects"));
 import SettingsPage from "./pages/Settings";
@@ -145,6 +146,7 @@ function AppRoute({ session }) {
     else if (path === "/app/settings") page = <SettingsPage session={session} />;
     else if (path === "/app/admin") page = <AdminPage />;
     else if (path === "/app/activity") page = <ActivityPage session={session} />;
+    else if (path === "/app/history") page = <HistoryPage session={session} />;
     else if (path === "/app/notebook") page = <NotebookPage session={session} />;
     else if (path === "/app/calculator") page = <CalculatorPage />;
     else if (path === "/app/chat") page = <ChatPage side="home" session={session} />;
