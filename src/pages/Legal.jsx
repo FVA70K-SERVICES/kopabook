@@ -54,7 +54,7 @@ function LegalShell({ title, updated, children }) {
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
             <CompanyIdentity />
             <div style={{ padding: "28px 28px 36px" }}>
-              <h2 style={{ color: BRAND.emerald, marginTop: 0, letterSpacing: 1 }}>{title}</h2>
+              <h1 style={{ color: BRAND.emerald, marginTop: 0, letterSpacing: 1 }}>{title}</h1>
               <p className="sub" style={{ borderBottom: "2px solid " + BRAND.cream, paddingBottom: 16 }}>
                 Last updated: {updated}
               </p>

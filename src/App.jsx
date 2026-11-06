@@ -53,6 +53,7 @@ const AdminPage = lazy(() => import("./pages/Admin"));
 const ChatPage = lazy(() => import("./pages/Chat"));
 import { NAV_MODULES, modulesForRole, modulesForType } from "./lib/businessTypes";
 import { AppLockGate } from "./components/AppLock";
+import { applyRouteSeo } from "./lib/seo";
 
 function useSession() {
   const [state, setState] = useState({ loading: true, session: null });
@@ -91,6 +92,10 @@ function useSession() {
 
 function AppRoute({ session }) {
   const path = window.location.pathname;
+  // SEO: each public route gets its own title, description and
+  // canonical (see src/lib/seo.js). App and auth routes are left
+  // alone, and unknown paths get the not-found title.
+  useEffect(() => { applyRouteSeo(path); }, [path]);
 
   if (path === "/") return <LandingPage />;
   if (path === "/features") return <FeaturesPage />;

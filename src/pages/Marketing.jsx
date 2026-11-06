@@ -939,7 +939,7 @@ export function FeaturesPage() {
       <MNav />
       <section className="section">
         <div className="wrap">
-          <h2>Everything in KopaBook</h2>
+          <h1>Everything in KopaBook</h1>
           <p className="sub">Every tool in the real app, explained plainly. Designed around how local merchants actually work: transfers, WhatsApp orders, walk-ins and trust-based credit. Green means free forever, gold means paid plans.</p>
           <div className="grid">
             {MODULES.map((m) => (
@@ -993,7 +993,7 @@ export function PricingPage() {
       <MNav />
       <section className="section">
         <div className="wrap">
-          <h2>Simple pricing</h2>
+          <h1>Simple pricing</h1>
           <p className="sub">Start free. Upgrade when your business grows. Prices in Nigerian naira. Recording a sale is always free and never blocked, on any plan.</p>
           <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
             <div className="card price-card" style={{ border: "2px solid var(--brand)" }}>
