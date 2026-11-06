@@ -53,13 +53,16 @@ function bar(used, limit) {
   );
 }
 
-export default function PlanCard() {
+export default function PlanCard({ isOwner }) {
   const [plan, setPlan] = useState(null);
   const [prices, setPrices] = useState(null);
   const [cycle, setCycle] = useState("monthly");
   const [paying, setPaying] = useState("");
   const [msg, setMsg] = useState("");
   const [verifying, setVerifying] = useState(false);
+  const [cancelConfirm, setCancelConfirm] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelMsg, setCancelMsg] = useState("");
   const [method, setMethod] = useState("card"); // card | transfer | crypto
   // Crypto state (existing crypto flow, unchanged).
   const [cryptoCurrency, setCryptoCurrency] = useState("USDT");
@@ -80,6 +83,24 @@ export default function PlanCard() {
 
   async function load() {
     try { setPlan(await api.get("/api/billing")); } catch (e) {}
+  }
+
+  // Self-serve cancel (Terms 9.1). The server decides who may cancel and
+  // whether a Paystack subscription exists; the button below only shows
+  // when the server says one can be cancelled, so bank-transfer and
+  // crypto one-off payments never see it.
+  async function cancelSubscription() {
+    setCancelBusy(true);
+    setCancelMsg("");
+    try {
+      const d = await api.post("/api/billing/cancel", {});
+      setCancelMsg(d.message || "Your subscription is cancelled.");
+      setCancelConfirm(false);
+      await load();
+    } catch (e) {
+      setCancelMsg(e.message);
+    }
+    setCancelBusy(false);
   }
 
   async function claimPromo() {
@@ -247,6 +268,12 @@ export default function PlanCard() {
   const isUpgradeable = (tier) => (TIER_RANK[tier] ?? 0) > tierRank;
 
   const promo = plan.promo || null;
+  // Cancel is owner only, and only when the server says an active
+  // auto-renewing Paystack subscription exists. Staff, partners and
+  // managers never see the button, and neither do manual-transfer or
+  // crypto one-off payments, which have nothing to cancel.
+  const canCancelSubscription = isOwner === true && plan.can_cancel_subscription === true;
+  const cancelEndDate = plan.current_period_end ? String(plan.current_period_end).slice(0, 10) : "";
   const capTier = (t) => {
     const s = String(t || "");
     return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "";
@@ -347,6 +374,31 @@ export default function PlanCard() {
         {verifying && <> · confirming your payment...</>}
       </p>
       {msg && <div className="alert alert-ok">{msg}</div>}
+      {cancelMsg && <div className="alert alert-ok">{cancelMsg}</div>}
+
+      {canCancelSubscription && (
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginBottom: 12 }}>
+          {!cancelConfirm ? (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setCancelConfirm(true); setCancelMsg(""); }}>
+              Cancel subscription
+            </button>
+          ) : (
+            <div>
+              <p style={{ margin: "0 0 8px", fontSize: 14 }}>
+                Cancel your {plan.tierName} plan? You will not be charged again, and your plan stays active until {cancelEndDate || "the end of the current billing period"}. Your records are kept.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className="btn btn-primary btn-sm" style={{ background: "var(--danger, #b91c1c)" }} disabled={cancelBusy} onClick={cancelSubscription}>
+                  {cancelBusy ? "Cancelling..." : "Yes, cancel my subscription"}
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={cancelBusy} onClick={() => setCancelConfirm(false)}>
+                  Keep my plan
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 12px" }}>
         <li style={{ marginBottom: 8 }}>

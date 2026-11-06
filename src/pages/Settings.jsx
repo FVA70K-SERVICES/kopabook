@@ -215,7 +215,8 @@ export default function SettingsPage({ session }) {
       )}
 
       <div style={{ marginTop: 18 }}>
-        <PlanCard />
+        {/* Cancel is owner only, not partner: the server enforces the same rule. */}
+        <PlanCard isOwner={session.business?.role === "owner"} />
       </div>
 
       <div className="card narrow" style={{ marginTop: 18 }}>

@@ -108,7 +108,11 @@ export async function baseTierFromSubscription(db, userId) {
   if (tier !== "free") {
     const nowIso = toSqliteDate();
     const expired = !!periodEnd && String(periodEnd) < nowIso;
-    const badStatus = !!row && (row.status === "past_due" || row.status === "cancelled");
+    // Mirrors getAccountTier: a cancelled subscription keeps its tier
+    // until the period end passes (Terms 9.1), and only then drops to
+    // free. A cancelled row with no period end on record drops to free.
+    const badStatus = !!row && (row.status === "past_due" ||
+      (row.status === "cancelled" && !periodEnd));
     if (expired || badStatus) {
       return {
         tier: "free",

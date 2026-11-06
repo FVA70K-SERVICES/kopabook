@@ -123,15 +123,18 @@ async function handleSubscriptionCreate(db, data) {
 }
 
 // subscription.disable — the subscription was cancelled on Paystack.
-// Drop the account to free. Matched by subscription code so an old
-// subscription being disabled can never clobber a newer active one.
+// Keep the tier and only mark the row cancelled: cancellation takes
+// effect at the end of the current billing period (Terms 9.1, Refund
+// 5.1), and getAccountTier drops the account to free when the period
+// ends. Matched by subscription code so an old subscription being
+// disabled can never clobber a newer active one.
 async function handleSubscriptionDisable(db, data) {
   const subCode = data.subscription_code ? String(data.subscription_code) : "";
   if (!subCode) return;
   const nowS = toSqliteDateTime(new Date());
   try {
     await db.prepare(
-      `UPDATE account_subscriptions SET tier = 'free', status = 'cancelled', updated_at = ?
+      `UPDATE account_subscriptions SET status = 'cancelled', updated_at = ?
        WHERE paystack_subscription_code = ? AND tier != 'free'`
     ).bind(nowS, subCode).run();
   } catch {

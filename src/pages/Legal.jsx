@@ -81,7 +81,7 @@ function LegalShell({ title, updated, children }) {
 
 export function TermsPage() {
   return (
-    <LegalShell title="TERMS OF SERVICE" updated="19 October 2026">
+    <LegalShell title="TERMS OF SERVICE" updated="6 November 2026">
       <h3>1. Definitions and Interpretation</h3>
       <p>1.1 In these Terms:</p>
       <p>(a) <strong>"Company"</strong> means FVA70K Services, a business name duly registered with the Corporate Affairs Commission of Nigeria under BN 7813786 (registered 9 August 2024), proprietor Fortune Godson, TIN 31821490-0001;</p>
@@ -122,7 +122,7 @@ export function TermsPage() {
       <p>8.2 To the maximum extent permitted by law, the Company's aggregate liability arising out of the Service shall not exceed the subscription fees paid by the User in the twelve (12) months preceding the claim.</p>
 
       <h3>9. Termination</h3>
-      <p>9.1 The User may cancel a subscription at any time; cancellation takes effect at the end of the current billing period.</p>
+      <p>9.1 The User may cancel a subscription at any time. To cancel, open Settings, open the plan card, and tap Cancel subscription. Cancellation takes effect at the end of the current billing period.</p>
       <p>9.2 The Company may suspend or terminate accounts in breach of these Terms, upon notice where practicable.</p>
       <p>9.3 Upon termination, the User may request deletion of Business Data in accordance with the Privacy Policy.</p>
 
@@ -140,7 +140,7 @@ export function TermsPage() {
 
 export function PrivacyPage() {
   return (
-    <LegalShell title="PRIVACY POLICY" updated="19 October 2026">
+    <LegalShell title="PRIVACY POLICY" updated="6 November 2026">
       <h3>1. Data Controller</h3>
       <p>
         1.1 This Policy is issued by <strong>FVA70K Services</strong>, a business name duly
@@ -163,8 +163,14 @@ export function PrivacyPage() {
 
       <h3>4. Disclosure</h3>
       <p>4.1 Business Data is visible to the User's staff members strictly in accordance with their assigned roles.</p>
-      <p>4.2 Infrastructure providers (hosting, database) process data on the Data Controller's behalf under strict contractual terms. Paystack receives the User's email address and payment amount for billing purposes.</p>
-      <p>4.3 No other disclosure shall be made except as required by law or with the User's consent.</p>
+      <p>4.2 The Data Controller shares data only with the service providers below. Each provider processes data only to provide the Service, and only the data it needs for its part:</p>
+      <p>(a) <strong>Cloudflare</strong>, for hosting, the database and file storage;</p>
+      <p>(b) <strong>Paystack</strong>, which receives the User's email address and payment amount for billing. Card details are processed exclusively by Paystack and are never visible to the Data Controller;</p>
+      <p>(c) <strong>Google Gemini</strong>, through the Google Generative Language API, which receives the business snapshot for the User's own business when the User asks Ask Kopa AI a question, so the answer can use live figures from that business only;</p>
+      <p>(d) <strong>Zoho Mail</strong>, which receives the recipient email address and the message content when the User asks KopaBook to send an email, such as a receipt, a password reset or a chat transcript;</p>
+      <p>(e) <strong>Telegram Bot API</strong>, which receives receipt text and any receipt photo when the User taps to send a receipt by Telegram;</p>
+      <p>(f) <strong>api.qrserver.com</strong>, which receives only the crypto wallet address, to draw the QR image shown when the User pays with crypto.</p>
+      <p>4.3 Apart from the providers named in 4.2, no other disclosure shall be made except as required by law or with the User's consent. Business Data is never sold and never shared with advertisers.</p>
 
       <h3>5. Data Subject Rights</h3>
       <p>5.1 In accordance with the Nigeria Data Protection Act 2023, the User is entitled to access, rectification, erasure and objection in respect of personal data.</p>

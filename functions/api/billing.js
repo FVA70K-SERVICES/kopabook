@@ -26,13 +26,19 @@ export async function getAccountTier(db, userId) {
   }
   const periodEnd = row ? row.current_period_end : null;
   // Expiry enforcement: a paid tier whose billing period has ended, or whose
-  // subscription is past due or cancelled, is treated as free. This function
-  // never writes to the database; it only changes the tier that is returned.
+  // subscription is past due, is treated as free. A cancelled subscription
+  // is different: cancel takes effect at the end of the current billing
+  // period (Terms 9.1, Refund 5.1), so it keeps its tier until the period
+  // end passes, and only then drops to free. A cancelled row with no period
+  // end on record cannot prove a paid period remains, so it drops to free.
+  // This function never writes to the database; it only changes the tier
+  // that is returned.
   let result;
   if (tier !== "free") {
     const nowIso = toSqliteDate(); // "YYYY-MM-DD HH:MM:SS" UTC, comparable as a string
     const expired = !!periodEnd && String(periodEnd) < nowIso;
-    const badStatus = !!row && (row.status === "past_due" || row.status === "cancelled");
+    const badStatus = !!row && (row.status === "past_due" ||
+      (row.status === "cancelled" && !periodEnd));
     if (expired || badStatus) {
       result = {
         tier: "free",
@@ -99,6 +105,21 @@ export async function onRequestGet(context) {
     } catch (e) {
       promo = null;
     }
+    // Self-serve cancel is only possible for an active paid plan that
+    // renews on Paystack. A stored Paystack subscription code is the
+    // marker: plan charges create one, while one-off bank-transfer and
+    // crypto payments never do, so those have nothing to cancel. A
+    // cancelled, past due or free plan also has nothing to cancel.
+    let canCancelSubscription = false;
+    try {
+      const subRow = await db.prepare(
+        `SELECT paystack_subscription_code FROM account_subscriptions WHERE user_id = ? LIMIT 1`
+      ).bind(auth.user.id).first();
+      canCancelSubscription = status === "active" && tier !== "free" &&
+        !!(subRow && subRow.paystack_subscription_code);
+    } catch {
+      canCancelSubscription = false;
+    }
     const businessId = auth.business.id;
 
     const weekStart = toSqliteDate(weekStartUtc());
@@ -126,6 +147,7 @@ export async function onRequestGet(context) {
       pendingTier,
       billing_cycle: billingCycle,
       current_period_end: periodEnd,
+      can_cancel_subscription: canCancelSubscription,
       limits,
       usage: {
         businesses: bizRow ? bizRow.n : 0,

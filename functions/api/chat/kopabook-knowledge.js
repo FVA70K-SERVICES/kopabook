@@ -117,7 +117,7 @@ export const KOPABOOK_KNOWLEDGE = [
   },
   {
     patterns: ['cancel my subscription', 'cancel subscription', 'cancel my plan', 'cancel plan', 'stop my subscription', 'unsubscribe'],
-    answer: 'To cancel your KopaBook subscription, go to Settings, then Subscription, and cancel there. If you cannot find the cancel option, WhatsApp us at +234 813 024 4617 or email info@kopabook.com and our team will help you.',
+    answer: 'To cancel, sign in, open Settings, open your plan card, and tap Cancel subscription. Your plan stays active until the end of the period you already paid for. Bank transfer and crypto payments do not renew, so there is nothing to cancel for those. If you need help, WhatsApp us at +234 813 024 4617 or email info@kopabook.com.',
     quickReplies: ['Pricing', 'Talk to human']
   },
   {
