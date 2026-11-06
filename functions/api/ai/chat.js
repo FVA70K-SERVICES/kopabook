@@ -16,7 +16,7 @@
 // actions/day (Projects itself is open to all plans). Starter: 20/day,
 // read + record_sale/add_expense (10 actions/day). Solo: 50/day, all tools.
 // Pro: 100/day, all tools. 60/hr rate limit on top.
-import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate, businessDay } from "../_utils";
+import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate, businessDay, businessDayWindow } from "../_utils";
 import { getBusinessOwnerTier, LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
 import { PROJECT_TYPES, projectTotals } from "../projects/_lib.js";
@@ -32,7 +32,7 @@ import {
   onRequestPatch as updateProjectEndpoint,
   onRequestDelete as deleteProjectEndpoint,
 } from "../projects/[id].js";
-import { resolveFastPath } from "./_fastpath.js";
+import { resolveFastPath, isClearChatRequest, CLEAR_CHAT_QUESTION, CLEAR_CHAT_DECLINED, CLEAR_CHAT_DONE } from "./_fastpath.js";
 
 const GEMINI_MODEL = "gemini-3.7-flash";
 // Cut 2026-11-05 from 45000: the 45s ceiling let one failing model call
@@ -286,8 +286,25 @@ export function toolAllowed(auth, tool) {
 // Rich business snapshot. One bad query must never kill the whole answer, so
 // each section is wrapped in its own try/catch. Every query binds business_id
 // from auth, never from user input.
+//
+// Business-timezone windows (round 5): every sales/expenses figure below
+// comes from the business's own timezone (auth.business.timezone, default
+// Africa/Lagos), the same pattern buildBriefing already uses. The old
+// UTC-day/month queries answered the wrong day after midnight WAT: at
+// 01:32 WAT on 2026-11-06 the UTC day had 0 sales while the Lagos day
+// had 1 sale, NGN 2,270,256, so Ask Kopa AI said "No sales yet today"
+// on the same session the Dashboard showed NGN 2,270,256.
+//
+// Profit is sales minus expenses per window, the same definition as the
+// briefing's "Profit today" line. There is NO cost_price in this
+// snapshot (products carry price and stock only), so gross margin from
+// cost is not computable here: never invent cost data, and a reader
+// that cannot compute a figure must use unknownFigureText() with the
+// reason, never a guessed figure.
 // ---------------------------------------------------------------------------
-async function buildSnapshot(db, auth) {
+// Exported for local tests (same convention as the pure helpers below):
+// the snapshot fields are only observable through chat replies otherwise.
+export async function buildSnapshot(db, auth) {
   const businessId = auth.business.id;
   const currency = auth.business.currency || "NGN";
   const snap = {};
@@ -297,6 +314,48 @@ async function buildSnapshot(db, auth) {
     } catch (e) {
       return fallback;
     }
+  };
+
+  // Business-tz period windows, all from the same "now": today,
+  // yesterday, this week (Monday to Sunday), this month, this year.
+  // Sales compare created_at (a UTC timestamp) against UTC windows;
+  // expenses compare incurred_on (a local YYYY-MM-DD date) against
+  // local dates. Voided sales (status 'voided', world-best soft void)
+  // never count anywhere: old rows may have a NULL status, so the
+  // filter keeps NULLs and excludes only 'voided'.
+  const tz = (auth.business && auth.business.timezone) || "Africa/Lagos";
+  const now = new Date();
+  const todayW = businessDay(tz, now);
+  const yestW = businessDay(tz, new Date(now.getTime() - 24 * 3600 * 1000));
+  const tomorrowDate = businessDay(tz, new Date(now.getTime() + 24 * 3600 * 1000)).date;
+  const [ty, tm, td] = todayW.date.split("-").map(Number);
+  const dayMs = 24 * 3600 * 1000;
+  const utcDay = Date.UTC(ty, tm - 1, td);
+  const mondayMs = utcDay - (((new Date(utcDay).getUTCDay() + 6) % 7) * dayMs);
+  const mondayDate = new Date(mondayMs).toISOString().slice(0, 10);
+  const nextMondayDate = new Date(mondayMs + 7 * dayMs).toISOString().slice(0, 10);
+  const monthStartDate = todayW.date.slice(0, 8) + "01";
+  const nextMonthDate = tm === 12 ? (ty + 1) + "-01-01" : ty + "-" + String(tm + 1).padStart(2, "0") + "-01";
+  const yearStartDate = ty + "-01-01";
+  const nextYearDate = (ty + 1) + "-01-01";
+  const weekStartUtc = businessDayWindow(tz, mondayDate).startUtc;
+  const weekEndUtc = businessDayWindow(tz, nextMondayDate).startUtc;
+  const monthStartUtc = businessDayWindow(tz, monthStartDate).startUtc;
+  const monthEndUtc = businessDayWindow(tz, nextMonthDate).startUtc;
+  const yearStartUtc = businessDayWindow(tz, yearStartDate).startUtc;
+  const yearEndUtc = businessDayWindow(tz, nextYearDate).startUtc;
+  const VOIDED = "(status IS NULL OR status <> 'voided')";
+  const salesWindow = async (startUtc, endUtc) => {
+    const r = await q(async () => await db.prepare(
+      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ? AND ${VOIDED}`
+    ).bind(businessId, startUtc, endUtc).first(), null);
+    return { total: Number(r && r.total) || 0, count: Number(r && r.cnt) || 0 };
+  };
+  const expensesWindow = async (startDate, endDate) => {
+    const r = await q(async () => await db.prepare(
+      `SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt FROM expenses WHERE business_id = ? AND incurred_on >= ? AND incurred_on < ?`
+    ).bind(businessId, startDate, endDate).first(), null);
+    return { total: Number(r && r.total) || 0, count: Number(r && r.cnt) || 0 };
   };
 
   snap.businessName = auth.business.name || "Your business";
@@ -309,7 +368,7 @@ async function buildSnapshot(db, auth) {
       rows = await db.prepare(
         `SELECT p.id, p.name, p.unit_price, p.unit, COALESCE(ii.quantity_on_hand, 0) AS stock,
                 COALESCE((SELECT SUM(si.quantity) FROM sale_items si JOIN sales s ON s.id = si.sale_id
-                          WHERE si.product_id = p.id AND s.business_id = ? AND s.created_at >= date('now', '-30 days')), 0) AS sold_30d
+                          WHERE si.product_id = p.id AND s.business_id = ? AND s.created_at >= date('now', '-30 days') AND (s.status IS NULL OR s.status <> 'voided')), 0) AS sold_30d
          FROM products p LEFT JOIN inventory_items ii ON ii.product_id = p.id
          WHERE p.business_id = ? AND p.is_active = 1
          ORDER BY sold_30d DESC, p.name ASC LIMIT 50`
@@ -319,7 +378,7 @@ async function buildSnapshot(db, auth) {
       rows = await db.prepare(
         `SELECT p.id, p.name, p.unit_price, COALESCE(ii.quantity_on_hand, 0) AS stock,
                 COALESCE((SELECT SUM(si.quantity) FROM sale_items si JOIN sales s ON s.id = si.sale_id
-                          WHERE si.product_id = p.id AND s.business_id = ? AND s.created_at >= date('now', '-30 days')), 0) AS sold_30d
+                          WHERE si.product_id = p.id AND s.business_id = ? AND s.created_at >= date('now', '-30 days') AND (s.status IS NULL OR s.status <> 'voided')), 0) AS sold_30d
          FROM products p LEFT JOIN inventory_items ii ON ii.product_id = p.id
          WHERE p.business_id = ? AND p.is_active = 1
          ORDER BY sold_30d DESC, p.name ASC LIMIT 50`
@@ -333,20 +392,16 @@ async function buildSnapshot(db, auth) {
     }));
   }, []);
 
-  const today = await q(async () => await db.prepare(
-    `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND date(created_at) = date('now')`
-  ).bind(businessId).first(), null);
-  snap.salesToday = { total: Number(today && today.total) || 0, count: Number(today && today.cnt) || 0 };
+  snap.salesToday = await salesWindow(todayW.startUtc, todayW.endUtc);
+  snap.salesYesterday = await salesWindow(yestW.startUtc, yestW.endUtc);
+  snap.salesWeek = await salesWindow(weekStartUtc, weekEndUtc);
+  snap.salesMonth = await salesWindow(monthStartUtc, monthEndUtc);
+  snap.salesYear = await salesWindow(yearStartUtc, yearEndUtc);
 
-  const month = await q(async () => await db.prepare(
-    `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')`
-  ).bind(businessId).first(), null);
-  snap.salesMonth = { total: Number(month && month.total) || 0, count: Number(month && month.cnt) || 0 };
-
-  const exp = await q(async () => await db.prepare(
-    `SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt FROM expenses WHERE business_id = ? AND strftime('%Y-%m', incurred_on) = strftime('%Y-%m','now')`
-  ).bind(businessId).first(), null);
-  snap.expensesMonth = { total: Number(exp && exp.total) || 0, count: Number(exp && exp.cnt) || 0 };
+  snap.expensesToday = await expensesWindow(todayW.date, tomorrowDate);
+  snap.expensesWeek = await expensesWindow(mondayDate, nextMondayDate);
+  snap.expensesMonth = await expensesWindow(monthStartDate, nextMonthDate);
+  snap.expensesYear = await expensesWindow(yearStartDate, nextYearDate);
 
   snap.debtors = await q(async () => {
     const rs = await db.prepare(
@@ -381,7 +436,7 @@ async function buildSnapshot(db, auth) {
     const rs = await db.prepare(
       `SELECT s.sale_number, COALESCE(c.name, 'Walk-in') AS customer, s.total_amount, s.amount_paid, s.balance_due, s.created_at
        FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
-       WHERE s.business_id = ? ORDER BY s.id DESC LIMIT 5`
+       WHERE s.business_id = ? AND (s.status IS NULL OR s.status <> 'voided') ORDER BY s.id DESC LIMIT 5`
     ).bind(businessId).all();
     return (rs.results || []).map((s) => ({
       ref: s.sale_number, customer: s.customer, total: Number(s.total_amount) || 0,
@@ -400,6 +455,13 @@ async function buildSnapshot(db, auth) {
 
   snap.staffCount = await q(async () => {
     const r = await db.prepare(`SELECT COUNT(*) AS n FROM business_members WHERE business_id = ?`).bind(businessId).first();
+    return Number(r && r.n) || 0;
+  }, 0);
+
+  // All customers, not just debtors: "how many customers do I have"
+  // needs this count; snap.debtors above is owing customers only.
+  snap.customerCount = await q(async () => {
+    const r = await db.prepare(`SELECT COUNT(*) AS n FROM customers WHERE business_id = ?`).bind(businessId).first();
     return Number(r && r.n) || 0;
   }, 0);
 
@@ -428,14 +490,23 @@ async function buildSnapshot(db, auth) {
 
 function snapshotText(snap, currency) {
   const L = [];
-  L.push(`Business: ${snap.businessName} (${snap.businessType}), plan: ${snap.tier}, staff members: ${snap.staffCount}.`);
+  L.push(`Business: ${snap.businessName} (${snap.businessType}), plan: ${snap.tier}, staff members: ${snap.staffCount}, customers: ${Number(snap.customerCount || 0)}.`);
   if (snap.products.length) {
     L.push("Products (name, price, unit, stock): " + snap.products.map((p) => `${p.name} ${fmt(p.price, currency)} per ${p.unit} (stock ${p.stock})`).join("; ") + ".");
   } else {
     L.push("Products: none added yet.");
   }
   L.push(`Sales today: ${fmt(snap.salesToday.total, currency)} across ${snap.salesToday.count} sales.`);
+  if (snap.salesYesterday) {
+    L.push(`Sales yesterday: ${fmt(snap.salesYesterday.total, currency)} across ${snap.salesYesterday.count} sales.`);
+  }
   L.push(`Sales this month: ${fmt(snap.salesMonth.total, currency)} across ${snap.salesMonth.count} sales.`);
+  if (snap.expensesToday) {
+    L.push(`Expenses today: ${fmt(snap.expensesToday.total, currency)} across ${snap.expensesToday.count} expenses.`);
+    // Profit is sales minus expenses for the same window. No cost_price
+    // exists in the snapshot, so this is not gross margin from cost.
+    L.push(`Profit today: ${fmt(Math.round((Number(snap.salesToday.total || 0) - Number(snap.expensesToday.total || 0)) * 100) / 100, currency)} (sales minus expenses).`);
+  }
   L.push(`Expenses this month: ${fmt(snap.expensesMonth.total, currency)} across ${snap.expensesMonth.count} expenses.`);
   if (snap.debtors.length) {
     L.push("Customers owing (name: balance): " + snap.debtors.map((d) => `${d.name}: ${fmt(d.balance, currency)}`).join("; ") + ".");
@@ -484,7 +555,7 @@ const TOOL_DOCS = {
   project_report: `- project_report: {"project": "exact project name or id"}. Use this for EVERY question about how a named project is doing; its figures come from the project record, never from memory.`,
 };
 
-function systemPrompt(snap, currency, tier, memorySection, assistant) {
+export function systemPrompt(snap, currency, tier, memorySection, assistant) {
   const profile = assistant || { name: "Kopa", custom: false, paEnabled: false, language: "en" };
   const assistantName = profile.name || "Kopa";
   const allowed = allowedToolsForTier(tier);
@@ -532,7 +603,9 @@ Reply in ${ASSISTANT_LANGUAGES[profile.language] || "English"} for all conversat
 
 ${managerSection}${projectSection}${languageSection}How you handle questions:
 - About THEIR BUSINESS (sales, stock, debts, records): answer ONLY from the BUSINESS SNAPSHOT below. Never invent or estimate numbers. If the snapshot does not have it, say so plainly and offer what you can check instead.
+- About STAFF SIGN-IN AND SIGN-OUT TIMES ("who logged in", "when did staff log out", "log activity"): this business does not record when staff sign in or out, so say so plainly and do not invent times or dates. Never guess a login or logout time, and never treat "log" as a customer name.
 - About BUSINESS ADVICE or PLANNING (growing sales, restocking, giving credit): give practical, grounded advice from general knowledge, and reference their snapshot data where it helps.
+- About BUSINESS PLANNING ("let's plan", "plan for our business improvement", "what does the business need", "what stock should we buy"): this is a business question for YOU, not a question about KopaBook the app. Answer it from the snapshot and general business knowledge. Never send the owner to Kopa Support for planning their own business. Kopa Support is only for questions about how the KopaBook app itself works, its plans and billing, or a problem with the app.
 - About ANYTHING ELSE (their day, general knowledge, casual chat): be genuinely helpful and conversational. Never say you can only answer business questions.
 
 HARD RULES:
@@ -735,6 +808,41 @@ function parseRemindAt(text, businessTz) {
   }
   const { hh, mm } = clock || { hh: 9, mm: 0 };
   return toUtc(atTime(base, hh, mm));
+}
+
+const BUSINESS_TIME_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Display a stored UTC "YYYY-MM-DD HH:MM:SS" instant in the business
+// timezone (round 5). The stored value stays UTC; only the words
+// change: "2026-11-07 14:00:00" in Africa/Lagos reads "3:00 pm
+// tomorrow, 7 Nov" when today is 6 Nov. The raw UTC stamp used to show
+// in the reminder proposal and done message, where 14:00 UTC read as
+// 2pm instead of 3pm WAT. An unparseable stamp, or an unknown timezone,
+// falls back to the raw stamp with no crash. Pure, exported for tests.
+export function formatBusinessTime(utcStamp, tz, now) {
+  const raw = String(utcStamp || "");
+  const at = new Date(raw.replace(" ", "T") + "Z");
+  if (!raw || Number.isNaN(at.getTime())) return raw;
+  const zone = tz || "Africa/Lagos";
+  const ref = now instanceof Date ? now : new Date();
+  try {
+    const dateFmt = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" });
+    const timeFmt = new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit", hour12: true });
+    const localDate = dateFmt.format(at);
+    const refDate = dateFmt.format(ref);
+    const time = timeFmt.format(at).toLowerCase();
+    const [y, mo, d] = localDate.split("-").map(Number);
+    const dayMs = 24 * 3600 * 1000;
+    const diff = Math.round((Date.parse(localDate + "T00:00:00Z") - Date.parse(refDate + "T00:00:00Z")) / dayMs);
+    let dayWord;
+    if (diff === 0) dayWord = "today";
+    else if (diff === 1) dayWord = "tomorrow";
+    else if (diff === -1) dayWord = "yesterday";
+    else dayWord = new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "long" }).format(at);
+    return `${time} ${dayWord}, ${d} ${BUSINESS_TIME_MONTHS[mo - 1]}`;
+  } catch {
+    return raw;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,14 +1151,18 @@ async function execSetReminder(context, db, auth, params, currency, opts) {
   const text = String(params.text || "").trim().slice(0, 200);
   if (!text) return { ok: false, clarification: "What should I remind you about?" };
   const remindAt = parseRemindAt(params.remind_at || params.remindAt, auth.business.timezone);
+  // Display only: the stored instant stays UTC (remindAt), the words
+  // the owner reads are in the business timezone (round 5). 14:00 UTC
+  // is 3:00 pm WAT, and the old "(UTC)" stamp read as 2pm.
+  const remindDisplay = formatBusinessTime(remindAt, auth.business.timezone);
   if (opts && opts.dryRun) {
     return {
       ok: true,
       proposal: {
-        summary: `Set reminder: "${text}" for ${remindAt} (UTC).`,
+        summary: `Set reminder: "${text}" for ${remindDisplay}.`,
         lines: [
           `Reminder: ${text}`,
-          `Remind at: ${remindAt} (UTC)`,
+          `Remind at: ${remindDisplay}`,
         ],
       },
     };
@@ -1060,7 +1172,7 @@ async function execSetReminder(context, db, auth, params, currency, opts) {
     `INSERT INTO bot_reminders (id, business_id, user_id, title, remind_at, repeat_type, status) VALUES (?, ?, ?, ?, ?, 'once', 'pending')`
   ).bind(id, auth.business.id, String(auth.user.id), text, remindAt).run();
   await audit(context, auth, "ai.reminder.create", "reminder", null, { text, remind_at: remindAt, via: "kopa_ai" });
-  return { ok: true, summary: `Reminder set: "${text}" for ${remindAt} (UTC).` };
+  return { ok: true, summary: `Reminder set: "${text}" for ${remindDisplay}.` };
 }
 
 async function execGetCustomerBalance(context, db, auth, params, currency) {
@@ -1826,6 +1938,16 @@ export function parseWarningAnswer(text) {
   if (/second sale|second one|it is a second|two sales/.test(t)) return "original";
   if (/create (a )?new|new one|keep (the )?original|original\b|still want|keep it\b/.test(t)) return "original";
   if (/first one|first sale|it was the first|only one sale|drop it|forget it|never mind/.test(t)) return "drop";
+  // Bare yes/no (round 5): the duplicate warning now asks "Record it
+  // again as a second sale?", so a bare Yes means proceed with the
+  // original request and a bare No means cancel it. This is only ever
+  // read when a warning is actually pending: the call site loads the
+  // pending warning first and only then calls this function, so a bare
+  // Yes with no pending warning never reaches here and never drafts
+  // anything. Polite tails ("yes please", "no thanks") count as bare.
+  const bare = t.replace(/[.!?]+$/g, "").trim();
+  if (bare === "yes" || bare === "yeah" || bare === "yep" || bare === "yes please" || bare === "yeah please" || bare === "yep please") return "original";
+  if (bare === "no" || bare === "nope" || bare === "no thanks" || bare === "no thank you") return "drop";
   return null;
 }
 
@@ -1839,6 +1961,35 @@ export function instructionGateRefusal(text) {
   const asksGateRemoval = /without asking|without confirm|no confirm|skip confirm|skip asking|automatically|auto send|send automatically|do not ask|don't ask|never ask|no need to ask|no need to confirm/.test(t);
   if (!asksGateRemoval) return null;
   return "I still need your Confirm tap for every write, even with that instruction. I can draft it ready for one tap, and nothing will go out until you tap Confirm.";
+}
+
+// Staff login/logout activity (round 5): the business records NO
+// login/logout times anywhere, so these questions have an honest
+// no-data answer, never invented times and never the model line.
+// What the code actually stores, verified by reading it:
+// - login only overwrites users.last_login_at (one latest stamp per
+//   user, no history, no business) and opens a sessions row; it writes
+//   no audit_logs row ("auth.login" is only a display label in
+//   functions/api/activity.js, nothing ever writes it).
+// - logout deletes the session row, so no logout time survives at all.
+// - history_events (world-best migration 0061) has no login/logout
+//   type and no caller records one. A separate staff-activity build
+//   (approved 2026-11-06) will record these events; until it lands,
+//   this is the true answer. The fast path owns the "log activity"
+//   routing; this is the chat.js answer side, reached when it does
+//   not match, and the system prompt below carries the same rule for
+//   the model. "Log" here is never a customer name.
+export const STAFF_ACTIVITY_NO_DATA = "I do not have staff login or logout times for this business. KopaBook does not record when staff sign in or out yet, so there is nothing in the log I can report and I cannot tell you exact times. Once sign-in and sign-out events are recorded, I will be able to tell you who signed in and out and when.";
+export function staffActivityAnswer(text) {
+  const t = normalizeIntentText(text);
+  if (!t) return null;
+  // "Who is signed in now" is a live-session question, not a login-time
+  // question: it falls through instead of getting the no-times answer.
+  if (/\b(is|are) (currently )?(signed|logged) ?in (now|right now)\b/.test(t)) return null;
+  if (/\b(log ?activity|activity ?log|login ?activity|logout ?activity|login ?history|activity ?history)\b/.test(t)) return STAFF_ACTIVITY_NO_DATA;
+  if (/\b(who|when|what time|what date|did|has|have)\b/.test(t)
+    && /\b(log ?in|log ?out|logged ?in|logged ?out|sign ?in|sign ?out|signed ?in|signed ?out)\b/.test(t)) return STAFF_ACTIVITY_NO_DATA;
+  return null;
 }
 
 // Requests the agent has no tool for: plan, price, billing, staff changes.
@@ -2099,11 +2250,15 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
       }
       // S1 duplicate: same customer + product + amount recorded today,
       // or already waiting as a pending proposal in this session.
+      // "Today" is the business day in the business timezone, the same
+      // window the snapshot uses: a sale at 00:30 WAT is today in Lagos
+      // but yesterday in UTC, and the old UTC-day query missed it.
       let duplicate = false;
       try {
+        const dupWindow = businessDay((auth.business && auth.business.timezone) || "Africa/Lagos", new Date());
         const todayRows = await db.prepare(
-          `SELECT id, customer_id, total_amount FROM sales WHERE business_id = ? AND date(created_at) = date('now')`
-        ).bind(businessId).all();
+          `SELECT id, customer_id, total_amount FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ? AND (status IS NULL OR status <> 'voided')`
+        ).bind(businessId, dupWindow.startUtc, dupWindow.endUtc).all();
         for (const s of (todayRows.results || [])) {
           if (Number(s.total_amount) !== total) continue;
           let saleCustomer = "";
@@ -2139,7 +2294,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
           why: "This is the second time today with the same customer, product and amount.",
           change: "A second sale would record " + fmtCur(total) + " again, and stock of " + first.product.name + " would go from " + first.product.stock + " to " + (first.product.stock - first.qty) + ".",
           safer: "Record it as one sale, not two. The first sale already stands.",
-          question: "Is this a second sale, or did you mean the first one?",
+          question: "Record it again as a second sale?",
           candidates: [],
           saferAction: { action: "reply", reply: "Understood. I will keep the first sale only and I have not recorded a second one. Nothing else changed." },
         } };
@@ -2175,7 +2330,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
       if (resolved.length === 1) {
         try {
           const rec = await db.prepare(
-            `SELECT s.total_amount FROM sales s JOIN sale_items si ON si.sale_id = s.id WHERE s.business_id = ? AND si.product_id = ? ORDER BY s.id DESC LIMIT 5`
+            `SELECT s.total_amount FROM sales s JOIN sale_items si ON si.sale_id = s.id WHERE s.business_id = ? AND si.product_id = ? AND (s.status IS NULL OR s.status <> 'voided') ORDER BY s.id DESC LIMIT 5`
           ).bind(businessId, resolved[0].product.id).all();
           const totals = (rec.results || []).map((r) => Number(r.total_amount) || 0).filter((n) => n > 0);
           const maxRecent = totals.length ? Math.max(...totals) : 0;
@@ -2254,7 +2409,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
             why: "This payment, same customer and same amount, was already recorded today.",
             change: c.name + "'s balance would go from " + fmtCur(c.balance) + " to " + fmtCur(c.balance - amt) + " a second time.",
             safer: "Record it as one payment, not two. The first payment already stands.",
-            question: "Is this a second payment, or did you mean the first one?",
+            question: "Record it again as a second payment?",
             candidates: [],
             saferAction: { action: "reply", reply: "Understood. I will keep the first payment only and I have not recorded a second one. Nothing else changed." },
           } };
@@ -2318,7 +2473,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
       const nowStr = toSqliteDate(new Date());
       const explained = /late|overdue|missed|backdate|already (due|passed)/i.test(String(userMessage || ""));
       if (remindAt < nowStr && !explained) {
-        return stop("That reminder time is in the past (" + remindAt + " UTC). What time should it be instead?");
+        return stop("That reminder time is in the past (" + formatBusinessTime(remindAt, auth.business.timezone) + "). What time should it be instead?");
       }
       return { ok: true };
     }
@@ -2411,7 +2566,6 @@ async function ensurePendingProposals(db) {
   } catch (e) { /* proposals are best effort until migration 0051 lands */ }
 }
 
-const CLEAR_CHAT_RE = /^\s*(?:please\s+)?(?:clear chat|clear the chat|clear this chat|clear my chat|clear conversation|clear history|delete chat|wipe chat|start fresh|start over|fresh start|new chat)\s*[.!?]*\s*$/i;
 // Confirm-tap-only rule (personal agent, best version): chat words never
 // execute a proposal. A bare "yes", "confirm", "go ahead", or their Pidgin,
 // Hausa, Yoruba, and Igbo equivalents in chat only produces the waiting
@@ -2679,13 +2833,13 @@ async function buildBriefing(db, auth, snap, currency) {
   let yesterdaySales = null;
   try {
     const t = await db.prepare(
-      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?`
+      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ? AND (status IS NULL OR status <> 'voided')`
     ).bind(businessId, todayWindow.startUtc, todayWindow.endUtc).first();
     todaySales = { total: Number(t && t.total) || 0, count: Number(t && t.cnt) || 0 };
   } catch (e) {}
   try {
     const y = await db.prepare(
-      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?`
+      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ? AND (status IS NULL OR status <> 'voided')`
     ).bind(businessId, yesterdayWindow.startUtc, yesterdayWindow.endUtc).first();
     yesterdaySales = { total: Number(y && y.total) || 0, count: Number(y && y.cnt) || 0 };
   } catch (e) {}
@@ -2701,7 +2855,7 @@ async function buildBriefing(db, auth, snap, currency) {
         const cust = await db.prepare(`SELECT id FROM customers WHERE business_id = ? AND name = ? LIMIT 1`).bind(businessId, d.name).first();
         if (cust) {
           const oldest = await db.prepare(
-            `SELECT MIN(created_at) AS oldest FROM sales WHERE business_id = ? AND customer_id = ? AND balance_due > 0`
+            `SELECT MIN(created_at) AS oldest FROM sales WHERE business_id = ? AND customer_id = ? AND balance_due > 0 AND (status IS NULL OR status <> 'voided')`
           ).bind(businessId, cust.id).first();
           const days = oldest && oldest.oldest ? daysSince(oldest.oldest) : null;
           if (days !== null) line += `, oldest unpaid sale ${days} ${days === 1 ? "day" : "days"} ago`;
@@ -2735,17 +2889,25 @@ async function buildBriefing(db, auth, snap, currency) {
 }
 
 // PA end-of-day summary: deterministic lines from real data only.
+// Business-timezone windows (round 5): the old UTC-day queries counted
+// the wrong day after midnight WAT, and counted voided sales. "Sales
+// today" and the profit line reuse the snapshot's business-day figures;
+// expenses, best sellers and new debts query the same window here.
 async function buildEodSummary(db, auth, snap, currency) {
   const businessId = auth.business.id;
   const L = [];
   L.push("Here is your end of day summary.");
   L.push(`Sales today: ${fmt(snap.salesToday.total, currency)} across ${snap.salesToday.count} ${snap.salesToday.count === 1 ? "sale" : "sales"}.`);
+  const tz = (auth.business && auth.business.timezone) || "Africa/Lagos";
+  const now = new Date();
+  const todayW = businessDay(tz, now);
+  const tomorrowDate = businessDay(tz, new Date(now.getTime() + 24 * 3600 * 1000)).date;
   let expensesToday = 0;
   let expensesCount = 0;
   try {
     const e = await db.prepare(
-      `SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt FROM expenses WHERE business_id = ? AND date(incurred_on) = date('now')`
-    ).bind(businessId).first();
+      `SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt FROM expenses WHERE business_id = ? AND incurred_on >= ? AND incurred_on < ?`
+    ).bind(businessId, todayW.date, tomorrowDate).first();
     expensesToday = Number(e && e.total) || 0;
     expensesCount = Number(e && e.cnt) || 0;
   } catch (err) {}
@@ -2757,9 +2919,9 @@ async function buildEodSummary(db, auth, snap, currency) {
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
        JOIN products p ON p.id = si.product_id
-       WHERE s.business_id = ? AND date(s.created_at) = date('now')
+       WHERE s.business_id = ? AND s.created_at >= ? AND s.created_at < ? AND (s.status IS NULL OR s.status <> 'voided')
        GROUP BY si.product_id ORDER BY qty DESC LIMIT 3`
-    ).bind(businessId).all();
+    ).bind(businessId, todayW.startUtc, todayW.endUtc).all();
     const best = (rs && rs.results) || [];
     if (best.length) {
       L.push("Best sellers today: " + best.map((b) => `${b.name} (${Number(b.qty) || 0} sold)`).join("; ") + ".");
@@ -2771,8 +2933,8 @@ async function buildEodSummary(db, auth, snap, currency) {
   }
   try {
     const d = await db.prepare(
-      `SELECT COALESCE(SUM(balance_due),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND date(created_at) = date('now') AND balance_due > 0`
-    ).bind(businessId).first();
+      `SELECT COALESCE(SUM(balance_due),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ? AND balance_due > 0 AND (status IS NULL OR status <> 'voided')`
+    ).bind(businessId, todayW.startUtc, todayW.endUtc).first();
     const debtTotal = Number(d && d.total) || 0;
     const debtCount = Number(d && d.cnt) || 0;
     L.push(`New debts today: ${fmt(debtTotal, currency)} across ${debtCount} ${debtCount === 1 ? "sale" : "sales"}.`);
@@ -3034,7 +3196,16 @@ export async function runKopaAiChat(context, auth, body) {
     // Clear chat, language switch, and cancel of a pending
     // proposal run BEFORE the daily question cap and BEFORE the question is
     // counted: none of them may consume a question or be blocked by the cap.
-    if (CLEAR_CHAT_RE.test(message)) {
+    // Clear chat (round 5): asking to clear only ASKS, once, in plain
+    // words. The words never clear anything on their own: the question
+    // is stored as a pending warning (kind "clear_chat") and only a
+    // bare Yes after it executes the clear, in the warning resolver
+    // below. That is the 2026-10-20 order (clear after one quick
+    // confirmation), which the old immediate clear never kept: it
+    // cleared on the words with no confirmation, and its anchored
+    // phrase list missed "clear old chat" and "clearly old chat"
+    // entirely, so those fell to the model and failed.
+    const executeClearChat = async () => {
       await ensurePendingProposals(db);
       try {
         await db.prepare(
@@ -3067,8 +3238,23 @@ export async function runKopaAiChat(context, auth, body) {
       try {
         await audit(context, auth, "ai.chat.clear", "chat", safeBody.sessionId || null, { session_key: sessionKey });
       } catch (e) { /* audit must never break the clear */ }
-      const clearReply = "Done, I have cleared this chat. We are starting fresh.";
-      return { status: 200, body: { ok: true, reply: clearReply, answer: clearReply, actions_taken: [], fallback: false, clear_chat: true } };
+      // clear_chat: true tells send.js to wipe this session's thread
+      // (DELETE FROM chat_messages WHERE session_id = ?) and the
+      // frontend to clear the visible bubbles. Support case tables are
+      // separate and are never touched by this clear.
+      return { status: 200, body: { ok: true, reply: CLEAR_CHAT_DONE, answer: CLEAR_CHAT_DONE, actions_taken: [], fallback: false, clear_chat: true } };
+    };
+    const askClearChatQuestion = async () => {
+      await storePendingWarning(db, {
+        businessId, userId: auth.user.id, sessionKey, tool: "clear_chat",
+        params: {}, summary: "Clear the old chat", lines: [],
+        kind: "clear_chat", question: CLEAR_CHAT_QUESTION, candidates: [],
+        saferAction: { action: "reply", reply: CLEAR_CHAT_DECLINED },
+      });
+      return { status: 200, body: { ok: true, reply: CLEAR_CHAT_QUESTION, answer: CLEAR_CHAT_QUESTION, actions_taken: [], fallback: false } };
+    };
+    if (isClearChatRequest(message)) {
+      return await askClearChatQuestion();
     }
 
     // Language switch: an explicit settings instruction from the owner, so
@@ -3094,8 +3280,14 @@ export async function runKopaAiChat(context, auth, body) {
     }
     let oneOffInstruction = null;
 
+    // A pending warning is the latest question the AI asked, so it is
+    // answered before any older pending proposal: a bare "Yes" with both
+    // pending answers the warning (round 5 capstone), not the proposal.
+    // The proposal block below only runs when no warning is pending;
+    // the warning block after it answers the warning first.
+    const pendingWarning = await loadPendingWarning(db, businessId, sessionKey);
     const pendingProposal = await loadPendingProposal(db, businessId, sessionKey);
-    if (pendingProposal) {
+    if (pendingProposal && !pendingWarning) {
       // Confirm-tap-only: chat words never execute a proposal. A bare
       // "yes" (or its Pidgin, Hausa, Yoruba, or Igbo equivalent) only
       // produces this waiting reply. The proposal stays pending, nothing
@@ -3124,7 +3316,6 @@ export async function runKopaAiChat(context, auth, body) {
     // a Confirm tap); a name answer drops the warning and falls through
     // so the normal flow re-emits with the exact name; any other message
     // supersedes the warning and falls through as a new request.
-    const pendingWarning = await loadPendingWarning(db, businessId, sessionKey);
     if (pendingWarning) {
       let wParams = {};
       let wSafer = { action: "proposal" };
@@ -3134,16 +3325,53 @@ export async function runKopaAiChat(context, auth, body) {
       try { wCandidates = JSON.parse(pendingWarning.candidates || "[]") || []; } catch (e) { wCandidates = []; }
       const normMsg = normalizeIntentText(message);
       const candidateHit = wCandidates.find((c) => normalizeIntentText(c) === normMsg);
-      if (intentMatches(CANCEL_RE, message)) {
+      // Round 5: the warning answer is read before the cancel words, so
+      // a bare "No" to a warning answers the warning (kind-aware reply)
+      // instead of falling into the generic cancel branch below. A bare
+      // "Yes" is likewise a warning answer, not a cancel. This only
+      // runs while a warning is actually pending.
+      const warnAnswer = parseWarningAnswer(message);
+      if (warnAnswer === "drop") {
+        // A bare No (or "drop it" / "never mind") to a warning cancels
+        // it with one plain line. Nothing is drafted and nothing is
+        // recorded. For a duplicate warning the stored safer reply
+        // names the first sale that still stands. A co-pending
+        // proposal is cancelled too: one No ends the whole thread.
         await clearPendingWarnings(db, businessId, sessionKey, "cancelled");
+        if (pendingProposal) {
+          await updateProposalStatus(db, businessId, pendingProposal.id, "cancelled");
+        }
+        const dropReply = (wSafer && wSafer.action === "reply" && wSafer.reply)
+          ? wSafer.reply
+          : "Understood. I cancelled that. Nothing was recorded.";
+        return { status: 200, body: { ok: true, reply: dropReply, answer: dropReply, actions_taken: [], fallback: false } };
+      } else if (intentMatches(CANCEL_RE, message)) {
+        await clearPendingWarnings(db, businessId, sessionKey, "cancelled");
+        // A co-pending proposal is cancelled too: one "Cancel" ends the
+        // whole pending thread, it never leaves an older proposal waiting.
+        if (pendingProposal) {
+          await updateProposalStatus(db, businessId, pendingProposal.id, "cancelled");
+        }
         const warnCancelReply = proposalText.cancelled;
         return { status: 200, body: { ok: true, reply: warnCancelReply, answer: warnCancelReply, actions_taken: [], fallback: false } };
       } else if (candidateHit) {
         await clearPendingWarnings(db, businessId, sessionKey, "superseded");
         // Fall through: the normal flow below re-emits with the exact name.
       } else {
-        const warnAnswer = parseWarningAnswer(message);
-        if (warnAnswer === "once" && pendingWarning.kind === "instruction_conflict") {
+        if (pendingWarning.kind === "clear_chat") {
+          // A bare Yes (or "yes, clear it" and the like) after the one
+          // clear question executes the clear. A No is already handled
+          // by the drop branch above, using the stored declined reply.
+          // Any other message supersedes the question and falls
+          // through as a new request.
+          const clearYes = warnAnswer === "original" || /^\s*yes\b/.test(normMsg);
+          if (clearYes) {
+            await clearPendingWarnings(db, businessId, sessionKey, "answered");
+            return await executeClearChat();
+          }
+          await clearPendingWarnings(db, businessId, sessionKey, "superseded");
+          // Fall through: a new, unrelated request replaces the question.
+        } else if (warnAnswer === "once" && pendingWarning.kind === "instruction_conflict") {
           await clearPendingWarnings(db, businessId, sessionKey, "answered");
           oneOffInstruction = wParams.value || wParams.fact || "";
           // Fall through: the one-off instruction is appended to the
@@ -3245,10 +3473,28 @@ export async function runKopaAiChat(context, auth, body) {
         const done = await handleReminderDone(db, auth, businessId, sessionKey, message, currency, proposalText);
         return { status: 200, body: { ok: true, reply: done.reply, answer: done.reply, actions_taken: [], fallback: false, usage: countedUsage, proposal: done.proposal } };
       }
+      if (fastPath.kind === "activitylog") {
+        // Round 5: staff login/logout activity. No login/logout times
+        // are recorded anywhere yet (no source table, no audit rows),
+        // so every scope gets the honest no-data answer, never a
+        // customer lookup and never invented times. When the
+        // staff-activity build lands (migration 0063,
+        // staff_activity_events), replace this with a real read.
+        return { status: 200, body: { ok: true, reply: STAFF_ACTIVITY_NO_DATA, answer: STAFF_ACTIVITY_NO_DATA, actions_taken: [], fallback: false, usage: countedUsage } };
+      }
+      if (fastPath.kind === "clearchat_question") {
+        // Normally unreachable: the early-intents branch above asks
+        // the question before the cap. This is the backstop so a
+        // clear request that reaches the fast path never falls to
+        // the model and never clears on the words alone.
+        return await askClearChatQuestion();
+      }
       // kind === "action": fall through with a synthetic ACTION line, so
       // the existing parseAction + dispatch below runs unchanged and no
-      // model call is made for it.
-      fastPathAction = fastPath;
+      // model call is made for it. Any other kind must NOT reach the
+      // ACTION render (it would print "ACTION: {}"); it falls through
+      // to the backstops and the model instead.
+      if (fastPath.kind === "action") fastPathAction = fastPath;
     }
 
     // PA deterministic intents (Solo and Pro only). These run in the normal
@@ -3273,6 +3519,19 @@ export async function runKopaAiChat(context, auth, body) {
       if (/reminder/i.test(message) && /(done|mark|complete|finished)/i.test(message)) {
         const done = await handleReminderDone(db, auth, businessId, sessionKey, message, currency, proposalText);
         return { status: 200, body: { ok: true, reply: done.reply, answer: done.reply, actions_taken: [], fallback: false, usage: countedUsage, proposal: done.proposal } };
+      }
+    }
+
+    // Staff login/logout activity (round 5): the business records no
+    // login/logout times anywhere, so these questions are answered here
+    // from the honest no-data text, never by the model (which would
+    // invent times or fail). The fast path owns the "log activity"
+    // routing above; this is the backstop for when it does not match.
+    // It runs after the fast path so a fast-path answer still wins.
+    if (!fastPathAction) {
+      const staffActivity = staffActivityAnswer(message);
+      if (staffActivity) {
+        return { status: 200, body: { ok: true, reply: staffActivity, answer: staffActivity, actions_taken: [], fallback: false, usage: countedUsage } };
       }
     }
 

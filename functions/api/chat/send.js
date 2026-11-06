@@ -536,6 +536,11 @@ export async function onRequestPost(context) {
           isOrderFlow: result.isOrderFlow || false,
           isBookingFlow: result.isBookingFlow || false,
           proposal: result.proposal || null,
+          // Clear chat: the frontend clears the visible thread when
+          // this is set. The thread rows were already wiped above
+          // (DELETE FROM chat_messages WHERE session_id = ?); only the
+          // confirmation line is stored after it.
+          clearChat: result.clearChat || false,
         };
       }
     }

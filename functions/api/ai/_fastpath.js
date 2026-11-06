@@ -28,6 +28,9 @@
 // - { kind: "eod" }                chat.js calls buildEodSummary.
 // - { kind: "reminders" }          chat.js lists due reminders from D1.
 // - { kind: "reminder_done", title } chat.js marks the reminder (proposal).
+// - { kind: "clearchat_question", text } chat.js asks the one
+//   confirmation question, then clears only on a bare Yes (chat.js).
+// - { kind: "activitylog", scope } chat.js answers the staff log read.
 // - null                           not a fast-path intent; use the model.
 
 // ---------------------------------------------------------------------------
@@ -238,6 +241,73 @@ function removeAmount(text, amount) {
 const PAYMENT_VERBS = /\b(paid|pay|payment|received|receive|collected|collect|settled|settle|gave|given)\b/;
 const PAYMENT_FILLER = /\b(record|please|kindly|just|has|have|had|now|the|a|an|payment|paid|pay|received|receive|collected|collect|settled|settle|gave|given|from|to|for|of|me|us|it|that|this|today|yesterday|this morning|on|in full|full|fully|paid up|cleared|clear|balance|in cash|cash|transfer|pos|bank transfer|via|by)\b/g;
 
+// Words that make a payment an expense, never a customer payment:
+// "I paid rent today 70000" is rent, "I paid light 5000" is light,
+// "I paid the staff 40000" is a staff salary. The payment intent fires
+// only for a real customer, so these words must never become a name.
+export const EXPENSE_WORDS = new Set([
+  "rent", "transport", "feeding", "food", "light", "electricity",
+  "fuel", "diesel", "petrol", "airtime", "data", "internet", "water",
+  "salary", "salaries", "wages", "staff", "repairs", "repair",
+  "maintenance", "subscription", "tax", "levy",
+]);
+
+// The expense category a word maps to. The executor only takes a
+// category from params.category (it never derives one from the
+// description), so the fast path sets it here; without it the expense
+// lands as Uncategorised.
+export const EXPENSE_CATEGORY_MAP = {
+  fuel: "Fuel", diesel: "Fuel", petrol: "Fuel",
+  transport: "Transport",
+  rent: "Rent",
+  feeding: "Feeding",
+  food: "Food",
+  light: "Electricity", electricity: "Electricity",
+  airtime: "Airtime",
+  data: "Data",
+  tax: "Tax", levy: "Tax",
+  salary: "Staff/Salary", salaries: "Staff/Salary",
+  staff: "Staff/Salary", wages: "Staff/Salary",
+  repairs: "Repairs", repair: "Repairs", maintenance: "Repairs",
+  water: "Water",
+  internet: "Internet",
+  subscription: "Subscriptions",
+};
+
+// The category for an expense description, from the first word in it
+// that maps to one, or null when no word maps.
+export function expenseCategoryFor(description) {
+  const words = String(description || "").toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  for (const w of words) {
+    if (Object.prototype.hasOwnProperty.call(EXPENSE_CATEGORY_MAP, w)) return EXPENSE_CATEGORY_MAP[w];
+  }
+  return null;
+}
+
+// Clean an expense description into plain words: strip the time tail
+// ("today", "in the morning", "this morning"), strip a leading "I"/"we",
+// and capitalise what is left. "i fuel today" becomes "Fuel", "i
+// transport today" becomes "Transport", "tax collectors" becomes
+// "Tax Collectors". Nothing is invented: only the words the owner used.
+export function cleanExpenseDescription(raw) {
+  let s = String(raw || "").toLowerCase();
+  s = s.replace(/\b(this morning|this afternoon|this evening|in the morning|in the afternoon|in the evening)\b/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  s = s.replace(/(\s*\b(today|yesterday|tonight|now|just|morning|afternoon|evening)\b\s*)+$/, "");
+  s = s.replace(/^(i|we|my|our)\s+/, "");
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  return titleCaseName(s);
+}
+
+// An expense action's params with its category attached when the
+// description maps to one. The executor reads params.category.
+export function withExpenseCategory(params) {
+  const category = expenseCategoryFor(params && params.description);
+  if (!category) return params;
+  return { ...params, category };
+}
+
 export function parsePaymentMention(text) {
   const t = normalizeFastText(text);
   if (!PAYMENT_VERBS.test(t)) return null;
@@ -251,12 +321,23 @@ export function parsePaymentMention(text) {
   rest = rest.replace(/\s+for\s+.*$/, "");
   rest = rest.replace(/\s+(towards|against)\s+.*$/, "");
   rest = rest.replace(PAYMENT_FILLER, " ").replace(/\s+/g, " ").trim();
+  // "log activity" / "activity log" is the activity history, never a
+  // customer: "log" must never survive as a name.
+  rest = rest.replace(/\b(log activity|activity log|activity|log)\b/g, " ").replace(/\s+/g, " ").trim();
   rest = rest.replace(/^[.,;:!?]+|[.,;:!?]+$/g, "").trim();
   if (!rest) return null;
   // First person is not a customer: "I paid 2000 for fuel" is an
   // expense, not a payment from a customer called "I". The expense
-  // parser owns that shape.
+  // parser owns that shape. A leading "I"/"my" is never part of a
+  // name either: "I paid Favour 5000" is a payment from Favour.
+  rest = rest.replace(/^(i|we|my)\s+/, "");
   if (/^(i|we)$/.test(rest)) return null;
+  // An expense word is never a customer name: "I paid rent" is rent,
+  // and neither is a number ("I paid the 3 staff" is a staff payment,
+  // never a customer called "3 Staff").
+  const restWords = rest.split(/\s+/);
+  if (/\d/.test(rest)) return null;
+  if (restWords.some((w) => EXPENSE_WORDS.has(w))) return null;
   // A name is one to four words; anything longer is not a name.
   const words = rest.split(/\s+/);
   if (words.length > 4) return null;
@@ -591,6 +672,67 @@ export function matchSnapshotProduct(name, products) {
   return best;
 }
 
+// Partial payments: "they paid for 2", "paid for 2 remaining 1 is
+// Fortune", "owe for 1". Returns { paidQty, owedQty, debtorName }
+// (owedQty and debtorName may be null) or null when the message states
+// no paid-for count at all. The debtor comes only from the words in
+// this message ("remaining 1 is Fortune", "Fortune owes the rest"),
+// never from a guess.
+function qtyWordToNumber(w) {
+  const lw = String(w || "").toLowerCase();
+  if (/^\d+$/.test(lw)) return Number(lw);
+  return NUMBER_WORD_ONES[lw] !== undefined ? NUMBER_WORD_ONES[lw] : null;
+}
+
+export function parsePartialPayment(text) {
+  const t = normalizeFastText(text);
+  const paidMatch = t.match(/\bpaid\s+for\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/);
+  if (!paidMatch) return null;
+  const paidQty = qtyWordToNumber(paidMatch[1]);
+  if (paidQty === null) return null;
+  let owedQty = null;
+  const remainMatch = t.match(/\bremaining\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/);
+  const oweMatch = t.match(/\b(owe|owes|owing|owed)\s+(?:for\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/);
+  if (remainMatch) owedQty = qtyWordToNumber(remainMatch[1]);
+  else if (oweMatch) owedQty = qtyWordToNumber(oweMatch[2]);
+  let debtorName = null;
+  const remainName = t.match(/\bremaining\s+(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:is\s+)?([a-z]+(?:\s+[a-z]+)?)\s*[.!?]*$/);
+  if (remainName) {
+    const words = remainName[1].trim().split(/\s+/);
+    const stopIdx = words.findIndex((w) => ["and", "or", "but", "he", "she", "they", "it", "will", "would", "pay", "paid", "tomorrow", "today", "now", "for", "to"].includes(w));
+    const clean = (stopIdx >= 0 ? words.slice(0, stopIdx) : words).join(" ").trim();
+    if (clean && !isPronounWord(clean.split(" ")[0])) debtorName = titleCaseName(clean);
+  }
+  if (!debtorName) {
+    const owesName = t.match(/\b([a-z]+(?:\s+[a-z]+)?)\s+owes\b/);
+    if (owesName) {
+      const name = owesName[1].trim();
+      if (name && !isPronounWord(name.split(" ")[0])) debtorName = titleCaseName(name);
+    }
+  }
+  return { paidQty, owedQty, debtorName };
+}
+
+// Strip a trailing "s" from a word when the singular matches a word in
+// a snapshot product name, case-insensitive: "laptops" matches Laptop,
+// "fvamails" matches Fvamail. The singular is only stripped when a
+// snapshot product actually carries it, so a real plural name is never
+// mangled.
+export function normalizePluralProduct(name, products) {
+  const words = String(name || "").split(/\s+/).filter(Boolean);
+  const productWordsSet = new Set();
+  for (const p of products || []) {
+    for (const w of String(p.name || "").toLowerCase().split(/\s+/)) productWordsSet.add(w);
+  }
+  return words.map((w) => {
+    const lw = w.toLowerCase();
+    if (lw.length > 3 && lw.endsWith("s") && !lw.endsWith("ss") && productWordsSet.has(lw.slice(0, -1))) {
+      return w.slice(0, -1);
+    }
+    return w;
+  }).join(" ");
+}
+
 // Snapshot-aware sale: quantity, product (exact snapshot name), customer,
 // "paid full" / "paid half" / "paid <amount>", and a stated payment
 // method, all from one sentence. Returns { kind: "action", tool, params }
@@ -605,11 +747,13 @@ export function parseSaleSnapshot(text, history, snap, currency) {
   const parsed = parseSaleMention(text);
   if (!parsed || !parsed.items || !parsed.items.length) return null;
   const items = [];
+  const unitPrices = [];
   let total = 0;
   for (const it of parsed.items) {
-    const match = matchSnapshotProduct(it.product, snap.products);
+    const match = matchSnapshotProduct(normalizePluralProduct(it.product, snap.products), snap.products);
     if (!match) return null;
     items.push({ product: match.name, qty: it.qty });
+    unitPrices.push(Number(match.price) || 0);
     total += (Number(match.price) || 0) * it.qty;
   }
   total = Math.round(total * 100) / 100;
@@ -622,8 +766,14 @@ export function parseSaleSnapshot(text, history, snap, currency) {
   if (customerName) params.customer_name = customerName;
   if (parsed.amount_paid !== undefined && parsed.amount_paid !== null) {
     params.amount_paid = parsed.amount_paid;
+  } else if (parsed.paid_qty !== undefined && parsed.paid_qty !== null && items.length === 1) {
+    // A partial payment: "paid for 2" of 3 laptops is 2 x the unit
+    // price, with the rest owed. Never the full total.
+    params.amount_paid = Math.round(unitPrices[0] * parsed.paid_qty * 100) / 100;
   } else if (/\bpaid\s+half\b/.test(t)) {
     params.amount_paid = Math.round((total / 2) * 100) / 100;
+  } else if (/\b(paid|pay)\s+(in\s+)?full\b/.test(t) || /\bfull\s+price\b/.test(t)) {
+    params.amount_paid = total;
   } else if (/\bpaid\b/.test(t)) {
     params.amount_paid = total;
   }
@@ -643,12 +793,12 @@ const SALE_VERBS = /\b(record|new|add|sold|sell|sale|sales|bought)\b/;
 // A buyer reporting what a customer did ("someone bought 5 fvamail") is
 // a sale, not a payment or an expense: the buyer is never part of a
 // product or customer name, and implies a walk-in customer.
-const SALE_BUYER_WORDS = /\b(someone|somebody|some person|a new customer|new customer|a customer|anybody|anyone)\b/g;
+const SALE_BUYER_WORDS = /\b(someone|somebody|some person|a new customer|new customer|a customer|anybody|anyone|some)\b/g;
 
 // Words that can only ever be part of a question, never a product name.
 // Used to stop a sales-history question ("what did we sell today?")
 // becoming a product called "what did we".
-const QUESTION_WORDS = new Set(["what", "which", "who", "whom", "whose", "when", "where", "why", "how", "did", "do", "does", "is", "are", "was", "were", "can", "could", "should", "would", "have", "has", "had", "we", "i", "you", "they", "he", "she", "it", "me", "us", "them", "him", "her", "his", "their", "my", "our", "your", "this", "that", "there", "here"]);
+const QUESTION_WORDS = new Set(["what", "which", "who", "whom", "whose", "when", "where", "why", "how", "many", "much", "did", "do", "does", "is", "are", "was", "were", "can", "could", "should", "would", "have", "has", "had", "we", "i", "you", "they", "he", "she", "it", "me", "us", "them", "him", "her", "his", "their", "my", "our", "your", "this", "that", "there", "here"]);
 
 export function isQuestionWordsOnly(product) {
   const words = String(product || "")
@@ -681,10 +831,17 @@ const SALE_METHODS = [
 export function parseSaleMention(text) {
   const t = normalizeFastText(text);
   if (!SALE_VERBS.test(t)) return null;
+  // A count question is never a sale: "how many sales we sold today?"
+  // is a read, and "how many" must never become a product name.
+  if (/^\s*how many\b/.test(t)) return null;
+  // A partial payment ("paid for 2", "remaining 1 is Fortune") is
+  // read first, before the payment tail is stripped away below.
+  const partial = parsePartialPayment(text);
   // A bought-only message is a sale only when a third party bought it
-  // ("someone bought 5 fvamail"): first-person "I bought fuel" is the
-  // owner buying supplies, which the expense step owns.
-  if (isBoughtOnly(t) && !isBuyerSale(t)) return null;
+  // ("someone bought 5 fvamail", "he bought a laptop"): first-person
+  // "I bought fuel" is the owner buying supplies, which the expense
+  // step owns.
+  if (isBoughtOnly(t) && !isBuyerSale(t) && !isPronounBuyerSale(t)) return null;
   let rest = t;
   // A leading acknowledgement ("Great, now record a sale") is discourse,
   // not a product: strip it before the sale is read.
@@ -709,13 +866,13 @@ export function parseSaleMention(text) {
   // unset for it, and the executor defaults an unset amount to the
   // full total.
   let amountPaid = null;
-  const paidMatch = rest.match(/\bpaid\s+(\d[\d,]*\.?\d*)\s*(million|thousand|k|m)?/i);
+  const paidMatch = rest.match(/\b(paid|pay)\s+(\d[\d,]*\.?\d*)\s*(million|thousand|k|m)?/i);
   if (paidMatch) {
     const found = findAmounts(paidMatch[0]);
     if (found.length) amountPaid = found[0].value;
     rest = rest.replace(paidMatch[0], " ");
   } else {
-    const paidWordTail = rest.match(/\bpaid\s+([a-z]+(?:\s+[a-z]+){0,5})/i);
+    const paidWordTail = rest.match(/\b(paid|pay)\s+([a-z]+(?:\s+[a-z]+){0,5})/i);
     if (paidWordTail) {
       const found = findAllAmounts(paidWordTail[1]);
       if (found.length && found[0].index === 0) {
@@ -742,9 +899,13 @@ export function parseSaleMention(text) {
     }
   }
   // Payment tail without an amount ("he paid full in cash", "she paid
-  // half", "paid"): remove it before the customer is read, or "fortune
-  // he paid full" becomes the customer name.
-  rest = rest.replace(/\b(?:he|she|they|it|i|we)?\s*paid\b.*$/, " ").replace(/\s+/g, " ").trim();
+  // half", "they pay full price", "paid"): remove it before the
+  // customer is read, or "fortune he paid full" becomes the customer
+  // name.
+  rest = rest.replace(/\b(?:he|she|they|it|i|we)?\s*(paid|pay)\b.*$/, " ").replace(/\s+/g, " ").trim();
+  // A "record it" tail is an instruction, never part of a name:
+  // "I sold a laptop to Favour record it" is a sale to Favour.
+  rest = rest.replace(/\brecord\s+(it|that|this|am)\b.*$/, " ").replace(/\s+/g, " ").trim();
   // Customer: a trailing "to <name>" or "for <name>".
   let customerName = "";
   const toMatch = rest.match(/\bto\s+([a-z][a-z' ]+?)\s*$/);
@@ -758,16 +919,25 @@ export function parseSaleMention(text) {
       rest = rest.replace(forName[0], " ");
     }
   }
+  // A name stops at conjunctions and verbs: "to some and they pay full
+  // price" is no customer at all (the buyer words were already
+  // stripped), and a payment phrase never becomes the name.
+  if (customerName) {
+    customerName = customerName.split(/\b(and|or|but|pay|paid|record|they|he|she|it|for|to)\b/)[0].trim();
+  }
+  // The partial-payment debtor ("remaining 1 is Fortune") is the
+  // customer when no "to <name>" named one.
+  if (!customerName && partial && partial.debtorName) customerName = partial.debtorName;
   // Remove the sale verbs and filler, then split into item segments.
   // "another" is filler too ("sold another laptop" is one Laptop).
   // A dangling "to"/"for" left behind when the buyer words were stripped
   // ("sold a laptop to somebody" -> "sold a laptop to") is dropped here,
   // so it never lands in a product name.
   rest = rest
-    .replace(/\b(record|new|add|sold|sell|sale|sales|bought|of|the|a|an|please|kindly|just|item|items|product|i|we|another)\b/g, " ")
+    .replace(/\b(record|new|add|sold|sell|sale|sales|bought|of|the|a|an|please|kindly|just|item|items|product|i|we|another|he|she|they|him|her|them)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/\s*\b(to|for)\s*$/, "")
+    .replace(/(\s*\b(to|for|and)\b\s*)+$/, "")
     .trim();
   const items = [];
   if (rest) {
@@ -807,6 +977,9 @@ export function parseSaleMention(text) {
   if (customerName) params.customer_name = titleCaseName(customerName);
   if (amountPaid !== null) params.amount_paid = amountPaid;
   if (paymentMethod) params.payment_method = paymentMethod;
+  // A partial payment ("paid for 2 of 3") carries the paid count; the
+  // snapshot-aware parser turns it into an amount from the price.
+  if (partial && partial.paidQty !== null && partial.paidQty !== undefined) params.paid_qty = partial.paidQty;
   return params;
 }
 
@@ -817,21 +990,133 @@ export function parseSaleMention(text) {
 
 const EXPENSE_VERBS = /\b(record|add|spent|spend|expense|expenses|bought)\b/;
 
-export function parseExpenseMention(text) {
+// "I gave <recipient> <amount> (for <purpose>)": an expense, never a
+// customer payment, unless the recipient matches a snapshot debtor.
+// "I gave my staff 2000 for feeding" is staff feeding; "I gave tax
+// collectors 200 in the morning" is tax; "I gave the cleaner 1500
+// today" is the cleaner. Money given TO the owner ("Favour gave me
+// 5000") is not this: the recipient is the owner, so it stays a
+// payment, and a debtor as the giver stays a payment from them.
+// Names the business already knows as customers: debtors (balance > 0)
+// plus anyone a recent sale was made to. The snapshot carries debtors
+// only, so a zero-balance customer like Favour would otherwise look
+// like a stranger. Used by the give-expense route: giving money TO a
+// known customer is a payment, never an expense.
+function isKnownCustomerName(name, snap) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  const debtors = (snap && snap.debtors) || [];
+  if (debtors.some((d) => String(d.name || "").toLowerCase() === n)) return true;
+  const recent = (snap && snap.recentSales) || [];
+  if (recent.some((s) => String(s.customer || "").toLowerCase() === n)) return true;
+  return false;
+}
+
+export function parseGiveExpense(text, snap) {
   const t = normalizeFastText(text);
+  const giveMatch = t.match(/\b(give|gave|given)\b/);
+  if (!giveMatch) return null;
+  const giveIdx = giveMatch.index;
+  // A debtor giving money is a payment from them, not an expense.
+  const giverPart = t.slice(0, giveIdx);
+  if (findDebtorsInText(giverPart, snap).length) return null;
+  const amounts = findAllAmounts(t);
+  if (!amounts.length) return null;
+  const amount = amounts[0];
+  // The recipient sits between the give verb and the amount.
+  let before = t.slice(giveIdx + giveMatch[0].length, amount.index);
+  let after = t.slice(amount.index + amount.length);
+  let recipient = before
+    .replace(/\b(to|for|the|a|an|my|our|please|kindly|i|we)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!recipient) {
+    // "I gave 2000 to my staff": the recipient follows the amount.
+    const toMatch = after.match(/\bto\s+([a-z][a-z' ]+?)(?:\s+for\s+.*)?$/);
+    if (toMatch) recipient = toMatch[1].trim();
+  }
+  if (!recipient) return null;
+  // "me"/"us" as the recipient is money coming TO the owner: a payment
+  // received, never an expense. A known customer as the recipient is a
+  // payment to them, and the payment parser owns it.
+  if (/^(me|us)$/.test(recipient)) return null;
+  if (isKnownCustomerName(recipient, snap)) return null;
+  // The purpose follows "for"; a "record it" tail is not part of it.
+  let purpose = "";
+  const forMatch = after.match(/\bfor\s+(.+)$/);
+  if (forMatch) {
+    purpose = forMatch[1].replace(/\brecord\s+(it|that|this|am)\b.*$/, "").trim();
+  }
+  const description = cleanExpenseDescription((recipient + " " + purpose).trim());
+  if (!description) return null;
+  return { amount: amount.value, description };
+}
+
+// "I paid the 3 staff today 40k" is a staff salary: 40k EACH, so the
+// total is 40,000 x 3. "I paid my staff 40000" is one lump sum.
+// "I paid the staff 40k" with no count is genuinely ambiguous, so ask
+// whether it is each or for all, never guess. When the count in the
+// message differs from the snapshot's staff count, the proposal says so
+// instead of silently correcting the number.
+export function parseStaffPayment(text, snap, currency) {
+  const t = normalizeFastText(text);
+  if (!/\bpaid\b/.test(t) || !/\bstaff\b/.test(t)) return null;
+  if (!/\b(i|we)\b/.test(t)) return null;
+  const amounts = findAllAmounts(t);
+  if (!amounts.length) return null;
+  const staffIdx = t.indexOf("staff");
+  const countMatch = t.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+staff\b/);
+  let countValue = null;
+  if (countMatch) {
+    const c = countMatch[1];
+    countValue = /^\d+$/.test(c) ? Number(c) : NUMBER_WORD_ONES[c];
+  }
+  // The money amount is the amount after the staff word (the count
+  // number before "staff" is not money).
+  const afterStaff = amounts.filter((a) => a.index > staffIdx);
+  const money = afterStaff.length ? afterStaff[afterStaff.length - 1] : amounts[amounts.length - 1];
+  if (!money || !(money.value > 0)) return null;
+  const rawTok = t.slice(money.index, money.index + money.length);
+  if (countValue !== null && countValue > 0) {
+    const total = Math.round(money.value * countValue * 100) / 100;
+    const staffCount = snap && Number.isFinite(Number(snap.staffCount)) ? Number(snap.staffCount) : null;
+    const note = staffCount !== null && staffCount !== countValue
+      ? `business shows ${staffCount} staff members`
+      : null;
+    const description = note
+      ? `Staff salary for ${countValue} staff (${note})`
+      : `Staff salary for ${countValue} staff`;
+    return { params: { amount: total, description, category: "Staff/Salary" } };
+  }
+  if (/\bmy staff\b/.test(t)) {
+    return { params: { amount: money.value, description: "Staff salary", category: "Staff/Salary" } };
+  }
+  return { question: `Is that ${rawTok} each or ${rawTok} for all?` };
+}
+
+export function parseExpenseMention(text, snap) {
+  const t = normalizeFastText(text);
+  // "give/gave <recipient> <amount> (for <purpose>)" is an expense
+  // with no expense verb in it.
+  const give = parseGiveExpense(text, snap);
+  if (give) return give;
   // "I paid 2000 for fuel" is an expense, not a payment from a customer
   // called "I": first-person "paid ... for ..." counts as an expense
-  // verb here. Any other "paid" without the word "expense" stays a
-  // payment (the guard below), so "Favour paid 5000" never lands here.
+  // verb here. "I paid <expense-word> <amount>" ("I paid rent today
+  // 70000", "I paid light 5000") is one too. Any other "paid" without
+  // the word "expense" stays a payment (the guard below), so "Favour
+  // paid 5000" never lands here.
   const firstPersonPaidFor = /\b(i|we)\s+paid\b/.test(t) && /\bfor\b/.test(t);
-  if (!EXPENSE_VERBS.test(t) && !firstPersonPaidFor) return null;
+  const firstPersonPaidExpense = /\b(i|we)\s+(paid|pay)\b/.test(t)
+    && t.split(/\s+/).some((w) => EXPENSE_WORDS.has(w.replace(/[^a-z]/g, "")));
+  if (!EXPENSE_VERBS.test(t) && !firstPersonPaidFor && !firstPersonPaidExpense) return null;
   // Must be an expense intent, not a sale or payment. "bought" alone does
   // not block the expense parser: "I bought fuel" is an expense, while
   // "someone bought 5 fvamail" is a sale only because the bought item
   // matches a snapshot product, which the sale step (step 11, before
   // this one) already claimed. A non-bought sale verb does block it.
   if (/\b(record|new|add|sold|sell|sale|sales)\b/.test(t) && !/\bexpense\b/.test(t)) return null;
-  if (PAYMENT_VERBS.test(t) && !/\bexpense\b/.test(t) && !firstPersonPaidFor) return null;
+  if (PAYMENT_VERBS.test(t) && !/\bexpense\b/.test(t) && !firstPersonPaidFor && !firstPersonPaidExpense) return null;
   const amounts = findAllAmounts(t);
   let amount = null;
   let rest = t;
@@ -839,13 +1124,8 @@ export function parseExpenseMention(text) {
     amount = amounts[0].value;
     rest = removeAmount(t, amounts[0]);
   }
-  // The description parser is unchanged on purpose: "I spend 5000 for
-  // transport today" still records the description "i transport today"
-  // (live quirk, out of scope). Only the first-person "paid for" shape
-  // strips its subject and verb, so "I paid 2000 for fuel" records
-  // "fuel".
-  const strip = firstPersonPaidFor
-    ? /\b(record|add|spent|spend|expense|expenses|bought|paid|an|the|a|please|kindly|just|for|on|of|to|i|we)\b/g
+  const strip = firstPersonPaidFor || firstPersonPaidExpense
+    ? /\b(record|add|spent|spend|expense|expenses|bought|paid|pay|an|the|a|please|kindly|just|for|on|of|to|i|we|today|yesterday|now)\b/g
     : /\b(record|add|spent|spend|expense|expenses|bought|an|the|a|please|kindly|just|for|on|of|to)\b/g;
   rest = rest
     .replace(strip, " ")
@@ -853,7 +1133,39 @@ export function parseExpenseMention(text) {
     .trim()
     .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
     .trim();
-  return { amount, description: rest };
+  const description = cleanExpenseDescription(rest);
+  // "I bought 5 fvamail" is 5 of a product, not 5 of money: when the
+  // bought thing matches a snapshot product, the amount is a quantity
+  // times the snapshot price. A money amount after the product name
+  // ("I bought 5 fvamail for 2500") wins over the computed one. A
+  // number inside the product name itself ("Rice 5kg") is never money.
+  if (snap && /\bbought\b/.test(t) && description) {
+    const match = matchSnapshotProduct(description, (snap.products || []));
+    if (match) {
+      const firstWord = match.name.toLowerCase().split(" ")[0];
+      const prodIdx = t.indexOf(firstWord);
+      const nameEnd = prodIdx >= 0 ? prodIdx + match.name.length : -1;
+      const moneyAmounts = amounts.filter((a) => a.index >= nameEnd);
+      const qtyAmounts = amounts.filter((a) => prodIdx >= 0 && a.index + a.length <= prodIdx);
+      if (moneyAmounts.length) {
+        amount = moneyAmounts[moneyAmounts.length - 1].value;
+      } else if (qtyAmounts.length) {
+        amount = Math.round(qtyAmounts[0].value * (Number(match.price) || 0) * 100) / 100;
+      }
+    }
+  }
+  return { amount, description };
+}
+
+// First-person "paid" expenses, for the early-expense step that runs
+// before the payment intent: "I paid rent today 70000", "I paid 2000
+// for fuel", "I paid light 5000". Staff is owned by parseStaffPayment,
+// which runs first.
+export function parseFirstPersonExpense(text, snap) {
+  const t = normalizeFastText(text);
+  if (!/\b(i|we)\s+(paid|pay)\b/.test(t)) return null;
+  if (/\bstaff\b/.test(t)) return null;
+  return parseExpenseMention(text, snap);
 }
 
 // ---------------------------------------------------------------------------
@@ -950,7 +1262,7 @@ export function parseBalanceQuery(text) {
   // intent; a generic plural is not a customer name.
   if (/\b(who|anyone|anybody|everyone|everybody|all)\b/.test(t) && !/\bdoes\b/.test(t)) return null;
   let rest = t
-    .replace(/\b(how|much|does|do|is|what|the|a|an|check|show|tell|me|for|please|kindly|anything|owe|owes|owing|balance|debt|outstanding|left|still)\b/g, " ")
+    .replace(/\b(how|much|does|do|is|what|the|a|an|check|show|tell|me|for|please|kindly|anything|owe|owes|owing|balance|debt|outstanding|left|still|log|activity)\b/g, " ")
     .replace(/'s/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -1159,21 +1471,41 @@ export function parseProjectTransaction(text) {
 // Scans recent user turns for an unrecorded payment, sale or expense.
 // ---------------------------------------------------------------------------
 
-export const RECORD_IT_RE = /^\s*(record it now|record that now|record it|record that|record am|record this|do it|go ahead and record|yes record|record the payment|record the sale|record the expense)\s*[.!?]*\s*$/i;
+export const RECORD_IT_RE = /^\s*(?:(and|so|then|please|kindly|ok|okay)[,!\s]+)?(record it now|record that now|record it|record that|record am|record this|do it|go ahead and record|yes record|record the payment|record the sale|record the expense)\s*[.!?]*\s*$/i;
 
 export function isRecordIt(text) {
   return RECORD_IT_RE.test(String(text || "").trim());
 }
 
 // Most recent unrecorded mention in the history (last 6 user turns).
-// Returns { kind: "payment"|"sale"|"expense", ...parsed } or null.
+// Returns { kind: "payment"|"sale"|"expense", ...parsed },
+// { kind: "question", text } when the mention is genuinely ambiguous
+// (the staff each-or-all question), or null.
 // With a snapshot, a full-balance mention ("Favour paid in full") also
-// resolves, taking its amount from the snapshot.
-export function findPendingMention(history, snap) {
+// resolves, taking its amount from the snapshot. Expense shapes run
+// before the payment parse on purpose: "I gave my staff 2000 for
+// feeding" and "I paid rent today 70000" are expenses, and the payment
+// parser would otherwise swallow them as customers called "I My Staff"
+// and "I Rent".
+export function findPendingMention(history, snap, currency) {
   const turns = (history || []).filter((h) => h && h.role === "user" && typeof h.content === "string").slice(-6);
   for (let i = turns.length - 1; i >= 0; i--) {
     const content = turns[i].content;
     const payment = parsePaymentMention(content);
+    const staffPay = parseStaffPayment(content, snap, currency);
+    if (staffPay && staffPay.params) return { kind: "expense", ...staffPay.params };
+    if (staffPay && staffPay.question) return { kind: "question", text: staffPay.question };
+    // A real payment still wins over the first-person expense shape:
+    // "I paid Favour 5000 for transport" pays Favour. The give shape
+    // runs first: it already returns null for a known-customer
+    // recipient, so "I gave the cleaner 1500" is an expense while
+    // "I gave Favour 5000" still reaches the payment below.
+    const giveExpense = parseGiveExpense(content, snap);
+    if (giveExpense) return { kind: "expense", ...giveExpense };
+    if (!payment) {
+      const firstExpense = parseFirstPersonExpense(content, snap);
+      if (firstExpense && (firstExpense.amount || firstExpense.description)) return { kind: "expense", ...firstExpense };
+    }
     if (payment) return { kind: "payment", ...payment };
     if (snap) {
       const full = parseFullBalanceMention(content, history, snap);
@@ -1181,7 +1513,7 @@ export function findPendingMention(history, snap) {
     }
     const sale = parseSaleMention(content);
     if (sale && sale.items && sale.items.length) return { kind: "sale", ...sale };
-    const expense = parseExpenseMention(content);
+    const expense = parseExpenseMention(content, snap);
     if (expense && (expense.amount || expense.description)) return { kind: "expense", ...expense };
   }
   return null;
@@ -1214,6 +1546,20 @@ export function classifyReadIntent(text) {
   if (includesAny(t, ["end of day", "day summary", "today's summary", "todays summary", "how did we do today", "close of day", "end of day summary"])) return "eod";
   if (includesAny(t, ["reminders due", "reminders", "what reminders", "any reminders", "remind me list", "due reminders", "what is due", "whats due"])) return "reminders";
   if (/\breminder\b/.test(t) && /\b(done|mark|complete|finished)\b/.test(t)) return "reminder_done";
+  // Business advice and planning: snapshot-based, never the model and
+  // never Support. "Let's plan" on its own is business planning, not a
+  // project to create: when the message also names a project, the
+  // project step owns it instead.
+  if (!/\bproject\b/.test(t) && includesAny(t, ["advice me", "advise me", "advice", "advise", "how to improve", "improve my business", "improve our business", "improve the business", "business improvement", "let's plan", "lets plan", "let us plan", "plan for our business", "plan my business", "plan our business", "grow my business", "grow our business"])) return "advice";
+  if (/\bproject\b/.test(t) && includesAny(t, ["advice me", "advise me", "how to improve", "improve my business", "improve our business", "improve the business", "business improvement", "plan for our business", "plan my business", "plan our business", "grow my business", "grow our business"])) return "advice";
+  // Activity log: staff logins and logouts with exact times, from the
+  // log. "log activity" / "activity log" is the history, never a
+  // customer called "Log".
+  if (includesAny(t, ["log activity", "activity log", "activity history", "staff login", "staff logins", "who logged in", "who log in", "who logged out", "when did my staff log", "staff logout", "staff log out", "login history", "logins today", "logged in today", "logged out"])) return "activitylog";
+  // Inventory value: what everything in store is worth at selling
+  // price. Runs before the stock read on purpose: "what is my stock
+  // worth" contains the word "stock" and would otherwise list stock.
+  if (includesAny(t, ["how much total does i have in products", "how much total in products", "total in products", "inventory value", "total stock value", "stock value", "how much does everything in store worth", "everything in store worth", "what is my stock worth", "how much is my stock worth", "total value of my products", "what are my products worth", "how much are my products worth", "value of my products", "products worth", "everything in the store worth", "what is everything worth"])) return "inventoryvalue";
   if (includesAny(t, ["who owes", "who owe", "who dey owe", "who is owing", "who is owed", "debtors", "customers owing", "who owes me", "who owes us", "who still owes", "anyone owing", "who has not paid", "who hasn't paid", "unpaid customers"])) return "debtors";
   if (includesAny(t, ["low stock", "running low", "running out", "out of stock", "low on stock", "almost finished", "almost out"])) return "lowstock";
   if (includesAny(t, ["stock", "inventory", "how much stock", "what do we have in stock", "check stock", "stock levels", "stock level"])) return "stock";
@@ -1222,16 +1568,35 @@ export function classifyReadIntent(text) {
   // them, so "show my stock" keeps answering exactly as it does today.
   // Bare "My products" only counts as a whole message: "what is the best
   // way to price my products?" is a pricing question, not a list request.
-  if (includesAny(t, ["list out my products", "list my products", "show me my products", "show my products", "show me the products", "list the products", "list products", "show products", "what products do i have", "what products have i", "what products", "product list", "products list"])) return "products";
+  if (includesAny(t, ["list out my products", "list out our products", "list out products", "list out the products", "list my products", "list our products", "show me my products", "show my products", "show our products", "show me our products", "show me the products", "list the products", "list products", "show products", "what products do i have", "what products have i", "what products", "product list", "products list"])) return "products";
   // Customer list: the snapshot carries only the debtors (customers with
   // a balance), so that is the list it can answer with. A full customer
   // list needs the snapshot to carry all customers; it does not yet, and
   // this must never invent customers to fill the gap.
-  if (includesAny(t, ["list my customers", "show my customers", "who are my customers", "list customers", "show customers", "customer list"])) return "customers";
+  if (includesAny(t, ["list my customers", "show my customers", "who are my customers", "list customers", "show customers", "customer list", "customers list", "list out my customers", "list out customers", "list out the customers"])) return "customers";
   // Project list (plural "projects" + list/show/what/my). A single
   // project report ("how is the browser apk project doing") is singular
-  // "project" and stays on the project_report path below.
-  if (includesAny(t, ["what projects are do i have", "what projects do i have", "list my projects", "show my projects", "list projects", "show projects", "what projects", "projects list"])) return "projects";
+  // "project" and stays on the project_report path below. The bare
+  // singular "project list" is a list, not a report: it has the word
+  // "list" and no report verb, so it belongs here, never the model.
+  if (includesAny(t, ["what projects are do i have", "what projects do i have", "list my projects", "show my projects", "list projects", "show projects", "what projects", "projects list", "project list", "list out my projects", "list out projects", "list out the projects"])) return "projects";
+  // Bare "<thing> list" as a whole message, singular or plural, with
+  // or without "my": "project list", "product list", "customer list",
+  // "sales list", "expense list", "staff list". The snapshot carries
+  // only a staff count, not staff names, so "staff list" answers with
+  // the count and says so plainly through formatCountStaff, never by
+  // inventing names. This runs before the count questions below so a
+  // bare list phrase is never read as a product lookup.
+  const bareThingList = t.match(/^\s*(my\s+)?(projects?|products?|customers?|sales?|expenses?|staff)\s+list\s*[.!?]*$/);
+  if (bareThingList) {
+    const thing = bareThingList[2];
+    if (/^projects?$/.test(thing)) return "projects";
+    if (/^products?$/.test(thing)) return "products";
+    if (/^customers?$/.test(thing)) return "customers";
+    if (/^sales?$/.test(thing)) return "recentsales";
+    if (/^expenses?$/.test(thing)) return "recentexpenses";
+    if (/^staff$/.test(thing)) return "countstaff";
+  }
   // Bare "My <things>" as a whole message: "My products", "My customers",
   // "My projects", "My sales", "My expenses". Anchored, so a longer
   // question that merely mentions the noun ("what is the best way to
@@ -1240,16 +1605,33 @@ export function classifyReadIntent(text) {
   if (bareList) {
     return { products: "products", customers: "customers", projects: "projects", sales: "recentsales", expenses: "recentexpenses" }[bareList[1]];
   }
+  // Count questions: "how many" is a count read, never a sale or a
+  // product lookup. Each count comes from its own snapshot list.
+  if (/^\s*how many\b/.test(t)) {
+    if (/\bprojects?\b/.test(t)) return "countprojects";
+    if (/\bstaffs?\b/.test(t) || /\bco[- ]?owners?\b/.test(t)) return "countstaff";
+    if (/\bcustomers?\b/.test(t)) return "countcustomers";
+    if (/\bsales?\b/.test(t)) return "countsalestoday";
+    if (/\bproducts?\b/.test(t)) return "countproducts";
+  }
   if (includesAny(t, ["sales today", "today's sales", "todays sales", "sales so far today", "how much did we sell today", "how much we sell today", "wetin we sell today", "what did we sell today", "what did i sell today", "what have i sold today", "what have we sold today", "today sales", "sales for today", "what did we sold today", "what did i sold today", "what have we sold today", "what have i sold today", "what sold today", "what we sold today"])) return "today";
+  // Yesterday: the snapshot now carries salesYesterday in the business
+  // timezone. A snapshot without that field is answered by falling
+  // through (the read step returns null for it), never by guessing.
+  if (includesAny(t, ["what did we sell yesterday", "what have we sold yesterday", "what did i sell yesterday", "what have i sold yesterday", "yesterday's sales", "yesterdays sales", "yesterday sales", "sales yesterday", "how much did we sell yesterday", "how much did i sell yesterday", "what sold yesterday"])) return "yesterday";
   // Bare "what did we sold" / "what have we sold" (no "today") as a whole
-  // message still means today: the snapshot has no yesterday read, and a
-  // substring match would also catch "... yesterday", which is a different
-  // day. Anchored, so "what did we sell yesterday" never lands here.
+  // message still means today: a substring match would also catch "...
+  // yesterday", which is a different day and has its own read above.
+  // Anchored, so "what did we sell yesterday" never lands here.
   if (/^\s*what (did|have) (we|i) (sold|sell)\s*[.!?]*$/.test(t)) return "today";
   if (includesAny(t, ["sales this month", "sales for the month", "this month sales", "how much did we sell this month", "monthly sales", "sales month"])) return "month";
   if (includesAny(t, ["how much did i spend this month", "how much did we spend this month", "what did i spend this month", "my spending this month", "spending this month", "expenses this month", "expenses for the month"])) return "monthexpenses";
-  if (includesAny(t, ["recent sales", "last sales", "latest sales", "sales history", "show sales", "last few sales", "recent transactions", "list my sales", "show my sales", "list sales", "sales list"])) return "recentsales";
-  if (includesAny(t, ["recent expenses", "last expenses", "latest expenses", "show expenses", "what did we spend", "what have we spent", "list my expenses", "show my expenses", "list expenses", "expenses list"])) return "recentexpenses";
+  // Profit: sales minus expenses, per window. There is no cost_price in
+  // the snapshot, so a gross margin from cost is not computable and is
+  // never invented; the formatter says plainly when a window is missing.
+  if (includesAny(t, ["how much profit", "profit today", "profit this week", "profit this month", "profit this year", "profit we made", "what profit", "my profit", "our profit", "profit made"])) return "profit";
+  if (includesAny(t, ["recent sales", "last sales", "latest sales", "sales history", "show sales", "last few sales", "recent transactions", "list my sales", "show my sales", "list sales", "sales list", "sale list", "list out my sales", "list out sales", "list out the sales"])) return "recentsales";
+  if (includesAny(t, ["recent expenses", "last expenses", "latest expenses", "show expenses", "what did we spend", "what have we spent", "list my expenses", "show my expenses", "list expenses", "expenses list", "expense list", "list out my expenses", "list out expenses", "list out the expenses"])) return "recentexpenses";
   return null;
 }
 
@@ -1314,9 +1696,157 @@ export function formatProjects(snap, currency) {
     const balance = t.balance !== undefined && t.balance !== null
       ? Number(t.balance)
       : (Number(t.totalIncome || 0) - Number(t.totalExpense || 0));
-    return `- #${p.id} ${p.name}: ${p.status}, budget ${formatMoney(p.budget, currency)}, balance ${formatMoney(balance, currency)}`;
+    // Income and expenses are shown when the project has any: the
+    // project list must carry the full figures, not just the budget
+    // and the balance. Zero-activity projects show budget and balance
+    // only, exactly as before.
+    const income = Number(t.totalIncome || 0);
+    const expenses = Number(t.totalExpense || 0);
+    const extra = (income > 0 || expenses > 0)
+      ? `, income ${formatMoney(income, currency)}, expenses ${formatMoney(expenses, currency)}`
+      : "";
+    return `- #${p.id} ${p.name}: ${p.status}, budget ${formatMoney(p.budget, currency)}, balance ${formatMoney(balance, currency)}${extra}`;
   });
   return `Projects (${snap.projects.length}):\n${lines.join("\n")}`;
+}
+
+// Yesterday's sales, from the snapshot's business-timezone window.
+// Returns null when the snapshot does not carry the window: the caller
+// falls through instead of guessing.
+export function formatYesterdaySales(snap, currency) {
+  const y = snap && snap.salesYesterday;
+  if (!y || typeof y !== "object") return null;
+  const total = Number(y.total) || 0;
+  const count = Number(y.count) || 0;
+  if (!count) return "No sales yesterday.";
+  return `Sales yesterday: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`;
+}
+
+export function formatCountProjects(snap) {
+  const projects = (snap && snap.projects) || [];
+  if (!projects.length) return "You have no projects.";
+  const lines = projects.map((p) => `- #${p.id} ${p.name} (${p.status || "active"})`);
+  return `You have ${projects.length} ${projects.length === 1 ? "project" : "projects"}:\n${lines.join("\n")}`;
+}
+
+export function formatCountStaff(snap) {
+  const n = snap && Number.isFinite(Number(snap.staffCount)) ? Number(snap.staffCount) : null;
+  if (n === null) return "I do not have a staff count for this business.";
+  if (n === 0) return "You have no staff members on this business.";
+  return `You have ${n} staff ${n === 1 ? "member" : "members"} on this business.`;
+}
+
+export function formatCountCustomers(snap) {
+  const n = snap && Number.isFinite(Number(snap.customerCount)) ? Number(snap.customerCount) : null;
+  if (n !== null) return `You have ${n} ${n === 1 ? "customer" : "customers"}.`;
+  // The snapshot carries debtors, not all customers: answer the debtor
+  // count and say so plainly, never guess a total.
+  const debtors = (snap && snap.debtors) || [];
+  return `${debtors.length} ${debtors.length === 1 ? "customer owes" : "customers owe"} money right now. I do not have your total customer count, so I cannot give the full total.`;
+}
+
+export function formatCountSalesToday(snap, currency) {
+  const st = (snap && snap.salesToday) || {};
+  const count = Number(st.count) || 0;
+  const total = Number(st.total) || 0;
+  if (!count) return "No sales yet today.";
+  return `You made ${count} ${count === 1 ? "sale" : "sales"} today, totalling ${formatMoney(total, currency)}.`;
+}
+
+export function formatCountProducts(snap, currency) {
+  const products = (snap && snap.products) || [];
+  if (!products.length) return "You have no products.";
+  const lines = products.map((p) => `- ${p.name} (${Number(p.stock) || 0} in stock)`);
+  return `You have ${products.length} ${products.length === 1 ? "product" : "products"}:\n${lines.join("\n")}`;
+}
+
+// Profit per window, as sales minus expenses. An explicit profit field
+// wins when the snapshot carries one; otherwise the window's sales and
+// expenses are subtracted. A window the snapshot does not carry gets a
+// plain "I do not have that figure" line with the reason, never a
+// guessed figure.
+export function formatProfit(snap, currency) {
+  const windows = [
+    ["today", "Today", "today's", snap.profitToday, snap.salesToday, snap.expensesToday],
+    ["week", "This week", "this week's", snap.profitWeek, snap.salesWeek, snap.expensesWeek],
+    ["month", "This month", "this month's", snap.profitMonth, snap.salesMonth, snap.expensesMonth],
+    ["year", "This year", "this year's", snap.profitYear, snap.salesYear, snap.expensesYear],
+  ];
+  const lines = windows.map(([, label, possessive, profit, sales, expenses]) => {
+    if (typeof profit === "number" && Number.isFinite(profit)) return `${label}: ${formatMoney(profit, currency)}`;
+    const s = sales && typeof sales.total === "number" ? sales.total : null;
+    const e = expenses && typeof expenses.total === "number" ? expenses.total : null;
+    if (s !== null && e !== null) return `${label}: ${formatMoney(Math.round((s - e) * 100) / 100, currency)}`;
+    return `${label}: I do not have that figure. The snapshot does not carry ${possessive} sales and expenses, so I cannot work out the profit.`;
+  });
+  return `Profit (sales minus expenses):\n${lines.join("\n")}`;
+}
+
+// Snapshot-based business advice: best seller, low stock, debtors,
+// sales and expenses this month. Short plain lines, no invented
+// figures. The best seller is the product with the most sold in the
+// last 30 days; the snapshot lists products in that order, so the
+// first product stands when no sold counts are carried.
+export function formatBusinessAdvice(snap, currency) {
+  const lines = ["Here is what your books say:"];
+  const products = (snap && snap.products) || [];
+  let best = null;
+  const withSold = products.filter((p) => Number.isFinite(Number(p.sold_30d)));
+  if (withSold.length) {
+    const sorted = [...withSold].sort((a, b) => Number(b.sold_30d) - Number(a.sold_30d));
+    if (Number(sorted[0].sold_30d) > 0) best = sorted[0];
+  } else if (products.length) {
+    best = products[0];
+  }
+  if (best) {
+    const sold = Number(best.sold_30d);
+    lines.push(Number.isFinite(sold) && sold > 0
+      ? `Best seller: ${best.name} (${sold} sold in the last 30 days).`
+      : `Best seller: ${best.name}.`);
+  } else {
+    lines.push("Best seller: nothing sold in the last 30 days.");
+  }
+  const low = (snap && snap.lowStock) || [];
+  if (low.length) {
+    lines.push(`Running low: ${low.map((p) => `${p.name} (${p.qty} ${p.unit || "units"} left)`).join(", ")}. Restock these first.`);
+  } else {
+    lines.push("Running low: nothing is running low.");
+  }
+  const debtors = (snap && snap.debtors) || [];
+  const owed = debtors.reduce((s, d) => s + (Number(d.balance) || 0), 0);
+  if (debtors.length) {
+    lines.push(`Owed to you: ${formatMoney(owed, currency)} from ${debtors.length} ${debtors.length === 1 ? "customer" : "customers"} (${debtors.map((d) => d.name).join(", ")}). Chase these first.`);
+  } else {
+    lines.push("Owed to you: nobody owes money right now.");
+  }
+  const sm = (snap && snap.salesMonth) || {};
+  const em = (snap && snap.expensesMonth) || {};
+  lines.push(`Sales this month: ${formatMoney(sm.total || 0, currency)} across ${sm.count || 0} ${(sm.count || 0) === 1 ? "sale" : "sales"}.`);
+  lines.push(`Expenses this month: ${formatMoney(em.total || 0, currency)} across ${em.count || 0} ${(em.count || 0) === 1 ? "expense" : "expenses"}.`);
+  return lines.join("\n");
+}
+
+// Inventory value at selling price: price x stock for every product,
+// with a per-product breakdown and the total. This is the
+// selling-price value, never the cost value: there is no cost data in
+// the snapshot. When the product list is at the snapshot cap, the
+// answer says it covers the products listed, not the whole business.
+export function formatInventoryValue(snap, currency) {
+  const products = (snap && snap.products) || [];
+  if (!products.length) return "No products added yet.";
+  const lines = products.map((p) => {
+    const value = Math.round((Number(p.price) || 0) * (Number(p.stock) || 0) * 100) / 100;
+    return `- ${p.name}: ${Number(p.stock) || 0} × ${formatMoney(p.price, currency)} = ${formatMoney(value, currency)}`;
+  });
+  const total = products.reduce((s, p) => s + (Number(p.price) || 0) * (Number(p.stock) || 0), 0);
+  const out = [
+    "Value of your products (at selling price):",
+    ...lines,
+    `Total: ${formatMoney(Math.round(total * 100) / 100, currency)}`,
+    "This is the selling-price value, not the cost value.",
+  ];
+  if (products.length >= 50) out.push("This covers the 50 products listed; there may be more.");
+  return out.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1327,11 +1857,19 @@ export function formatProjects(snap, currency) {
 // ---------------------------------------------------------------------------
 
 // A third-party buyer is named ("someone", "somebody", "a customer",
-// "a new customer", "some person", "anybody", "anyone"): the purchase
+// "a new customer", "some person", "anybody", "anyone", "some"): the purchase
 // is a sale to a walk-in, not the owner buying supplies.
 export function isBuyerSale(text) {
   const t = normalizeFastText(text);
-  return /\b(someone|somebody|some person|a new customer|new customer|a customer|anybody|anyone)\b/.test(t);
+  return /\b(someone|somebody|some person|a new customer|new customer|a customer|anybody|anyone|some)\b/.test(t);
+}
+
+// A third-person pronoun bought it ("he bought a laptop", "they bought
+// 2 laptops"): a sale to a walk-in, not an expense. First-person "I
+// bought" stays an expense.
+export function isPronounBuyerSale(text) {
+  const t = normalizeFastText(text);
+  return /\b(he|she|they)\s+bought\b/.test(t);
 }
 
 // "bought" on its own, with no seller-side sale verb: the buyer is
@@ -1342,10 +1880,11 @@ export function isBoughtOnly(text) {
 }
 
 // Total of snapshot-matched sale items, from the snapshot prices.
+// Matching is plural- and case-tolerant, so "laptops" prices as Laptop.
 export function saleTotalFromSnapshot(items, snap) {
   const products = (snap && snap.products) || [];
   return (items || []).reduce((s, it) => {
-    const p = products.find((x) => x.name === it.product);
+    const p = matchSnapshotProduct(normalizePluralProduct(it.product, products), products);
     return s + (Number(p && p.price) || 0) * (Number(it.qty) || 0);
   }, 0);
 }
@@ -1418,7 +1957,16 @@ export function parseSalePaymentAnswer(text, total) {
   const t = normalizeFastText(text);
   const answer = parseAmountAnswer(text);
   if (answer && answer.amount > 0) return { amount: answer.amount, method: saleMethodFromText(t) };
+  // A bare "full" or "half" answers the pending payment question too.
+  if (/^\s*(full|in full)\s*$/.test(t)) return { amount: total, method: saleMethodFromText(t) };
+  if (/^\s*half\s*$/.test(t)) {
+    if (!(total > 0)) return null;
+    return { amount: Math.round((total / 2) * 100) / 100, method: saleMethodFromText(t) };
+  }
   if (/\bpaid\s+half\b/.test(t)) {
+    // "paid half" with no computable total is not an answer: the caller
+    // asks "How much is half?" instead of defaulting to full.
+    if (!(total > 0)) return null;
     return { amount: Math.round((total / 2) * 100) / 100, method: saleMethodFromText(t) };
   }
   if (/\b(paid\s+(in\s+)?full|in\s+full|fully\s+paid|full\s+payment)\b/.test(t)) {
@@ -1455,6 +2003,460 @@ export function acknowledgementReply(text) {
   return null;
 }
 
+// The one short question for a partial payment with no debtor named:
+// "Who owes for the remaining laptop?" (one) / "Who owes for the
+// remaining 2 laptops?" (more).
+export function partialDebtorQuestion(items, partial) {
+  const owed = partial.owedQty !== null && partial.owedQty !== undefined
+    ? partial.owedQty
+    : ((items || []).reduce((n, it) => n + (it.qty || 0), 0) - (partial.paidQty || 0));
+  const name = (items && items.length === 1) ? items[0].product : "items";
+  const plural = name.endsWith("s") ? name : name + "s";
+  if (owed === 1) return `Who owes for the remaining ${name.toLowerCase()}?`;
+  return `Who owes for the remaining ${owed} ${plural.toLowerCase()}?`;
+}
+
+// ---------------------------------------------------------------------------
+// Supplier orders: "I order laptops from supplier 50 and I paid him
+// full", "I ordered 30 fvamail". A stock purchase, proposed Confirm-first
+// as an expense for the amount paid: the executor has no stock-in or
+// purchase action, so the proposal states plainly that stock is not
+// updated by the draft. The amount is quantity x snapshot price. When
+// payment was not stated, or the product has no snapshot price, ask one
+// short question for the missing piece instead of guessing.
+// Returns { params } (propose), { question } (ask), or null.
+// ---------------------------------------------------------------------------
+
+export function parseSupplierOrder(text, snap, currency) {
+  const t = normalizeFastText(text);
+  if (!/\b(order|ordered|ordering)\b/.test(t)) return null;
+  // A customer ordering goods is a sale, not a supplier order.
+  if (isBuyerSale(t)) return null;
+  const trimmed = t.replace(/^(please|kindly)\s+/, "");
+  if (!/^(i|we|order|ordered|ordering)\b/.test(trimmed)) return null;
+  // Payment stated in the message itself, before any stripping.
+  const paidFull = /\b(paid|pay)\b[^.]{0,20}\bfull\b/.test(t);
+  const paidAmountMatch = t.match(/\bpaid\s+(\d[\d,]*\.?\d*)\s*(million|thousand|k|m)?/i);
+  const paidAmount = paidAmountMatch ? (findAmounts(paidAmountMatch[0])[0] || {}).value : null;
+  // The supplier's name, when given ("from Ada Stores"); "supplier" on
+  // its own stays "supplier".
+  let supplier = "supplier";
+  const fromMatch = t.match(/\bfrom\s+([a-z][a-z' ]+?)(?=\s+\d|\s+and\b|\s*$)/);
+  if (fromMatch && fromMatch[1].trim() && !/^(supplier|suppliers)$/.test(fromMatch[1].trim())) {
+    supplier = titleCaseName(fromMatch[1].trim());
+  }
+  let rest = t;
+  rest = rest.replace(/\b(this morning|this afternoon|this evening|in the morning|in the afternoon|in the evening|now|today|just|yesterday)\b/g, " ");
+  rest = rest.replace(/\bfrom\s+[a-z][a-z' ]+?(?=\s+\d|\s+and\b|\s*$)/, " ");
+  rest = rest.replace(/\b(?:and\s+)?(?:i\s+|we\s+)?paid\b.*$/, " ");
+  rest = rest.replace(/\b(order|ordered|ordering|from|supplier|suppliers|a|an|the|please|kindly|i|we|him|her|them|my|our|and)\b/g, " ");
+  rest = rest.replace(/\s+/g, " ").trim();
+  const qtyMatch = rest.match(/(\d+(?:\.\d+)?)/);
+  const qty = qtyMatch ? Number(qtyMatch[1]) : 1;
+  const productRaw = rest.replace(/\d+(?:\.\d+)?/g, " ").replace(/\s+/g, " ").trim();
+  if (!productRaw) return null;
+  const match = (snap && snap.products) ? matchSnapshotProduct(normalizePluralProduct(productRaw, snap.products), snap.products) : null;
+  const total = match ? Math.round((Number(match.price) || 0) * qty * 100) / 100 : null;
+  if (match && (paidFull || paidAmount !== null)) {
+    const amount = paidAmount !== null && paidAmount !== undefined ? paidAmount : total;
+    return { params: { amount, description: `Stock purchase: ${qty} × ${match.name} from ${supplier} (stock not updated by this draft)`, category: "Stock purchase" } };
+  }
+  if (match) {
+    // The total is computable, but nothing was paid yet: state the
+    // total and ask the one missing piece.
+    return { question: `${qty} × ${match.name} comes to ${formatMoney(total, currency)}. Who is the supplier, and how much did you pay?` };
+  }
+  // No snapshot price: the total cannot be computed, so ask for it.
+  return { question: `How much did you pay for the ${qty} ${productRaw}? I do not have a price for ${productRaw}, so I cannot work out the total.` };
+}
+
+// ---------------------------------------------------------------------------
+// Conversation memory: the thread, not just the latest message.
+// ---------------------------------------------------------------------------
+
+// Words that can never be a bare-name answer ("Fortune" is a name;
+// "Cancelled", "Yes", "Cash" and "Record it" are not).
+const BARE_NAME_STOP = new Set([
+  "yes", "no", "ok", "okay", "thanks", "thank", "hello", "hi", "hey",
+  "great", "good", "nice", "cash", "transfer", "pos", "full", "half",
+  "paid", "pay", "record", "sale", "sales", "expense", "expenses",
+  "payment", "please", "kindly", "cancel", "cancelled", "cancelling",
+  "confirm", "confirmed", "done", "really", "lol", "haha", "hehe",
+  "wow", "cool", "do", "it", "that", "this", "am", "and", "or", "but",
+  "sold", "bought", "gave", "give", "order", "ordered", "staff",
+  "rent", "fuel", "tax", "all", "each", "both", "them", "they", "he",
+  "she", "we", "i", "you", "me", "us", "him", "her", "his", "their",
+]);
+
+// A bare name ("Fortune"): one to three words, letters only, not a
+// stop word, not a product name, not a number. Used to recognise a
+// name answer to the AI's own question.
+export function isBareName(text, snap) {
+  const t = String(text || "").trim().toLowerCase().replace(/[.!?]+$/, "").trim();
+  if (!t) return false;
+  if (/[^a-z' ]/.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 3) return false;
+  if (words.some((w) => BARE_NAME_STOP.has(w))) return false;
+  if (snap && snap.products && matchSnapshotProduct(t, snap.products)) return false;
+  return true;
+}
+
+// The last sale in the thread: the most recent user turn that parses as
+// a sale, combined with a restatement turn ("They paid for 2 and owe
+// for 1") and a bare-name answer ("Fortune") when they follow it.
+// Returns { items, total, amountPaid, paidQty, customerName } or null.
+// The customer name comes only from the sale turn itself, a restatement
+// that names the debtor, or a bare-name answer in the thread.
+export function findLastSaleContext(history, snap, currency) {
+  const hist = history || [];
+  let startIdx = 0;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && h.role === "assistant" && typeof h.content === "string" && /Done\. Recorded (payment|sale|expense)/.test(h.content)) {
+      startIdx = i + 1;
+      break;
+    }
+  }
+  const recent = hist.slice(startIdx);
+  let sale = null;
+  let restatement = null;
+  let bareName = null;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const h = recent[i];
+    if (!h || h.role !== "user" || typeof h.content !== "string") continue;
+    if (!sale) {
+      const s = parseSaleSnapshot(h.content, recent, snap, currency);
+      if (s) sale = s;
+    }
+    if (!restatement) {
+      const r = parsePartialPayment(h.content);
+      if (r && !SALE_VERBS.test(normalizeFastText(h.content))) restatement = r;
+    }
+    if (!bareName && isBareName(h.content, snap)) bareName = titleCaseName(h.content.trim().replace(/[.!?]+$/, ""));
+    if (sale && restatement && bareName) break;
+  }
+  if (!sale) return null;
+  const items = sale.params.items || [];
+  const total = saleTotalFromSnapshot(items, snap);
+  let paidQty = null;
+  if (restatement && restatement.paidQty !== null && restatement.paidQty !== undefined && items.length === 1 && items[0].qty > 0) {
+    paidQty = restatement.paidQty;
+  } else if (sale.params.amount_paid !== undefined && sale.params.amount_paid !== null && items.length === 1 && items[0].qty > 0) {
+    const unit = total / items[0].qty;
+    if (unit > 0) paidQty = Math.round(sale.params.amount_paid / unit);
+  }
+  const unit = items.length === 1 && items[0].qty > 0 ? total / items[0].qty : null;
+  const amountPaid = paidQty !== null && unit !== null
+    ? Math.round(unit * paidQty * 100) / 100
+    : (sale.params.amount_paid !== undefined && sale.params.amount_paid !== null ? sale.params.amount_paid : null);
+  const customerName = sale.params.customer_name || bareName || (restatement && restatement.debtorName) || null;
+  return { items, total, amountPaid, paidQty, customerName };
+}
+
+// A quantity correction in the thread: "actually make it 2 laptops",
+// "make it 2 laptops", "actually 2 laptops". Returns { qty, product }
+// or null. The correction must name a quantity; a bare "make it 2"
+// with no product is not one.
+export function parseCorrection(text) {
+  const t = normalizeFastText(text);
+  const m = t.match(/^\s*(?:(actually|no wait|correction)\s+)?(?:(make it|change it to|change it)\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(.+?)\s*[.!?]*$/);
+  if (!m) return null;
+  if (!m[1] && !m[2]) return null;
+  const qty = qtyWordToNumber(m[3]);
+  const product = (m[4] || "").trim();
+  if (qty === null || !product || isQuestionWordsOnly(product)) return null;
+  return { qty, product };
+}
+
+// A corrected pending sale: a correction turn ("actually make it 2
+// laptops") applied to the sale it follows. Returns the corrected sale
+// action or null (no correction, no sale, or a different product: the
+// normal pending path owns those).
+export function findCorrectedPendingSale(history, snap, currency) {
+  const turns = (history || []).filter((h) => h && h.role === "user" && typeof h.content === "string").slice(-6);
+  let correction = null;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const content = turns[i].content;
+    if (!correction) {
+      const c = parseCorrection(content);
+      if (c) { correction = c; continue; }
+    }
+    const snapSale = snap ? parseSaleSnapshot(content, turns, snap, currency) : null;
+    if (!snapSale) continue;
+    // A sale newer than any correction cannot be the corrected one:
+    // corrections always follow the sale they correct.
+    if (!correction) return null;
+    const items = snapSale.params.items || [];
+    if (items.length !== 1) return null;
+    const matched = matchSnapshotProduct(normalizePluralProduct(correction.product, (snap.products || [])), (snap.products || []));
+    if (!matched || matched.name !== items[0].product) return null;
+    const unit = saleTotalFromSnapshot(items, snap) / items[0].qty;
+    if (!(unit > 0)) return null;
+    const newQty = correction.qty;
+    const paidQty = snapSale.params.amount_paid !== undefined && snapSale.params.amount_paid !== null
+      ? Math.min(Math.round(snapSale.params.amount_paid / unit), newQty)
+      : null;
+    const params = { items: [{ product: matched.name, qty: newQty }] };
+    if (snapSale.params.customer_name) params.customer_name = snapSale.params.customer_name;
+    if (paidQty !== null) params.amount_paid = Math.round(unit * paidQty * 100) / 100;
+    else if (snapSale.params.amount_paid !== undefined) params.amount_paid = Math.min(snapSale.params.amount_paid, Math.round(unit * newQty * 100) / 100);
+    if (snapSale.params.payment_method) params.payment_method = snapSale.params.payment_method;
+    return { kind: "action", tool: "record_sale", params };
+  }
+  return null;
+}
+
+// Re-parse a pending sale from the history turn it came from, with the
+// snapshot: plural names ("laptops") resolve to the real product
+// ("Laptop"), which the pure re-parse cannot do. Returns the
+// snapshot-resolved sale action or null.
+export function reparsePendingSale(history, pending, snap, currency) {
+  if (!pending || pending.kind !== "sale") return null;
+  const turns = (history || []).filter((h) => h && h.role === "user" && typeof h.content === "string").slice(-6);
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const sale = parseSaleMention(turns[i].content);
+    if (!sale || !sale.items || !sale.items.length) continue;
+    const sameItems = JSON.stringify(sale.items) === JSON.stringify(pending.items);
+    const sameCustomer = (sale.customer_name || "") === (pending.customer_name || "");
+    if (!sameItems || !sameCustomer) continue;
+    if (snap) {
+      const snapSale = parseSaleSnapshot(turns[i].content, history, snap, currency);
+      if (snapSale) return snapSale;
+    }
+    return null;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Challenge follow-ups: "Really?", "Are you sure?", "That can't be
+// right". Re-check the last assistant answer against the current
+// snapshot and either correct it or confirm it with the figure, never
+// the failure line. When there is no previous figure answer to check
+// against, say so plainly.
+// ---------------------------------------------------------------------------
+
+const CHALLENGE_RES = [
+  /^\s*really\s*[.!?]*$/,
+  /^\s*are you (sure|certain)\s*[.!?]*$/,
+  /^\s*that (can't|cant|can not) be right\s*[.!?]*$/,
+  /^\s*that (is|'s) not right\s*[.!?]*$/,
+  /^\s*that (is|'s) wrong\s*[.!?]*$/,
+  /^\s*is that (right|correct)\s*[.!?]*$/,
+];
+
+export function isChallenge(text) {
+  const t = normalizeFastText(text);
+  return CHALLENGE_RES.some((re) => re.test(t));
+}
+
+// Re-run the read a previous assistant answer came from, against the
+// current snapshot. Returns the fresh answer text, or null when the
+// previous answer is not a recognisable snapshot read.
+export function recheckReadFromAnswer(answer, snap, currency) {
+  const a = String(answer || "").trim();
+  if (/^No sales yet today\./.test(a) || /^Sales today so far:/.test(a)) return formatTodaySales(snap, currency);
+  if (/^No sales yesterday\./.test(a) || /^Sales yesterday:/.test(a)) return formatYesterdaySales(snap, currency);
+  if (/^No sales yet this month\./.test(a) || /^Sales this month:/.test(a)) return formatMonthSales(snap, currency);
+  if (/^No expenses yet this month\./.test(a) || /^Expenses this month:/.test(a)) return formatMonthExpenses(snap, currency);
+  if (/^Nobody owes money right now\./.test(a) || /^Customers owing/.test(a)) return formatDebtors(snap, currency);
+  if (/^Nothing is running low\./.test(a) || /^Running low:/.test(a)) return formatLowStock(snap, currency);
+  if (/^No products added yet\./.test(a) || /^Stock:/.test(a)) return formatStock(snap, currency);
+  if (/^No projects yet\./.test(a) || /^Projects \(\d+\)/.test(a)) return formatProjects(snap, currency);
+  if (/^No sales recorded yet\./.test(a) || /^Last sales:/.test(a)) return formatRecentSales(snap, currency);
+  if (/^No expenses recorded yet\./.test(a) || /^Last expenses:/.test(a)) return formatRecentExpenses(snap, currency);
+  return null;
+}
+
+export function challengeReply(text, history, snap, currency) {
+  const hist = history || [];
+  const lastAssistant = [...hist].reverse().find((h) => h && h.role === "assistant" && typeof h.content === "string");
+  if (!lastAssistant) {
+    return { kind: "reply", text: "I do not have that figure. Tell me what to check and I will look it up in your books." };
+  }
+  const prev = lastAssistant.content.trim();
+  const rechecked = recheckReadFromAnswer(prev, snap, currency);
+  if (rechecked !== null) {
+    if (rechecked === prev) return { kind: "reply", text: `I checked again: ${rechecked}` };
+    return { kind: "reply", text: `Yes, let me check again. ${rechecked}` };
+  }
+  // A proposal is figures too: re-check the sale in the thread from the
+  // snapshot and confirm with the fresh figures.
+  if (/record sale of/i.test(prev)) {
+    const ctx = findLastSaleContext(hist, snap, currency);
+    if (ctx) {
+      const paid = ctx.amountPaid !== null && ctx.amountPaid !== undefined ? ctx.amountPaid : ctx.total;
+      const balance = Math.round((ctx.total - paid) * 100) / 100;
+      const itemsDesc = ctx.items.map((it) => `${it.qty} × ${it.product}`).join(", ");
+      const who = ctx.customerName || "Walk-in";
+      const tail = balance > 0 ? `, with ${formatMoney(balance, currency)} owed by ${who}` : ", nothing owed";
+      return { kind: "reply", text: `Yes, I checked the books again: ${itemsDesc}, total ${formatMoney(ctx.total, currency)}, paid ${formatMoney(paid, currency)}${tail}.` };
+    }
+  }
+  return { kind: "reply", text: "I do not have that figure. Tell me what to check and I will look it up in your books." };
+}
+
+// ---------------------------------------------------------------------------
+// Casual replies: greetings, small talk, reactions, emoji-only messages,
+// jokes. Short, warm, in plain words, never a business figure, never a
+// claim to be human or to have feelings. One emoji at most, and only
+// where it fits. Runs after every business intent, so a business
+// message that happens to contain an emoji is never misread as casual.
+// ---------------------------------------------------------------------------
+
+export function firstEmoji(text) {
+  const m = String(text || "").match(/\p{Extended_Pictographic}/u);
+  return m ? m[0] : null;
+}
+
+export function isEmojiOnly(text) {
+  const t = String(text || "").trim();
+  if (!t || !firstEmoji(t)) return false;
+  const stripped = t.replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\ufe0f\s.,!?:;]/gu, "");
+  return stripped.length === 0;
+}
+
+const EMOJI_REPLIES = {
+  "🔥": "🔥 Right with you.",
+  "👍": "👍 Got it.",
+  "😂": "😂 Good one.",
+  "🤣": "🤣 Good one.",
+  "❤️": "❤️ Right back at you.",
+  "🙏": "🙏 Anytime.",
+  "🎉": "🎉 Love to see it.",
+  "👏": "👏 Thank you.",
+  "✅": "✅ Got it.",
+  "👋": "👋 Hello.",
+  "😀": "😀 Right with you.",
+  "😄": "😄 Right with you.",
+  "😁": "😁 Right with you.",
+  "😎": "😎 Nice.",
+  "💪": "💪 Right with you.",
+  "🙌": "🙌 Right with you.",
+};
+
+export function emojiReply(text) {
+  const e = firstEmoji(text);
+  if (!e) return null;
+  return EMOJI_REPLIES[e] || `${e} Right with you.`;
+}
+
+export function casualReply(text) {
+  if (isEmojiOnly(text)) return emojiReply(text);
+  const t = normalizeFastText(text).replace(/[.!?]+$/, "").trim();
+  if (/^(lol|lmao|haha|hehe|hahaha|hehehe)$/.test(t)) return "Ha, good one. 😄";
+  if (/^(wow|woah|whoa)$/.test(t)) return "I know, right? 😄";
+  if (/^(cool|dope|lit)$/.test(t)) return "Cool. 😎";
+  if (/^good night$/.test(t)) return "Good night. Talk tomorrow.";
+  if (/^(bye|goodbye|good bye|see you|see ya|later)$/.test(t)) return "Goodbye. Talk soon.";
+  if (/^(how are you|how are u|how are you doing|how is it going|how are things|how's it going|hows it going)$/.test(t)) return "I am here and ready to help. What do you need for the business today?";
+  if (/\btell me a joke\b/.test(t) || /\bmake me laugh\b/.test(t) || /\banother joke\b/.test(t)) return "Why did the ledger break up with the calculator? It could not count on it. 😄";
+  if (/^(you are funny|youre funny|you are hilarious|youre hilarious|you are so funny)$/.test(t)) return "Thank you. I do my best. 😄";
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Clear chat: "clear old chat", "clearly old chat" (the typo variant:
+// "clearly" means "clear" here), "clear chat", "delete old chat".
+// Deterministic fast-path intent, never the model. Asking to clear is
+// NOT clearing: resolveFastPath only returns the one confirmation
+// question, and chat.js clears only on a bare Yes after it. The match
+// is anchored to the whole message and to a chat noun, so "clear
+// Favour's balance" (a payment) and "clearly I paid ..." never match.
+// ---------------------------------------------------------------------------
+
+export const CLEAR_CHAT_QUESTION = "Clear the old chat? Reply Yes and I will clear it.";
+export const CLEAR_CHAT_DECLINED = "Understood. I left the chat as it is. Nothing was cleared.";
+export const CLEAR_CHAT_DONE = "Done, I have cleared this chat. We are starting fresh.";
+
+const CLEAR_CHAT_RES = [
+  /^\s*(please\s+)?(clear|delete|wipe|erase|remove)\s+(the\s+|this\s+|my\s+|our\s+|all\s+)?(old\s+)?(chat|conversation|history|messages?)\s*(please\s*)?[.!?]*$/,
+  /^\s*(start fresh|start over|fresh start|new chat)\s*[.!?]*$/,
+];
+
+export function isClearChatRequest(text) {
+  // "Clearly old chat" is the "clear old chat" typo: "clearly" maps to
+  // "clear" as a whole word, nowhere else in the message.
+  const t = normalizeFastText(text).replace(/\bclearly\b/g, "clear");
+  return CLEAR_CHAT_RES.some((re) => re.test(t));
+}
+
+// ---------------------------------------------------------------------------
+// Answering the assistant's own expense-amount question: "I bought
+// fuel" -> "How much was the expense? I need an amount greater than
+// zero." -> "5000". The user answered the AI's own question, so the
+// amount completes the pending expense from the thread (description
+// Fuel, NGN 5,000, proposal for Confirm), never the model and never
+// the failure line. The question wording itself lives in chat.js; this
+// only recognises it.
+// ---------------------------------------------------------------------------
+
+export function isExpenseAmountQuestion(text) {
+  return /\bhow much was the expense\b/i.test(String(text || ""))
+    || /\bhow much is the expense\b/i.test(String(text || ""));
+}
+
+// Parse an answer to the expense-amount question. Reuses the strict
+// amount answer ("5000", "5000 naira", "5k") and also allows a "for
+// <description>" tail ("5000 for fuel"): the tail names the expense
+// when the user repeats it. Returns { amount, description } with
+// description "" when the answer carries no tail, or null when the
+// message is not an amount answer at all.
+export function parseExpenseAmountAnswer(text) {
+  const plain = parseAmountAnswer(text);
+  if (plain && plain.amount > 0) return { amount: plain.amount, description: "" };
+  const t = normalizeFastText(text);
+  const amounts = findAllAmounts(t);
+  if (amounts.length !== 1) return null;
+  const a = amounts[0];
+  const before = t.slice(0, a.index).trim();
+  const after = t.slice(a.index + a.length).trim();
+  // Nothing before the amount, and after it only a currency word, a
+  // "for <description>" tail, or a currency word then the tail
+  // ("5000 naira for fuel"). Anything else is a fresh statement, not
+  // an answer to the question.
+  if (before) return null;
+  if (!after) return { amount: a.value, description: "" };
+  let tail = after;
+  const firstWord = tail.split(/\s+/)[0].replace(/[^a-z]/g, "");
+  if (CURRENCY_WORDS.includes(firstWord)) tail = tail.slice(tail.indexOf(" ") + 1).trim();
+  if (!tail) return { amount: a.value, description: "" };
+  const forTail = tail.match(/^for\s+(.+)$/);
+  if (forTail) {
+    const description = cleanExpenseDescription(forTail[1]);
+    if (!description) return null;
+    return { amount: a.value, description };
+  }
+  const leftover = tail.replace(/[^a-z]/g, "");
+  if (leftover && CURRENCY_WORDS.includes(leftover)) return { amount: a.value, description: "" };
+  return null;
+}
+
+// The expense awaiting an amount: re-parse the user turns since the
+// last "Done. Recorded ..." line with the expense parser and return
+// the most recent one that has a description but no amount (the "I
+// bought fuel" turn). Returns null when no such turn exists.
+export function resolvePendingExpense(history, snap) {
+  const hist = history || [];
+  let startIdx = 0;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && h.role === "assistant" && typeof h.content === "string" && /Done\. Recorded (payment|sale|expense)/.test(h.content)) {
+      startIdx = i + 1;
+      break;
+    }
+  }
+  const recent = hist.slice(startIdx);
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const h = recent[i];
+    if (!h || h.role !== "user" || typeof h.content !== "string") continue;
+    const e = parseExpenseMention(h.content, snap);
+    if (e && e.description && !(e.amount > 0)) return e;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator: message + history + snapshot -> fast-path result or null.
 // ---------------------------------------------------------------------------
@@ -1464,12 +2466,24 @@ export function resolveFastPath(message, history, snap, currency) {
   if (!text) return null;
   const t = normalizeFastText(text);
 
+  // 0. Clear chat: ask the one confirmation question, never clear on
+  // the words alone and never fall to the model. chat.js owns the
+  // question store and the Yes-after-question execution.
+  if (isClearChatRequest(text)) {
+    return { kind: "clearchat_question", text: CLEAR_CHAT_QUESTION };
+  }
+
   // 1. "Record it" (and its variations): resolve the pending mention from
   // the recent turns. No mention -> one short line, not a dump.
   if (isRecordIt(text)) {
-    const pending = findPendingMention(history, snap);
+    const corrected = findCorrectedPendingSale(history, snap, currency);
+    if (corrected) return corrected;
+    const pending = findPendingMention(history, snap, currency);
     if (!pending) {
       return { kind: "reply", text: "I do not have anything to record yet. Tell me what happened, for example 'Favour paid 1000000'." };
+    }
+    if (pending.kind === "question") {
+      return { kind: "reply", text: pending.text };
     }
     if (pending.kind === "payment") {
       // A pronoun in the mention ("He paid 5000") resolves to the last
@@ -1485,9 +2499,11 @@ export function resolveFastPath(message, history, snap, currency) {
       return { kind: "action", tool: "record_customer_payment", params: { customer_name: pending.customer_name, amount: pending.amount } };
     }
     if (pending.kind === "sale") {
+      const resolved = reparsePendingSale(history, pending, snap, currency);
+      if (resolved) return resolved;
       return { kind: "action", tool: "record_sale", params: pending };
     }
-    return { kind: "action", tool: "add_expense", params: { amount: pending.amount, description: pending.description } };
+    return { kind: "action", tool: "add_expense", params: withExpenseCategory({ amount: pending.amount, description: pending.description }) };
   }
 
   // 2. Full-balance payment: "Favour have paid the full balance he owe
@@ -1499,6 +2515,12 @@ export function resolveFastPath(message, history, snap, currency) {
   // and this message resolves as its answer.
   const pendingSaleFull = findPendingSalePayment(history, snap, currency);
   if (pendingSaleFull) {
+    // "Paid half" with no computable total: ask what half is, never
+    // default to full. A total the snapshot cannot price is a missing
+    // piece, not a guess.
+    if (/\bpaid\s+half\b/.test(t) && !(pendingSaleFull.total > 0)) {
+      return { kind: "reply", text: "How much is half? I do not have that item's price, so I cannot work it out." };
+    }
     const salePaymentFull = parseSalePaymentAnswer(text, pendingSaleFull.total);
     if (salePaymentFull) {
       return { kind: "action", tool: "record_sale", params: { ...pendingSaleFull.params, amount_paid: salePaymentFull.amount, ...(salePaymentFull.method ? { payment_method: salePaymentFull.method } : {}) } };
@@ -1540,11 +2562,14 @@ export function resolveFastPath(message, history, snap, currency) {
     // through to its own step instead of re-asking the question.
     const pendingSale = findPendingSalePayment(history, snap, currency);
     if (pendingSale) {
+      if (/\bpaid\s+half\b/.test(t) && !(pendingSale.total > 0)) {
+        return { kind: "reply", text: "How much is half? I do not have that item's price, so I cannot work it out." };
+      }
       const salePayment = parseSalePaymentAnswer(text, pendingSale.total);
       if (salePayment) {
         return { kind: "action", tool: "record_sale", params: { ...pendingSale.params, amount_paid: salePayment.amount, ...(salePayment.method ? { payment_method: salePayment.method } : {}) } };
       }
-      const fresh = parsePaymentMention(text) || SALE_VERBS.test(t) || classifyReadIntent(text) || isFullBalancePayment(text);
+      const fresh = parsePaymentMention(text) || SALE_VERBS.test(t) || classifyReadIntent(text) || isFullBalancePayment(text) || parsePartialPayment(text);
       if (!fresh) return { kind: "reply", text: pendingSale.question };
     }
     const answer = parseAmountAnswer(text);
@@ -1561,6 +2586,119 @@ export function resolveFastPath(message, history, snap, currency) {
     }
   }
 
+  // 2a-expense. Answer to the assistant's own expense-amount
+  // question ("How much was the expense?"): a bare amount ("5000"),
+  // "5000 naira", "5k", or "5000 for fuel" completes the pending
+  // expense from the thread, never the model. When the message is not
+  // an amount answer, re-ask the same question instead of failing:
+  // the user is mid-answer to the AI's own question.
+  if (lastAssistantIdx >= 0 && isExpenseAmountQuestion(history[lastAssistantIdx].content)) {
+    const expenseAnswer = parseExpenseAmountAnswer(text);
+    if (expenseAnswer && expenseAnswer.amount > 0) {
+      const pending = resolvePendingExpense(history, snap);
+      const description = expenseAnswer.description || (pending && pending.description) || "";
+      if (!description) {
+        return { kind: "reply", text: "What was the expense for? Tell me what it was for and I will draft it for your Confirm tap." };
+      }
+      return { kind: "action", tool: "add_expense", params: withExpenseCategory({ amount: expenseAnswer.amount, description }) };
+    }
+    // A zero amount, or a bare amount-like reply that could not be
+    // read as money, gets the same question again, never the failure
+    // line. Anything else (a new question, a cancel, a fresh
+    // statement) falls through to its own step.
+    if (expenseAnswer || /^\s*[\d,.]+(\s*(k|m|thousand|million|naira|ngn))?\s*[.!?]*$/.test(t)) {
+      return { kind: "reply", text: "How much was the expense? I need an amount greater than zero." };
+    }
+  }
+
+  // 2a2. The thread, not just the latest message.
+  // A partial-payment restatement ("They paid for 2 and owe for 1")
+  // resolves its amount from the last sale in the thread and asks only
+  // for what is genuinely missing: the customer name. Never the amount:
+  // the last sale already fixes paid 2 of 3. A restatement with no sale
+  // behind it asks which sale it was.
+  const partialRest = parsePartialPayment(text);
+  if (partialRest && !SALE_VERBS.test(t) && /^\s*(they|he|she|it|paid)\b/.test(t)) {
+    const ctx = findLastSaleContext(history, snap, currency);
+    if (!ctx) {
+      return { kind: "reply", text: "Which sale was that? Tell me the product and how many they paid for." };
+    }
+    const name = partialRest.debtorName
+      || (findDebtorsInText(text, snap)[0] || {}).name
+      || null;
+    if (name) {
+      const params = { items: ctx.items, customer_name: name };
+      if (ctx.amountPaid !== null && ctx.amountPaid !== undefined) params.amount_paid = ctx.amountPaid;
+      return { kind: "action", tool: "record_sale", params };
+    }
+    return { kind: "reply", text: "Who paid?" };
+  }
+  // A bare name answering the AI's own name question ("Who paid?",
+  // "Who owes for the remaining laptop?"): apply the name to the
+  // pending partial sale in the thread. Bare "Yes"/"No"/"Confirm" are
+  // deliberately not names: they return null here and reach the
+  // Confirm handler in chat.js.
+  const lastAssistantForName = [...(history || [])].reverse().find((h) => h && h.role === "assistant" && typeof h.content === "string");
+  if (lastAssistantForName && /who paid\?|who owes for the remaining/i.test(lastAssistantForName.content) && isBareName(text, snap)) {
+    const ctx = findLastSaleContext(history, snap, currency);
+    if (ctx && ctx.items && ctx.items.length) {
+      const params = { items: ctx.items, customer_name: titleCaseName(text.trim().replace(/[.!?]+$/, "")) };
+      if (ctx.amountPaid !== null && ctx.amountPaid !== undefined) params.amount_paid = ctx.amountPaid;
+      return { kind: "action", tool: "record_sale", params };
+    }
+  }
+  // A quantity correction ("actually make it 2 laptops") corrects the
+  // last sale in the thread instead of starting a fresh sale.
+  const correction = parseCorrection(text);
+  if (correction) {
+    const ctx = findLastSaleContext(history, snap, currency);
+    if (ctx && ctx.items && ctx.items.length === 1) {
+      const matched = matchSnapshotProduct(normalizePluralProduct(correction.product, (snap && snap.products) || []), (snap && snap.products) || []);
+      if (matched && matched.name === ctx.items[0].product) {
+        const unit = ctx.total / ctx.items[0].qty;
+        if (unit > 0) {
+          const paidQty = ctx.paidQty !== null && ctx.paidQty !== undefined ? Math.min(ctx.paidQty, correction.qty) : null;
+          const params = { items: [{ product: matched.name, qty: correction.qty }] };
+          if (ctx.customerName) params.customer_name = ctx.customerName;
+          if (paidQty !== null) params.amount_paid = Math.round(unit * paidQty * 100) / 100;
+          else if (ctx.amountPaid !== null && ctx.amountPaid !== undefined) params.amount_paid = Math.min(ctx.amountPaid, Math.round(unit * correction.qty * 100) / 100);
+          return { kind: "action", tool: "record_sale", params };
+        }
+      }
+    }
+  }
+
+  // 2a3. Early expense routing, before the payment intent: shapes the
+  // payment parser would swallow as a customer name ("I My Staff",
+  // "I Rent", "I 3 Staff"). A staff salary, a give-to-someone expense,
+  // a first-person paid expense and a supplier order all live here. A
+  // real payment still wins: "I paid Favour 5000 for transport" pays
+  // Favour, so the give/first-person shapes only run when the payment
+  // parser finds no payment.
+  const staffPay = parseStaffPayment(text, snap, currency);
+  if (staffPay) {
+    if (staffPay.question) return { kind: "reply", text: staffPay.question };
+    return { kind: "action", tool: "add_expense", params: staffPay.params };
+  }
+  // The give shape ("I gave the cleaner 1500") is an expense unless the
+  // recipient is a known customer: parseGiveExpense already returns null
+  // for one, so it runs before the payment parser instead of behind it.
+  const giveExpense = parseGiveExpense(text, snap);
+  if (giveExpense) {
+    return { kind: "action", tool: "add_expense", params: withExpenseCategory(giveExpense) };
+  }
+  if (!parsePaymentMention(text)) {
+    const firstExpense = parseFirstPersonExpense(text, snap);
+    if (firstExpense && (firstExpense.amount || firstExpense.description)) {
+      return { kind: "action", tool: "add_expense", params: withExpenseCategory(firstExpense) };
+    }
+  }
+  const supplierOrder = parseSupplierOrder(text, snap, currency);
+  if (supplierOrder) {
+    if (supplierOrder.question) return { kind: "reply", text: supplierOrder.question };
+    return { kind: "action", tool: "add_expense", params: supplierOrder.params };
+  }
+
   // 2b. Direct payment mention: "Favour paid 1000000" -> propose it now.
   // A pronoun ("He paid 5000") resolves to the last customer talked
   // about; with no antecedent, one short question instead of a guess.
@@ -1569,8 +2707,12 @@ export function resolveFastPath(message, history, snap, currency) {
   // A message that parses as a sale against the snapshot is a sale, not
   // a payment: "Someone bought 5 fvamail now and paid in full" has a
   // quantity (5) that the payment parser would read as the amount and
-  // the rest as a customer name. Step 11 owns it.
-  const payment = parseSaleSnapshot(text, history, snap, currency) ? null : parsePaymentMention(text);
+  // the rest as a customer name. Step 11 owns it. The same holds when
+  // the product is outside the snapshot's list: "I sold 3 widgets now
+  // they paid half" is a sale whose total is unknown, not a payment
+  // from a customer called "Sold Widgets".
+  const salePaymentShape = SALE_VERBS.test(t) && (/\b(paid|pay)\b[^.]{0,25}\b(full|half)\b/.test(t) || /\bpaid\s+for\s+\d/.test(t));
+  const payment = (parseSaleSnapshot(text, history, snap, currency) || salePaymentShape) ? null : parsePaymentMention(text);
   if (payment) {
     if (isPronounWord(payment.customer_name.split(" ")[0])) {
       const debtor = resolvePronounCustomer(history, snap);
@@ -1752,8 +2894,24 @@ export function resolveFastPath(message, history, snap, currency) {
     return { kind: "reminder_done", title: titleMatch || "" };
   }
   if (read === "today") return { kind: "reply", text: formatTodaySales(snap, currency) };
+  if (read === "yesterday") {
+    const y = formatYesterdaySales(snap, currency);
+    if (y !== null) return { kind: "reply", text: y };
+  }
   if (read === "month") return { kind: "reply", text: formatMonthSales(snap, currency) };
   if (read === "monthexpenses") return { kind: "reply", text: formatMonthExpenses(snap, currency) };
+  if (read === "profit") return { kind: "reply", text: formatProfit(snap, currency) };
+  if (read === "advice") return { kind: "reply", text: formatBusinessAdvice(snap, currency) };
+  if (read === "inventoryvalue") return { kind: "reply", text: formatInventoryValue(snap, currency) };
+  if (read === "activitylog") {
+    const scope = /\b(log\s*out|logout)\b/.test(t) ? "logouts" : /\b(log\s*in|login)\b/.test(t) ? "logins" : /\btoday\b/.test(t) ? "today" : "all";
+    return { kind: "activitylog", scope };
+  }
+  if (read === "countprojects") return { kind: "reply", text: formatCountProjects(snap, currency) };
+  if (read === "countstaff") return { kind: "reply", text: formatCountStaff(snap, currency) };
+  if (read === "countcustomers") return { kind: "reply", text: formatCountCustomers(snap, currency) };
+  if (read === "countsalestoday") return { kind: "reply", text: formatCountSalesToday(snap, currency) };
+  if (read === "countproducts") return { kind: "reply", text: formatCountProducts(snap, currency) };
   if (read === "debtors") return { kind: "reply", text: formatDebtors(snap, currency) };
   if (read === "stock") return { kind: "reply", text: formatStock(snap, currency) };
   if (read === "products") return { kind: "reply", text: formatStock(snap, currency) };
@@ -1891,6 +3049,16 @@ export function resolveFastPath(message, history, snap, currency) {
   if (SALE_VERBS.test(t) && !/\bexpense\b/.test(t)) {
     const snapSale = parseSaleSnapshot(text, history, snap, currency);
     if (snapSale) {
+      // A partial payment with no debtor named ("I sold 3 laptops,
+      // they paid for 2 and owe for 1"): ask who owes, never guess
+      // walk-in and never propose the full total as paid. The executor
+      // refuses a partial sale with no customer, so this question is
+      // the only way the sale can be completed.
+      const partial = parsePartialPayment(text);
+      const totalQty = (snapSale.params.items || []).reduce((n, it) => n + (it.qty || 0), 0);
+      if (partial && partial.paidQty !== null && partial.paidQty !== undefined && partial.paidQty < totalQty && !snapSale.params.customer_name && !partial.debtorName) {
+        return { kind: "reply", text: partialDebtorQuestion(snapSale.params.items, partial) };
+      }
       // A buyer-side report ("someone bought 5 fvamail") with no payment
       // stated: ask one short question about the payment instead of
       // assuming full payment. The seller-side ("I sold a laptop") keeps
@@ -1903,6 +3071,20 @@ export function resolveFastPath(message, history, snap, currency) {
     }
     const sale = parseSaleMention(text);
     if (sale) {
+      // The product is outside the snapshot's list, so the total is
+      // unknown: "paid half" asks what half is, and a partial payment
+      // asks what they paid, instead of defaulting to full.
+      const saleItemsKnown = (sale.items || []).every((it) => matchSnapshotProduct(normalizePluralProduct(it.product, (snap && snap.products) || []), (snap && snap.products) || []));
+      if (!saleItemsKnown) {
+        if (/\bpaid\s+half\b/.test(t)) {
+          return { kind: "reply", text: "How much is half? I do not have that item's price, so I cannot work it out." };
+        }
+        const partialOnly = parsePartialPayment(text);
+        if (partialOnly && partialOnly.paidQty !== null && partialOnly.paidQty !== undefined) {
+          const rawProduct = (sale.items || []).map((it) => it.product).join(", ");
+          return { kind: "reply", text: `How much did they pay for the ${partialOnly.paidQty} ${rawProduct}? I do not have a price for it, so I cannot work out the amount.` };
+        }
+      }
       return { kind: "action", tool: "record_sale", params: sale };
     }
   }
@@ -1913,9 +3095,9 @@ export function resolveFastPath(message, history, snap, currency) {
   // which is an expense. A third-party bought that matches a product
   // was already claimed by step 11.
   if (/\bexpense\b/.test(t) || /\bspent\b/.test(t) || /\bspend\b/.test(t) || /\bbought\b/.test(t)) {
-    const expense = parseExpenseMention(text);
+    const expense = parseExpenseMention(text, snap);
     if (expense) {
-      return { kind: "action", tool: "add_expense", params: { amount: expense.amount, description: expense.description } };
+      return { kind: "action", tool: "add_expense", params: withExpenseCategory({ amount: expense.amount, description: expense.description }) };
     }
   }
 
@@ -1937,12 +3119,27 @@ export function resolveFastPath(message, history, snap, currency) {
     }
   }
 
+  // 14a. Challenge follow-up ("Really?", "Are you sure?", "That can't
+  // be right"): re-check the last answer against the snapshot and either
+  // correct it or confirm it, never the failure line. Runs before the
+  // casual step on purpose: a challenge is a re-check, not a greeting.
+  if (isChallenge(text)) {
+    return challengeReply(text, history, snap, currency);
+  }
+
   // 14b. Bare acknowledgement or greeting ("Great", "Thanks", "Hello"):
   // one short friendly line, never the model, never the failure line.
   // Whole-message anchored, so a longer sentence ("Great, now record a
   // sale") still reaches its own step.
   const ack = acknowledgementReply(text);
   if (ack) return { kind: "reply", text: ack };
+
+  // 14c. Casual replies: emoji-only, reactions, small talk, jokes.
+  // Runs after every business intent and just before the model
+  // fallback, so a business message that happens to contain an emoji
+  // is never misread as casual ("I sold 2 laptops 🔥" is a sale).
+  const casual = casualReply(text);
+  if (casual) return { kind: "reply", text: casual };
 
   // 15. Nothing matched: the model handles it.
   return null;

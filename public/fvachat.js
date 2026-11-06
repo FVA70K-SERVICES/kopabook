@@ -586,10 +586,41 @@
     return 'Kopa Bot is answering';
   }
 
+  // Round 5: the tab-row inset. The tab row is in-flow, but in-flow
+  // alone does not stop a bubble being clipped by it: the messages
+  // container starts exactly on the tab row's bottom edge, so on a long
+  // thread any scroll offset slices the topmost bubble's first line
+  // exactly at the pills (13 live screenshots, 00:55-01:36 WAT). The
+  // fix separates the scroller's clip edge from the row by a full
+  // tab-row height: while the tabs are shown, the window carries
+  // .fva-tabs-on and the thread containers get a 48px top margin
+  // (row measures 46px at 390px). Enforced inline here, not only in
+  // the sheet, so a stale cached fvachat.css cannot defeat it (the
+  // round-4 lesson for the full sheet). Gated on the tabs actually
+  // being shown, so public chats with no tab row get no dead band.
+  // The same 48px lives in fvachat.css as the backstop rule.
+  var TAB_ROW_INSET_PX = 48;
+  function applyTabInset() {
+    try {
+      const tabs = body.querySelector('#fva-mode-tabs');
+      if (!tabs) return;
+      // The tabs are shown exactly when the owner mode gate in
+      // renderModeTabs passes, so derive the inset from that same gate
+      // instead of reading the row's display back (which is only
+      // reliable after renderModeTabs has set it inline).
+      const on = !!(IS_KOPABOOK && isOwnerMode());
+      win.classList.toggle('fva-tabs-on', on);
+      ['#fva-chat-messages', '#fva-case-history', '#fva-owner-inbox'].forEach(sel => {
+        const el = body.querySelector(sel);
+        if (el) el.style.marginTop = on ? TAB_ROW_INSET_PX + 'px' : '';
+      });
+    } catch (e) {}
+  }
+
   function renderModeTabs() {
     const tabs = body.querySelector('#fva-mode-tabs');
     if (!tabs) return;
-    if (!(IS_KOPABOOK && isOwnerMode())) { tabs.style.display = 'none'; return; }
+    if (!(IS_KOPABOOK && isOwnerMode())) { tabs.style.display = 'none'; applyTabInset(); return; }
     tabs.style.display = 'flex';
     tabs.querySelectorAll('button').forEach(b => {
       b.classList.toggle('active', b.getAttribute('data-mode') === chatMode);
@@ -612,6 +643,7 @@
     }
     renderPaCards();
     updateVoiceControls();
+    applyTabInset();
   }
 
   function showDoorPicker() {
@@ -1937,6 +1969,11 @@
     loadHistory();
     poll();
     afterOwnerUI();
+    // Round 5: showChatUI rebuilds the whole body (wiping inline
+    // styles), and afterOwnerUI returns early for signed-out visitors,
+    // so re-derive the tab inset here too — the invariant is that after
+    // showChatUI the inset always matches tab visibility.
+    applyTabInset();
   }
 
   // Load full chat history on open
@@ -2046,6 +2083,16 @@
         // speaks the same text by message id and by text, so it is not repeated.
         if (data.botReply && data.botReply.answer) {
           maybeSpeakBotText(data.botReply.answer);
+        }
+        // Clear chat: the server wiped this session's thread and kept
+        // only the confirmation line, which arrives through the poll
+        // loop (a fresh id, so it is appended after this clear). Drop
+        // the visible bubbles now so the old chat does not sit on
+        // screen until the panel is reopened. Support case history
+        // lives in its own view and is never touched by this.
+        if (data.botReply && data.botReply.clearChat) {
+          const msgs = body.querySelector('.fva-messages');
+          if (msgs) msgs.innerHTML = '';
         }
         // Confirmation proposal card for a write action proposed by Ask Kopa AI.
         // Confirm is a structured tap: the button sends confirmProposalId

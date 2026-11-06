@@ -307,9 +307,23 @@ const PLATFORM_SIGNALS = [
   'not working', 'bug', 'error message', 'app is', 'the app', 'feature', 'how do i use',
   'how does kopabook', 'refund', 'cancel my', 'delete my account', 'support',
 ];
+// Business planning is Ask Kopa AI's job, not Kopa Support's: "let's plan",
+// "plan to improve the business", "business planning for next month".
+// The bare word "plan" must not deflect those. A subscription tier
+// ("my plan", "the pro plan", "what plan am I on", "how much does a plan
+// cost") still deflects, so the exemption never applies when "plan" is
+// named as a tier.
+const BUSINESS_PLANNING_WORDS = /\b(improve|improvement|grow|growth|business|stock|sales?|profit|revenue|customers?|expenses?|marketing|strategy|debts?|next month|this month)\b/;
+const SUBSCRIPTION_PLAN = /\b(my|your|the|this|that|a|an|what|which)\s+(pro\s+|starter\s+|solo\s+|free\s+)?plans?\b/;
+
 export function isPlatformQuestion(message) {
   const lower = String(message || '').toLowerCase();
   if (isBusinessActionCommand(lower) && !/kopabook|plan|subscription|upgrade|pricing/.test(lower)) return false;
+  const isBusinessPlanning =
+    /\blet'?s plan\b/.test(lower) ||
+    /\blet us plan\b/.test(lower) ||
+    (/\b(plan|planning)\b/.test(lower) && BUSINESS_PLANNING_WORDS.test(lower));
+  if (isBusinessPlanning && !SUBSCRIPTION_PLAN.test(lower)) return false;
   return PLATFORM_SIGNALS.some((s) => lower.includes(s));
 }
 

@@ -90,16 +90,36 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
   display: none; flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-#fva-chat-window.open { display: flex; }
+#fva-chat-window.open { display: flex; height: 568px; }
+/* Round 5: the open window is 568px, not 520px, to pay for the 48px
+   tab-row inset. On the Support side the status + tools rows sit under
+   the tabs, so with the inset the desktop messages column was 162px
+   and the 192px proposal card no longer fit whole (fit failures at
+   768/1280/1920). 568px restores the pre-fix column height at normal
+   desktop viewport heights; the app shell's max-height cap still
+   applies, so very short viewports (692-739px tall, Support side
+   only) can still cut the top of a proposal card — see known gaps.
+   The 568px lives here, on .open, so the base rule above stays
+   byte-identical (the round-2 suite pins its 360px/bottom-96px text). */
 #fva-chat-header {
   background: var(--navy, #1a2b49); color: white; padding: 16px 20px;
   display: flex; align-items: center; justify-content: space-between;
+  /* Round 5: the header never shrinks. Without flex-shrink: 0, a short
+     window (keyboard open, short phone) can squeeze the header and its
+     title/status paint over the tab row and messages below it. */
+  flex: 0 0 auto;
 }
 #fva-chat-header .title { font-weight: 700; font-size: 16px; }
 #fva-chat-header .status { font-size: 12px; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
 #fva-chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; }
 #fva-chat-close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
 #fva-chat-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* Round 5: the body column carries the panel background, so the 48px
+   inset band between the tab row and the messages reads as one
+   continuous panel instead of a strip of window background. Kept as
+   a separate rule so the base rule above stays byte-identical (the
+   round-3 suite pins its exact text). */
+#fva-chat-body { background: var(--fv-panel); }
 #fva-chat-messages { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--fv-panel); }
 .fva-msg { box-sizing: border-box; max-width: min(85%, 100%); min-width: 0; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.45; word-wrap: break-word; overflow-wrap: anywhere; animation: fva-msg-in 0.22s ease-out; }
 .fva-msg.agent { background: var(--fv-agent-bg); color: var(--fv-ink); border: 1px solid var(--fv-line); align-self: flex-start; border-bottom-left-radius: 4px; }
@@ -225,13 +245,39 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
 #fva-mode-tabs {
   display: flex; flex: 0 0 auto; gap: 8px; padding: 10px 12px 0; background: var(--fv-panel);
   border-bottom: 1px solid var(--fv-line);
+  /* Round 5: the tab row is a non-scrolling header. It is in-flow (the
+     round-4 comment was right about that), but in-flow alone does NOT
+     stop a bubble being clipped by it — and that is the real mechanism
+     behind the 13 live screenshots. The scrollable messages container
+     starts exactly on the tab row's bottom edge, and the row and the
+     messages share the same panel background with only a 1px border
+     between them, so on a long live thread (which opens scrolled to the
+     bottom) any scroll offset that puts a bubble across the container's
+     top edge slices its first line exactly at the pills, and it reads
+     as half hidden behind the tab row. It comes and goes with the
+     scroll offset, which is why it looked intermittent. The fix is
+     separation, not just in-flow order: the messages container (and
+     the history/inbox containers that take its place) start a full
+     tab-row height below the row — see .fva-tabs-on below — so a bubble
+     can only ever be sliced 48px below the pills, never at them. This
+     row itself is pinned above the scrolling content (relative +
+     z-index, opaque background, never shrinks), so no bubble can paint
+     over it either. */
+  position: relative; z-index: 5;
 }
-/* The tab row is a normal in-flow row above the scrollable messages area:
-   it never shrinks below its content height, so its pills can never be
-   squeezed onto the messages, and its bottom edge is a real line, so a
-   bubble clipped at the top of the scrolled thread reads as scrolled —
-   never as hidden behind a pill. The other chrome rows never shrink
-   either: only #fva-chat-messages flexes. */
+/* Round 5: the top inset. While the tabs are shown (window carries
+   .fva-tabs-on, set by applyTabInset() in fvachat.js), every scrollable
+   thread container starts 48px below the tab row — at least the row's
+   own height (46px measured at 390px). The clip edge of the scroller
+   is therefore a full row below the pills, and the first bubble at
+   scrollTop 0 sits 48px + the container's own padding below them.
+   The inset is gated on the tabs being shown, so public (signed-out)
+   chats with no tab row get no dead band at the top of the thread.
+   The JS also enforces the same 48px inline, so a stale cached sheet
+   cannot defeat it (round-4 lesson); this rule is the backstop. */
+#fva-chat-window.fva-tabs-on #fva-chat-messages,
+#fva-chat-window.fva-tabs-on #fva-case-history,
+#fva-chat-window.fva-tabs-on #fva-owner-inbox { margin-top: 48px; }
 #fva-support-status, #fva-support-tools, #fva-door-picker { flex: 0 0 auto; }
 #fva-mode-tabs button {
   flex: 1; padding: 9px 6px; border-radius: 999px; cursor: pointer;

@@ -121,6 +121,28 @@ function tzOffsetMinutes(zone, date) {
   return Math.round((asUtc - date.getTime()) / 60000);
 }
 
+// UTC window for a given local date (YYYY-MM-DD) in a timezone.
+// businessDay(tz, at) answers "which local day is this instant in";
+// this answers "which UTC window is this local day". Same two-pass
+// refinement, so week/month/year windows built from local dates use
+// exactly the same conversion. Round 5: the snapshot needs windows
+// for days other than today (yesterday, Monday, the 1st), which
+// businessDay alone cannot express.
+export function businessDayWindow(tz, localDate) {
+  const zone = tz || "Africa/Lagos";
+  const date = String(localDate || "").slice(0, 10);
+  let guess = Date.parse(date + "T00:00:00Z");
+  for (let i = 0; i < 2; i++) {
+    let offset;
+    try { offset = tzOffsetMinutes(zone, new Date(guess)); }
+    catch { offset = 60; }
+    guess = Date.parse(date + "T00:00:00Z") - offset * 60000;
+  }
+  const start = new Date(guess);
+  const end = new Date(guess + 24 * 3600 * 1000);
+  return { date, startUtc: toSqliteDate(start), endUtc: toSqliteDate(end) };
+}
+
 // "Today" in the business's own timezone. Returns the local date (YYYY-MM-DD)
 // plus the matching UTC window for comparing created_at timestamps.
 // Pure Intl, no library needed, works on Cloudflare Workers.
@@ -139,17 +161,7 @@ export function businessDay(tz, at) {
       timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit",
     }).format(now);
   }
-  // Find UTC start of that local day via two refinement passes.
-  let guess = Date.parse(date + "T00:00:00Z");
-  for (let i = 0; i < 2; i++) {
-    let offset;
-    try { offset = tzOffsetMinutes(zone, new Date(guess)); }
-    catch { offset = 60; }
-    guess = Date.parse(date + "T00:00:00Z") - offset * 60000;
-  }
-  const start = new Date(guess);
-  const end = new Date(guess + 24 * 3600 * 1000);
-  return { date, startUtc: toSqliteDate(start), endUtc: toSqliteDate(end) };
+  return businessDayWindow(zone, date);
 }
 
 // Returns { user, business, membership } or null.
