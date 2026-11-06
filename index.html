@@ -56,13 +56,19 @@
     <a class="skip-link" href="#main">Skip to main content</a>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    <!-- FVAChat: merged chat by FVA70K Services. Signed in: Ask Kopa AI + Kopa Support. Signed out: Kopa Support bot. -->
+    <!-- FVAChat: merged chat by FVA70K Services. Signed in: Ask Kopa AI + Kopa Support. Signed out: Kopa Support bot.
+         Speed (2026-11-06): deferred, so the 109 kB chat script no
+         longer blocks parsing and first paint on cold open. It reads
+         document.currentScript at run time, which defer preserves, and
+         it only builds its own button, so running after the app module
+         changes nothing. The inline owner-context script above it is
+         untouched and still runs first. -->
     <script>
       // Owner context for the merged chat. The server verifies this against the signed-in session before trusting it.
       window.FVAChatOwner = null;
       window.setFVAChatOwner = function(ctx) { window.FVAChatOwner = ctx; };
     </script>
-    <script src="/fvachat.js"
+    <script defer src="/fvachat.js"
       data-site-id="kopabook"
       data-business="Kopa Support"
       data-bot-name="Kopa Bot"

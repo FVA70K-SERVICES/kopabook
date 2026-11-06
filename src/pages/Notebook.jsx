@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api } from "../lib/api";
 
 const COLORS = {
@@ -42,8 +44,9 @@ function fmtDate(s) {
 
 export default function NotebookPage({ session }) {
   const [tab, setTab] = useState("shared"); // shared | private
-  const [notes, setNotes] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [notes, setNotes] = useState(() => { const c = getCachedList("notes:shared", session?.business?.id); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("notes:shared", session?.business?.id); return c ? c.updatedAt : null; });
+  const [loading, setLoading] = useState(() => !getCachedList("notes:shared", session?.business?.id));
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -61,10 +64,13 @@ export default function NotebookPage({ session }) {
   const canModerate = myRole === "owner" || myRole === "partner";
 
   async function load(t) {
-    setLoading(true); setError("");
+    const key = "notes:" + t;
+    if (!getCachedList(key, session?.business?.id)) setLoading(true);
+    setError("");
     try {
       const d = await api.get("/api/notes?visibility=" + t);
       setNotes(d.notes || []);
+      setCachedList(key, session?.business?.id, d.notes || []); setUpdatedAt(Date.now());
     } catch (e) { setError(e.message); }
     setLoading(false);
   }
@@ -173,8 +179,9 @@ export default function NotebookPage({ session }) {
         }}
       />
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {loading && <div className="loading">Loading notes...</div>}
+      {error && <LoadError message={error} onRetry={() => load(tab)} />}
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load(tab)} />
+      {loading && notes.length === 0 && <ListSkeleton label="Loading notes..." />}
 
       {!loading && visible.length === 0 && (
         <div className="card" style={{ textAlign: "center", color: "#666", borderRadius: 14 }}>

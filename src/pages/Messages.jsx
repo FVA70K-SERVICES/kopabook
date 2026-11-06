@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote } from "../components/ListState";
 import { api, fmt } from "../lib/api";
 import { waLink } from "../lib/whatsapp";
 import { sendVia } from "../lib/channels";
@@ -10,12 +12,13 @@ import { promoCardUrl, shareCard, downloadCard } from "../lib/shareCards";
 // presses send. Nothing goes out automatically.
 export default function MessagesPage({ session }) {
   const [tab, setTab] = useState("broadcast");
-  const [customers, setCustomers] = useState([]);
-  const [members, setMembers] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [biz, setBiz] = useState({ name: "", brand_color: "#166534", tagline: "" });
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [customers, setCustomers] = useState(() => { const c = getCachedList("customers", session?.business?.id); return c ? c.data : []; });
+  const [members, setMembers] = useState(() => { const c = getCachedList("staff", session?.business?.id); return c ? c.data : []; });
+  const [products, setProducts] = useState(() => { const c = getCachedList("products", session?.business?.id); return c ? c.data : []; });
+  const [biz, setBiz] = useState(() => { const c = getCachedList("business", session?.business?.id); return c ? c.data : { name: "", brand_color: "#166534", tagline: "" }; });
+  const [logs, setLogs] = useState(() => { const c = getCachedList("reminders", session?.business?.id); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("reminders", session?.business?.id); return c ? c.updatedAt : null; });
+  const [loading, setLoading] = useState(() => !getCachedList("reminders", session?.business?.id));
 
   // Broadcast composer
   const [audience, setAudience] = useState("all"); // all | debtors
@@ -32,12 +35,14 @@ export default function MessagesPage({ session }) {
   const [channel, setChannel] = useState("whatsapp");
 
   useEffect(() => {
+    // Already parallel; this writes each fresh list back to the shared
+    // cache so the page (and the list screens) paint instantly next time.
     Promise.all([
-      api.get("/api/customers").then((d) => setCustomers(d.customers || [])).catch(() => {}),
-      api.get("/api/staff").then((d) => setMembers(d.members || [])).catch(() => {}),
-      api.get("/api/products").then((d) => setProducts(d.products || [])).catch(() => {}),
-      api.get("/api/business").then((d) => setBiz(d.business || {})).catch(() => {}),
-      api.get("/api/reminders").then((d) => setLogs(d.logs || [])).catch(() => {}),
+      api.get("/api/customers").then((d) => { setCustomers(d.customers || []); setCachedList("customers", session?.business?.id, d.customers || []); }).catch(() => {}),
+      api.get("/api/staff").then((d) => { setMembers(d.members || []); setCachedList("staff", session?.business?.id, d.members || []); }).catch(() => {}),
+      api.get("/api/products").then((d) => { setProducts(d.products || []); setCachedList("products", session?.business?.id, d.products || []); }).catch(() => {}),
+      api.get("/api/business").then((d) => { setBiz(d.business || {}); setCachedList("business", session?.business?.id, d.business || {}); }).catch(() => {}),
+      api.get("/api/reminders").then((d) => { setLogs(d.logs || []); setCachedList("reminders", session?.business?.id, d.logs || []); setUpdatedAt(Date.now()); }).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -113,7 +118,7 @@ export default function MessagesPage({ session }) {
   const curStaff = staffQueue ? staffQueue.list[staffQueue.idx] : null;
   const effectiveStaffMsg = staffMsg || STAFF_TEMPLATES[staffTpl].text;
 
-  if (loading) return <div className="loading">Loading...</div>;
+  if (loading) return <ListSkeleton label="Loading messages..." />;
 
   return (
     <>
@@ -202,6 +207,8 @@ export default function MessagesPage({ session }) {
       )}
 
       {tab === "history" && (
+        <>
+        <UpdatedNote updatedAt={updatedAt} />
         <div className="table-wrap">
           <table className="data">
             <thead><tr><th>When</th><th>Type</th><th>To</th><th>Message</th></tr></thead>
@@ -218,6 +225,7 @@ export default function MessagesPage({ session }) {
           </table>
           {logs.length === 0 && <p className="empty">No messages sent yet.</p>}
         </div>
+        </>
       )}
 
       {queue && cur && (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
 import { api, fmt, nav } from "../lib/api";
 import { parseCSV, detectMapping, validateRows, cell, TARGET_FIELDS, FIELD_LABELS } from "../lib/csv";
 
@@ -23,19 +24,23 @@ export default function ImportPage() {
   const [mapping, setMapping] = useState(null);
   const [validRows, setValidRows] = useState([]);
   const [rowErrors, setRowErrors] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => { const c = getCachedList("products", ""); return c ? c.data : []; });
   const [prodError, setProdError] = useState("");
   const [importState, setImportState] = useState(null); // {done, ok, fail, results:[{name, ok, message}]}
   const [importing, setImporting] = useState(false);
   const [reviewQueue, setReviewQueue] = useState(loadReviewQueue);
   const [parseError, setParseError] = useState("");
-  const [billing, setBilling] = useState(null);
+  const [billing, setBilling] = useState(() => { const c = getCachedList("billing", ""); return c ? c.data : null; });
 
+  // The two lookups are independent: one parallel fetch, each writing
+  // its fresh value back to the cache so matching paints instantly.
   useEffect(() => {
-    api.get("/api/products")
-      .then((d) => setProducts(d.products || []))
-      .catch((e) => setProdError(e.message));
-    api.get("/api/billing").then(setBilling).catch(() => {});
+    Promise.allSettled([api.get("/api/products"), api.get("/api/billing")])
+      .then(([prods, bill]) => {
+        if (prods.status === "fulfilled") { setProducts(prods.value.products || []); setCachedList("products", "", prods.value.products || []); }
+        else setProdError(prods.reason?.message || "Could not load products.");
+        if (bill.status === "fulfilled") { setBilling(bill.value); setCachedList("billing", "", bill.value); }
+      });
   }, []);
 
   const productIndex = useMemo(() => {
@@ -93,7 +98,7 @@ export default function ImportPage() {
     api.get("/api/products")
       .then((d) => {
         const prods = d.products || [];
-        setProducts(prods);
+        setProducts(prods); setCachedList("products", "", prods);
         setProdError("");
         // drop queue entries that now match a product
         const byName = new Set(prods.map((p) => String(p.name || "").toLowerCase().trim()));

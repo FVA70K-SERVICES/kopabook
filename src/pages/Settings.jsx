@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton } from "../components/ListState";
 import { api, nav } from "../lib/api";
 import { LANGUAGES } from "../lib/i18n";
 import { NIGERIAN_STATES } from "../lib/nigeria";
@@ -9,6 +11,22 @@ import PlanCard from "../components/PlanCard";
 import ChatbotControl from "../components/ChatbotControl";
 import AppLockSettings from "../components/AppLockSettings";
 import LanguageSwitcher from "../components/LanguageSwitcher";
+
+
+// Maps a raw business object to the settings form. Used for both the
+// cached first paint and the fresh fetch, so the two can never disagree.
+function businessToForm(b) {
+  const d = b || {};
+  return {
+    name: d.name || "", businessType: d.business_type || "", customType: d.custom_type || "",
+    state: d.state || "", city: d.city || "", country: d.country || "Nigeria",
+    timezone: d.timezone || "Africa/Lagos", currency: d.currency || "NGN",
+    brandColor: d.brand_color || "#166534", tagline: d.tagline || "",
+    reminderTemplate: d.reminder_template || "",
+    receiptPhone: d.receipt_phone || "", receiptAddress: d.receipt_address || "",
+    receiptFooter: d.receipt_footer || "", receiptPaperWidth: d.receipt_paper_width || "80mm",
+  };
+}
 
 export default function SettingsPage({ session }) {
   const [confirmClose, setConfirmClose] = useState(false);
@@ -22,8 +40,8 @@ export default function SettingsPage({ session }) {
     } catch (e) { setError(e.message); setConfirmClose(false); }
     setClosing(false);
   }
-  const [form, setForm] = useState({ name: "", businessType: "", state: "", city: "", currency: "NGN", brandColor: "#166534", tagline: "", reminderTemplate: "", receiptPhone: "", receiptAddress: "", receiptFooter: "", receiptPaperWidth: "80mm" });
-  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(() => { const c = getCachedList("business", session?.business?.id); return businessToForm(c ? c.data : null); });
+  const [loading, setLoading] = useState(() => !getCachedList("business", session?.business?.id));
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [saving, setSaving] = useState(false);
@@ -57,16 +75,8 @@ export default function SettingsPage({ session }) {
   useEffect(() => {
     api.get("/api/business")
       .then((d) => {
-        setForm({
-          name: d.business?.name || "", businessType: d.business?.business_type || "",
-          customType: d.business?.custom_type || "",
-          state: d.business?.state || "", city: d.business?.city || "", country: d.business?.country || "Nigeria",
-          timezone: d.business?.timezone || "Africa/Lagos", currency: d.business?.currency || "NGN",
-          brandColor: d.business?.brand_color || "#166534", tagline: d.business?.tagline || "",
-          reminderTemplate: d.business?.reminder_template || "",
-          receiptPhone: d.business?.receipt_phone || "", receiptAddress: d.business?.receipt_address || "",
-          receiptFooter: d.business?.receipt_footer || "", receiptPaperWidth: d.business?.receipt_paper_width || "80mm",
-        });
+        setForm(businessToForm(d.business));
+        setCachedList("business", session?.business?.id, d.business || {});
         setLoading(false);
       })
       .catch((e) => { setError(e.message); setLoading(false); });
@@ -104,7 +114,7 @@ export default function SettingsPage({ session }) {
     }
   }
 
-  if (loading) return <div className="loading">Loading...</div>;
+  if (loading) return <ListSkeleton label="Loading settings..." />;
 
   return (
     <>
@@ -368,24 +378,27 @@ export default function SettingsPage({ session }) {
    its tender is still owed, not money in. If "Credit" means card payment
    for this business, rename the mode instead of changing its kind. */
 function RulesSettingsSection({ isOwner }) {
-  const [lowStockDefault, setLowStockDefault] = useState("5");
-  const [overdueDays, setOverdueDays] = useState("7");
-  const [modes, setModes] = useState([]);
+  const [lowStockDefault, setLowStockDefault] = useState(() => { const c = getCachedList("business", ""); return String(c?.data?.low_stock_default ?? 5); });
+  const [overdueDays, setOverdueDays] = useState(() => { const c = getCachedList("business", ""); return String(c?.data?.overdue_days ?? 7); });
+  const [modes, setModes] = useState(() => { const c = getCachedList("payment-modes", ""); return c ? c.data : []; });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [kindSaving, setKindSaving] = useState(null);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
 
+  // The two reads were already fired in parallel; this writes the
+  // fresh values back to the cache for an instant next paint.
   useEffect(() => {
     api.get("/api/business")
       .then((d) => {
         setLowStockDefault(String(d.business?.low_stock_default ?? 5));
         setOverdueDays(String(d.business?.overdue_days ?? 7));
+        setCachedList("business", "", d.business || {});
       })
       .catch(() => {});
     api.get("/api/payment-modes")
-      .then((d) => setModes(d.modes || []))
+      .then((d) => { setModes(d.modes || []); setCachedList("payment-modes", "", d.modes || []); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -419,7 +432,7 @@ function RulesSettingsSection({ isOwner }) {
       <p className="hint">Low-stock warning level, when a debt counts as overdue, and what each payment mode means.</p>
       {error && <div className="alert alert-error">{error}</div>}
       {ok && <div className="alert alert-ok">{ok}</div>}
-      {loading ? <p className="hint">Loading rules...</p> : (
+      {loading ? <ListSkeleton rows={3} label="Loading rules..." /> : (
         <form onSubmit={saveRules}>
           <div className="field"><div className="row2">
             <div><label>Low-stock threshold (default)</label>

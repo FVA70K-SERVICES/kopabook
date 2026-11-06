@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt } from "../lib/api";
 
 const emptyForm = { name: "", sku: "", unitPrice: "", costPrice: "", openingQuantity: "", lowStockThreshold: "5", category: "", unit: "piece" };
@@ -6,9 +9,12 @@ const emptyForm = { name: "", sku: "", unitPrice: "", costPrice: "", openingQuan
 const UNIT_OPTIONS = ["piece", "pack", "cup", "kg", "g", "litre", "bottle", "bag", "carton", "other"];
 
 export default function ProductsPage({ session }) {
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => { const c = getCachedList("products", session?.business?.id); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("products", session?.business?.id); return c ? c.updatedAt : null; });
   const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("products", session?.business?.id));
+  const debouncedQ = useDebouncedValue(q, 300);
+  const firstSearch = useRef(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -28,15 +34,14 @@ export default function ProductsPage({ session }) {
 
   async function openHistory(p) {
     setHistoryFor(p); setHistoryRows([]); setHistoryLoading(true);
-    try {
-      const d = await api.get(`/api/products/${p.id}/movements`);
-      setHistoryRows(d.movements || []);
-    } catch (e) { setError(e.message); }
+    const [mov, adj] = await Promise.allSettled([
+      api.get(`/api/products/${p.id}/movements`),
+      api.get(`/api/products/${p.id}/adjust`),
+    ]);
+    if (mov.status === "fulfilled") setHistoryRows(mov.value.movements || []);
+    else setError(mov.reason?.message || "Could not load movements.");
     // WORLD-BEST: Stock adjustment history — start
-    try {
-      const a = await api.get(`/api/products/${p.id}/adjust`);
-      setAdjustRows(a.adjustments || []);
-    } catch (e) { setAdjustRows([]); }
+    setAdjustRows(adj.status === "fulfilled" ? (adj.value.adjustments || []) : []);
     // WORLD-BEST: Stock adjustment history — end
     setHistoryLoading(false);
   }
@@ -44,16 +49,22 @@ export default function ProductsPage({ session }) {
   const canManage = session.perms?.can_manage_products;
 
   async function load(search) {
-    setLoading(true);
+    const cached = !search ? getCachedList("products", session?.business?.id) : null;
+    if (!cached) setLoading(true);
     try {
       const d = await api.get("/api/products" + (search ? `?q=${encodeURIComponent(search)}` : ""));
       setProducts(d.products);
+      if (!search) { setCachedList("products", session?.business?.id, d.products); setUpdatedAt(Date.now()); }
       setError("");
     } catch (e) { setError(e.message); }
     setLoading(false);
   }
 
   useEffect(() => { load(""); }, []);
+  useEffect(() => {
+    if (firstSearch.current) { firstSearch.current = false; return; }
+    load(debouncedQ);
+  }, [debouncedQ]);
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -154,11 +165,13 @@ export default function ProductsPage({ session }) {
 
       <div className="toolbar">
         <input className="search" placeholder="Search products..." aria-label="Search products" value={q}
-          onChange={(e) => { setQ(e.target.value); load(e.target.value); }} />
+          onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {loading ? <div className="loading">Loading products...</div> : (
+      {error && <LoadError message={error} onRetry={() => load(q)} />}
+      {loading ? <ListSkeleton label="Loading products..." /> : (
+        <>
+        <UpdatedNote updatedAt={updatedAt} onRefresh={() => load(q)} />
         <div className="table-wrap">
           <table className="data">
             <thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
@@ -196,6 +209,7 @@ export default function ProductsPage({ session }) {
           </table>
           {products.length === 0 && <p className="empty">No products yet. Add your first product to start selling.</p>}
         </div>
+        </>
       )}
 
       {showForm && (

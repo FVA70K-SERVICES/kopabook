@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, nav, todayISO } from "../lib/api";
 
 const STATUS_COLORS = {
@@ -16,11 +18,12 @@ function nightsBetween(a, b) {
 
 export default function HotelsPage({ session }) {
   const [tab, setTab] = useState("board");
-  const [overview, setOverview] = useState(null);
-  const [rooms, setRooms] = useState([]);
-  const [bookings, setBookings] = useState([]);
+  const [overview, setOverview] = useState(() => { const c = getCachedList("hotel:all", session?.business?.id); return c ? c.data.overview : null; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("hotel:all", session?.business?.id); return c ? c.updatedAt : null; });
+  const [rooms, setRooms] = useState(() => { const c = getCachedList("hotel:all", session?.business?.id); return c ? c.data.rooms : []; });
+  const [bookings, setBookings] = useState(() => { const c = getCachedList("hotel:all", session?.business?.id); return c ? c.data.bookings : []; });
   const [filter, setFilter] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("hotel:all", session?.business?.id));
   const [error, setError] = useState("");
   const [modes, setModes] = useState([]);
   const [needsUpgrade, setNeedsUpgrade] = useState(false);
@@ -56,7 +59,10 @@ export default function HotelsPage({ session }) {
   const canHousekeeping = ["owner", "hotel_manager", "housekeeper"].includes(role);
 
   async function load() {
-    setLoading(true);
+    // The four reads were already parallel; this adds cached first paint
+    // (one bundle per booking filter) and writes the fresh bundle back.
+    const key = "hotel:" + (filter || "all");
+    if (!getCachedList(key, session?.business?.id)) setLoading(true);
     try {
       const [o, r, b, m] = await Promise.all([
         api.get("/api/hotel/overview"),
@@ -68,6 +74,7 @@ export default function HotelsPage({ session }) {
       setRooms(r.rooms || []);
       setBookings(b.bookings || []);
       setModes((m.modes || []).filter((x) => x.enabled !== 0).map((x) => x.name));
+      setCachedList(key, session?.business?.id, { overview: o, rooms: r.rooms || [], bookings: b.bookings || [] }); setUpdatedAt(Date.now());
       setError("");
       setNeedsUpgrade(false);
     } catch (e) {
@@ -81,10 +88,13 @@ export default function HotelsPage({ session }) {
 
   async function loadFolio(id) {
     setFolioId(id);
-    setFolioLoading(true);
+    const cachedFolio = getCachedList("hotel-folio:" + id, session?.business?.id);
+    if (cachedFolio) setFolio(cachedFolio.data);
+    if (!cachedFolio) setFolioLoading(true);
     try {
       const d = await api.get(`/api/hotel/folio?bookingId=${id}`);
       setFolio(d);
+      setCachedList("hotel-folio:" + id, session?.business?.id, d);
       setCheckoutForm({ amount: String(Math.max(0, d.balance)), mode: payForm.mode || "Cash", note: "" });
     } catch (e) { setError(e.message); }
     setFolioLoading(false);
@@ -248,7 +258,8 @@ export default function HotelsPage({ session }) {
         </div>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load()} />}
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load()} />
 
       {overview && (
         <div className="metric-grid" style={{ marginBottom: 16 }}>
@@ -267,7 +278,7 @@ export default function HotelsPage({ session }) {
         ))}
       </div>
 
-      {loading ? <div className="loading">Loading...</div> : (<>
+      {loading ? <ListSkeleton label="Loading hotel..." /> : (<>
         {tab === "board" && (
           rooms.length === 0 ? <p className="empty">No rooms yet. Add your first room to start.</p> : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
@@ -422,7 +433,7 @@ export default function HotelsPage({ session }) {
         <div className="modal-back" onClick={closeFolio}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
             <button type="button" className="modal-close" aria-label="Close" title="Close" onClick={closeFolio}>✕</button>
-            {folioLoading ? <div className="loading">Loading folio...</div> : folio && (<>
+            {folioLoading ? <ListSkeleton rows={3} label="Loading folio..." /> : folio && (<>
               <h2>Folio — {folio.booking.guest_name}</h2>
               <p style={{ color: "var(--muted)", marginTop: 0 }}>
                 Room {folio.booking.room_number} · {folio.booking.check_in}{folio.booking.check_in_time ? ` ${folio.booking.check_in_time}` : ""} → {folio.booking.check_out}{folio.booking.check_out_time ? ` ${folio.booking.check_out_time}` : ""} · {folio.booking.status.replace("_", " ")}

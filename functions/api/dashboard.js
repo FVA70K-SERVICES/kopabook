@@ -6,6 +6,15 @@
 // A payment mode is credit-kind when payment_modes.kind = 'credit', or —
 // before migration 0061 runs — when its name is exactly 'credit'
 // (case-insensitive). Credit-kind tender does NOT count as money received.
+//
+// SPEED (Dashboard stream): the independent D1 reads below used to run
+// one after another (about 14 sequential awaits). They now fire together
+// in a single Promise.all batch and the derived figures are computed
+// after the batch resolves. Every SQL string, every metric field and
+// every derivation is unchanged; only the waiting is parallel. The two
+// reads with their own fallbacks (overdue days, trend cost gate) keep
+// those fallbacks inside their own promises, so a failure there still
+// degrades to the default instead of failing the whole Dashboard.
 import { json, getAuthContext, requireAuth, businessDay } from "./_utils";
 import { getBusinessOwnerTier } from "./billing";
 import { computeMoneySplit } from "./_money.js";
@@ -29,26 +38,131 @@ export async function onRequestGet(context) {
 
     // "Today" follows the business's own timezone, not server UTC.
     const day = businessDay(auth.business.timezone);
-    const todaySales = await db.prepare(
-      `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count,
-              COALESCE(SUM(change_given), 0) AS changeGiven
-       FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?
-         AND (status IS NULL OR status != 'voided')`
-    ).bind(bid, day.startUtc, day.endUtc).first();
+    const trendFrom = isoDateNDaysAgo(day.date, 6);
 
-    const todayExpenses = await db.prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count
-       FROM expenses WHERE business_id = ? AND incurred_on = ?`
-    ).bind(bid, day.date).first();
+    // Owner-set overdue days (migration 0061). Pre-migration the column
+    // does not exist: fall back to the 7-day default.
+    const overdueDaysPromise = db.prepare(
+      `SELECT overdue_days FROM businesses WHERE id = ? LIMIT 1`
+    ).bind(bid).first().then((bizRow) => {
+      if (bizRow && bizRow.overdue_days !== null && bizRow.overdue_days !== undefined) {
+        return Number(bizRow.overdue_days) || 7;
+      }
+      return 7;
+    }).catch(() => 7);
 
-    const debtRows = await db.prepare(
-      `SELECT c.id, c.name,
-              (SELECT balance_after FROM customer_ledger
-               WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS outstanding,
-              (SELECT created_at FROM customer_ledger
-               WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS last_activity
-       FROM customers c WHERE c.business_id = ?`
-    ).bind(bid).all();
+    // 7-day revenue trend cost/profit stay Starter-gated exactly like
+    // Reports, and only for staff who can view profit: otherwise cost
+    // and profit are null.
+    const canSeeTrendCostPromise = getBusinessOwnerTier(db, bid).then(
+      ({ tier }) => ["pro", "solo", "starter"].includes(tier) && !!auth.perms.can_view_profit
+    ).catch(() => false);
+
+    const [
+      todaySales,
+      todayExpenses,
+      debtRows,
+      overdueDays,
+      lowStock,
+      lowStockNames,
+      products,
+      recentSales,
+      byMethod,
+      modeRows,
+      canSeeTrendCost,
+      trendRows,
+      todayStamps,
+      bestRows,
+    ] = await Promise.all([
+      db.prepare(
+        `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count,
+                COALESCE(SUM(change_given), 0) AS changeGiven
+         FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ?
+           AND (status IS NULL OR status != 'voided')`
+      ).bind(bid, day.startUtc, day.endUtc).first(),
+      db.prepare(
+        `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count
+         FROM expenses WHERE business_id = ? AND incurred_on = ?`
+      ).bind(bid, day.date).first(),
+      db.prepare(
+        `SELECT c.id, c.name,
+                (SELECT balance_after FROM customer_ledger
+                 WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS outstanding,
+                (SELECT created_at FROM customer_ledger
+                 WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS last_activity
+         FROM customers c WHERE c.business_id = ?`
+      ).bind(bid).all(),
+      overdueDaysPromise,
+      db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM products p
+         LEFT JOIN inventory_items i ON i.product_id = p.id
+         WHERE p.business_id = ? AND p.is_active = 1
+           AND COALESCE(i.quantity_on_hand, 0) <= COALESCE(i.reorder_level, p.low_stock_threshold, 5)`
+      ).bind(bid).first(),
+      // First three low-stock item names, for the Dashboard card.
+      db.prepare(
+        `SELECT p.name
+         FROM products p
+         LEFT JOIN inventory_items i ON i.product_id = p.id
+         WHERE p.business_id = ? AND p.is_active = 1
+           AND COALESCE(i.quantity_on_hand, 0) <= COALESCE(i.reorder_level, p.low_stock_threshold, 5)
+         ORDER BY p.name ASC LIMIT 3`
+      ).bind(bid).all(),
+      db.prepare(
+        `SELECT COUNT(*) AS count FROM products WHERE business_id = ? AND is_active = 1`
+      ).bind(bid).first(),
+      db.prepare(
+        `SELECT s.id, s.sale_number, s.total_amount, s.amount_paid, s.balance_due,
+                s.payment_method, s.created_at, c.name AS customer_name
+         FROM sales s
+         LEFT JOIN customers c ON c.id = s.customer_id
+         WHERE s.business_id = ? AND (s.status IS NULL OR s.status != 'voided')
+         ORDER BY s.id DESC LIMIT 5`
+      ).bind(bid).all(),
+      // Money position: what was tendered today, by method, and what went
+      // back as change. "Have" = collected (sales total). "Haven't" = still
+      // owed (debts). Change = given back. Tendered rows are NOT money in
+      // when the method is credit-kind: that portion is still owed.
+      db.prepare(
+        `SELECT pr.payment_method AS method, COALESCE(SUM(pr.amount), 0) AS total
+         FROM payment_records pr
+         INNER JOIN sales s ON s.id = pr.sale_id
+         WHERE pr.business_id = ? AND s.created_at >= ? AND s.created_at < ?
+           AND (s.status IS NULL OR s.status != 'voided')
+         GROUP BY pr.payment_method`
+      ).bind(bid, day.startUtc, day.endUtc).all(),
+      loadModeRows(db, bid),
+      canSeeTrendCostPromise,
+      db.prepare(
+        `SELECT date(s.created_at) AS period,
+                COALESCE(SUM(si.line_total), 0) AS revenue,
+                COALESCE(SUM(si.quantity * si.cost_snapshot), 0) AS cost
+         FROM sale_items si
+         INNER JOIN sales s ON s.id = si.sale_id
+         WHERE s.business_id = ? AND date(s.created_at) BETWEEN ? AND ?
+           AND (s.status IS NULL OR s.status != 'voided')
+         GROUP BY period ORDER BY period ASC`
+      ).bind(bid, trendFrom, day.date).all(),
+      // Busiest hour today (lightweight: today's sale timestamps, bucketed
+      // in the business timezone by the shared helper).
+      db.prepare(
+        `SELECT created_at FROM sales
+         WHERE business_id = ? AND created_at >= ? AND created_at < ?
+           AND (status IS NULL OR status != 'voided')`
+      ).bind(bid, day.startUtc, day.endUtc).all(),
+      // Best seller today, by revenue (same shape as Reports top products).
+      db.prepare(
+        `SELECT p.name, SUM(si.quantity) AS qty, SUM(si.line_total) AS revenue
+         FROM sale_items si
+         INNER JOIN sales s ON s.id = si.sale_id
+         INNER JOIN products p ON p.id = si.product_id
+         WHERE s.business_id = ? AND s.created_at >= ? AND s.created_at < ?
+           AND (s.status IS NULL OR s.status != 'voided')
+         GROUP BY p.id ORDER BY revenue DESC LIMIT 1`
+      ).bind(bid, day.startUtc, day.endUtc).all(),
+    ]);
+
     let outstandingDebt = 0, openDebts = 0;
     const debtorList = [];
     for (const r of debtRows.results || []) {
@@ -60,69 +174,12 @@ export async function onRequestGet(context) {
       }
     }
 
-    // Owner-set overdue days (migration 0061). Pre-migration the column
-    // does not exist: fall back to the 7-day default.
-    let overdueDays = 7;
-    try {
-      const bizRow = await db.prepare(
-        `SELECT overdue_days FROM businesses WHERE id = ? LIMIT 1`
-      ).bind(bid).first();
-      if (bizRow && bizRow.overdue_days !== null && bizRow.overdue_days !== undefined) {
-        overdueDays = Number(bizRow.overdue_days) || 7;
-      }
-    } catch {
-      overdueDays = 7;
-    }
     const overdueCount = debtorList.filter((d) => isOverdue(d.last_activity, overdueDays)).length;
 
-    const lowStock = await db.prepare(
-      `SELECT COUNT(*) AS count
-       FROM products p
-       LEFT JOIN inventory_items i ON i.product_id = p.id
-       WHERE p.business_id = ? AND p.is_active = 1
-         AND COALESCE(i.quantity_on_hand, 0) <= COALESCE(i.reorder_level, p.low_stock_threshold, 5)`
-    ).bind(bid).first();
-
-    // First three low-stock item names, for the Dashboard card.
-    const lowStockNames = await db.prepare(
-      `SELECT p.name
-       FROM products p
-       LEFT JOIN inventory_items i ON i.product_id = p.id
-       WHERE p.business_id = ? AND p.is_active = 1
-         AND COALESCE(i.quantity_on_hand, 0) <= COALESCE(i.reorder_level, p.low_stock_threshold, 5)
-       ORDER BY p.name ASC LIMIT 3`
-    ).bind(bid).all();
-
-    const products = await db.prepare(
-      `SELECT COUNT(*) AS count FROM products WHERE business_id = ? AND is_active = 1`
-    ).bind(bid).first();
-
-    const recentSales = await db.prepare(
-      `SELECT s.id, s.sale_number, s.total_amount, s.amount_paid, s.balance_due,
-              s.payment_method, s.created_at, c.name AS customer_name
-       FROM sales s
-       LEFT JOIN customers c ON c.id = s.customer_id
-       WHERE s.business_id = ? AND (s.status IS NULL OR s.status != 'voided')
-       ORDER BY s.id DESC LIMIT 5`
-    ).bind(bid).all();
-
-    // Money position: what was tendered today, by method, and what went
-    // back as change. "Have" = collected (sales total). "Haven't" = still
-    // owed (debts). Change = given back. Tendered rows are NOT money in
-    // when the method is credit-kind: that portion is still owed.
-    const byMethod = await db.prepare(
-      `SELECT pr.payment_method AS method, COALESCE(SUM(pr.amount), 0) AS total
-       FROM payment_records pr
-       INNER JOIN sales s ON s.id = pr.sale_id
-       WHERE pr.business_id = ? AND s.created_at >= ? AND s.created_at < ?
-         AND (s.status IS NULL OR s.status != 'voided')
-       GROUP BY pr.payment_method`
-    ).bind(bid, day.startUtc, day.endUtc).all();
     const collectedByMethod = {};
     for (const r of byMethod.results || []) {
       collectedByMethod[r.method || "cash"] = Number(r.total || 0);
     }
-    const modeRows = await loadModeRows(db, bid);
     const moneySplit = computeMoneySplit(
       collectedByMethod,
       Number(todaySales?.changeGiven || 0),
@@ -138,27 +195,6 @@ export async function onRequestGet(context) {
       }
     }
 
-    // 7-day revenue trend (free for all Dashboard viewers). Cost/profit
-    // stay Starter-gated exactly like Reports, and only for staff who can
-    // view profit: otherwise cost and profit are null.
-    const trendFrom = isoDateNDaysAgo(day.date, 6);
-    let canSeeTrendCost = false;
-    try {
-      const { tier } = await getBusinessOwnerTier(db, bid);
-      canSeeTrendCost = ["pro", "solo", "starter"].includes(tier) && !!auth.perms.can_view_profit;
-    } catch {
-      canSeeTrendCost = false;
-    }
-    const trendRows = await db.prepare(
-      `SELECT date(s.created_at) AS period,
-              COALESCE(SUM(si.line_total), 0) AS revenue,
-              COALESCE(SUM(si.quantity * si.cost_snapshot), 0) AS cost
-       FROM sale_items si
-       INNER JOIN sales s ON s.id = si.sale_id
-       WHERE s.business_id = ? AND date(s.created_at) BETWEEN ? AND ?
-         AND (s.status IS NULL OR s.status != 'voided')
-       GROUP BY period ORDER BY period ASC`
-    ).bind(bid, trendFrom, day.date).all();
     const trendByDay = new Map();
     for (const r of trendRows.results || []) {
       trendByDay.set(r.period, { revenue: Number(r.revenue || 0), cost: Number(r.cost || 0) });
@@ -175,28 +211,10 @@ export async function onRequestGet(context) {
       });
     }
 
-    // Busiest hour today (lightweight: today's sale timestamps, bucketed
-    // in the business timezone by the shared helper).
-    const todayStamps = await db.prepare(
-      `SELECT created_at FROM sales
-       WHERE business_id = ? AND created_at >= ? AND created_at < ?
-         AND (status IS NULL OR status != 'voided')`
-    ).bind(bid, day.startUtc, day.endUtc).all();
     const busiest = busiestHour(
       (todayStamps.results || []).map((r) => r.created_at),
       auth.business.timezone
     );
-
-    // Best seller today, by revenue (same shape as Reports top products).
-    const bestRows = await db.prepare(
-      `SELECT p.name, SUM(si.quantity) AS qty, SUM(si.line_total) AS revenue
-       FROM sale_items si
-       INNER JOIN sales s ON s.id = si.sale_id
-       INNER JOIN products p ON p.id = si.product_id
-       WHERE s.business_id = ? AND s.created_at >= ? AND s.created_at < ?
-         AND (s.status IS NULL OR s.status != 'voided')
-       GROUP BY p.id ORDER BY revenue DESC LIMIT 1`
-    ).bind(bid, day.startUtc, day.endUtc).all();
 
     return json({
       ok: true,

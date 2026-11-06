@@ -1,35 +1,54 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import Layout from "./components/Layout";
 import { api, nav, setCurrency } from "./lib/api";
-import {
-  LandingPage, FeaturesPage, PricingPage, NotFoundPage,
-  HotelsLandingPage, AboutPage, FaqPage, DownloadPage,
-} from "./pages/Marketing";
-import { TermsPage, PrivacyPage, RefundPage } from "./pages/Legal";
-import { LoginPage, ForgotPasswordPage, ResetPasswordPage } from "./pages/Auth";
-import RegisterPage from "./pages/Register";
+// Speed (2026-11-06): the main bundle used to carry every page, so a
+// cold open downloaded the landing page, the auth pages, the receipt
+// pages and all fourteen app sections before the PIN screen could even
+// render (1,033 kB minified). Only the Dashboard stays eager: it is
+// the screen behind the lock and must be ready the moment the PIN
+// lands. Every other page loads on demand; the Suspense fallback in
+// App() covers the public routes and the one in the /app branch covers
+// the sections. Named page exports go through a small adapter so
+// lazy() still gets a default export.
+const lazyNamed = (loader, name) => lazy(() => loader().then((m) => ({ default: m[name] })));
+const LandingPage = lazyNamed(() => import("./pages/Marketing"), "LandingPage");
+const FeaturesPage = lazyNamed(() => import("./pages/Marketing"), "FeaturesPage");
+const PricingPage = lazyNamed(() => import("./pages/Marketing"), "PricingPage");
+const NotFoundPage = lazyNamed(() => import("./pages/Marketing"), "NotFoundPage");
+const HotelsLandingPage = lazyNamed(() => import("./pages/Marketing"), "HotelsLandingPage");
+const AboutPage = lazyNamed(() => import("./pages/Marketing"), "AboutPage");
+const FaqPage = lazyNamed(() => import("./pages/Marketing"), "FaqPage");
+const DownloadPage = lazyNamed(() => import("./pages/Marketing"), "DownloadPage");
+const TermsPage = lazyNamed(() => import("./pages/Legal"), "TermsPage");
+const PrivacyPage = lazyNamed(() => import("./pages/Legal"), "PrivacyPage");
+const RefundPage = lazyNamed(() => import("./pages/Legal"), "RefundPage");
+const LoginPage = lazyNamed(() => import("./pages/Auth"), "LoginPage");
+const ForgotPasswordPage = lazyNamed(() => import("./pages/Auth"), "ForgotPasswordPage");
+const ResetPasswordPage = lazyNamed(() => import("./pages/Auth"), "ResetPasswordPage");
+const RegisterPage = lazy(() => import("./pages/Register"));
 const ProjectJoinPage = lazy(() => import("./pages/ProjectJoin"));
-import { SaleReceiptPage, HotelReceiptPage } from "./pages/Receipt";
+const SaleReceiptPage = lazyNamed(() => import("./pages/Receipt"), "SaleReceiptPage");
+const HotelReceiptPage = lazyNamed(() => import("./pages/Receipt"), "HotelReceiptPage");
 import DashboardPage from "./pages/Dashboard";
-import ProductsPage from "./pages/Products";
-import SalesPage from "./pages/Sales";
-import ServicesPage from "./pages/Services";
-import SuppliersPage from "./pages/Suppliers";
-import ImportPage from "./pages/Import";
-import ExpensesPage from "./pages/Expenses";
-import CustomersPage from "./pages/Customers";
-import CustomerDetailPage from "./pages/CustomerDetail";
+const ProductsPage = lazy(() => import("./pages/Products"));
+const SalesPage = lazy(() => import("./pages/Sales"));
+const ServicesPage = lazy(() => import("./pages/Services"));
+const SuppliersPage = lazy(() => import("./pages/Suppliers"));
+const ImportPage = lazy(() => import("./pages/Import"));
+const ExpensesPage = lazy(() => import("./pages/Expenses"));
+const CustomersPage = lazy(() => import("./pages/Customers"));
+const CustomerDetailPage = lazy(() => import("./pages/CustomerDetail"));
 const HotelsPage = lazy(() => import("./pages/Hotels"));
-import DebtsPage from "./pages/Debts";
+const DebtsPage = lazy(() => import("./pages/Debts"));
 const MessagesPage = lazy(() => import("./pages/Messages"));
 const ReportsPage = lazy(() => import("./pages/Reports"));
 const HistoryPage = lazy(() => import("./pages/History"));
 const StaffPage = lazy(() => import("./pages/Staff"));
 const ProjectsPage = lazy(() => import("./pages/Projects"));
-import SettingsPage from "./pages/Settings";
-import ActivityPage from "./pages/Activity";
-import NotebookPage from "./pages/Notebook";
-import CalculatorPage from "./pages/Calculator";
+const SettingsPage = lazy(() => import("./pages/Settings"));
+const ActivityPage = lazy(() => import("./pages/Activity"));
+const NotebookPage = lazy(() => import("./pages/Notebook"));
+const CalculatorPage = lazy(() => import("./pages/Calculator"));
 const AdminPage = lazy(() => import("./pages/Admin"));
 const ChatPage = lazy(() => import("./pages/Chat"));
 import { NAV_MODULES, modulesForRole, modulesForType } from "./lib/businessTypes";
@@ -39,6 +58,12 @@ function useSession() {
   const [state, setState] = useState({ loading: true, session: null });
   useEffect(() => {
     let active = true;
+    // Warm the app-lock state in parallel with the session fetch: the
+    // gate's own GET then hits the in-flight / cached response (see
+    // api.js) instead of starting a second serial round trip after
+    // me() resolves. Fire-and-forget; the gate owns the result, and a
+    // signed-out 401 here is expected and ignored.
+    api.get("/api/auth/app-lock").catch(() => {});
     api.me()
       .then((d) => {
         if (active) {
@@ -192,6 +217,12 @@ function AppRoute({ session }) {
 export default function App() {
   const { loading, session } = useSession();
   if (loading) return <div className="loading">Loading KopaBook...</div>;
-  return <AppRoute session={session} />;
+  // One Suspense boundary for the lazily loaded pages (public routes
+  // and receipts); the /app branch has its own below.
+  return (
+    <Suspense fallback={<div className="loading">Loading KopaBook...</div>}>
+      <AppRoute session={session} />
+    </Suspense>
+  );
 }
 

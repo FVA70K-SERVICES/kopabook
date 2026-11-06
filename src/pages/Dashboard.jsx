@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmt, todayISO } from "../lib/api";
+import { readDashboardSnapshot, saveDashboardSnapshot, formatSnapshotTime } from "../lib/dashboardCache";
 import PinInvite from "../components/PinInvite";
 
+// SPEED (Dashboard stream): first paint comes from the last known
+// snapshot for the signed-in business (see src/lib/dashboardCache.js),
+// then fresh data replaces it when /api/dashboard resolves. The
+// snapshot is keyed per business id + day, so another business's figures
+// can never paint here. With no snapshot the page shows a loading
+// skeleton, never money zeros presented as data. The count-up below
+// starts from the cached value, not from zero, when cached data exists.
+
 // WORLD-BEST (Dashboard stream): number count-up. Counts from the previous
-// value (or zero) to the new value over 600ms. The full figure is always
+// value (or zero) to the new value over 600ms. When the page first paints
+// from a cached snapshot, the previous value IS the cached value, so the
+// count-up starts there, never from zero. The full figure is always
 // shown at the end, and with prefers-reduced-motion the real figure shows
 // at once — the count-up never delays it.
 function useCountUp(value) {
@@ -56,9 +67,10 @@ function buildTodayCsv(sales, dateLabel) {
 }
 
 export default function DashboardPage() {
-  const [state, setState] = useState({ loading: true, metrics: null, recentSales: [], error: "" });
+  const [state, setState] = useState({ loading: true, metrics: null, recentSales: [], error: "", fromCache: false });
   const [refreshing, setRefreshing] = useState(false);
   const [updatedNote, setUpdatedNote] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState(todayISO());
@@ -69,22 +81,75 @@ export default function DashboardPage() {
   const [exporting, setExporting] = useState(false);
   const touchStartY = useRef(null);
   const pullingRef = useRef(false);
+  // True once real or cached figures are on screen. While true, a failed
+  // refresh keeps the figures and shows a banner instead of an error page.
+  const hasVisibleDataRef = useRef(false);
+  // The signed-in business id, from /api/auth/me. The Dashboard gets no
+  // session prop (App.jsx owns the session), so it asks once and reuses
+  // the promise. The id keys the snapshot cache and is never painted.
+  const businessIdPromiseRef = useRef(null);
+  function getBusinessId() {
+    if (!businessIdPromiseRef.current) {
+      businessIdPromiseRef.current = api.me()
+        .then((d) => (d && d.business && d.business.id !== undefined && d.business.id !== null ? d.business.id : null))
+        .catch(() => null);
+    }
+    return businessIdPromiseRef.current;
+  }
 
   const load = useCallback(async (isRefresh) => {
-    if (isRefresh) setRefreshing(true);
+    const showSpinner = isRefresh || hasVisibleDataRef.current;
+    if (showSpinner) setRefreshing(true);
+    setLoadError("");
     try {
       const d = await api.get("/api/dashboard");
-      setState({ loading: false, metrics: d.metrics, recentSales: d.recentSales || [], error: "" });
-      if (isRefresh) {
+      const wasVisible = hasVisibleDataRef.current;
+      hasVisibleDataRef.current = true;
+      setState({ loading: false, metrics: d.metrics, recentSales: d.recentSales || [], error: "", fromCache: false });
+      // Save the fresh figures as the next first paint, for this business
+      // and this day only. A failed save never blocks the fresh paint.
+      try {
+        const bid = await getBusinessId();
+        if (bid !== null && bid !== undefined) {
+          saveDashboardSnapshot(bid, todayISO(), { metrics: d.metrics, recentSales: d.recentSales || [] });
+        }
+      } catch {
+        // Snapshot save is best effort.
+      }
+      if (isRefresh || wasVisible) {
         setUpdatedNote(`Updated ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       }
     } catch (e) {
-      setState((s) => ({ ...s, loading: false, error: e.message }));
+      if (hasVisibleDataRef.current) {
+        // Cached figures stay on screen; the failure is a banner, not a
+        // blank page and never a zero.
+        setLoadError(e.message);
+      } else {
+        setState((s) => ({ ...s, loading: false, error: e.message }));
+      }
     }
-    if (isRefresh) setRefreshing(false);
+    setRefreshing(false);
   }, []);
 
-  useEffect(() => { load(false); }, [load]);
+  // First paint: the snapshot for this business and day, if one exists.
+  // The fresh fetch runs in parallel (load below); it replaces the cached
+  // figures when it resolves. If the fresh fetch wins the race, the
+  // snapshot is skipped: hasVisibleDataRef is already true.
+  useEffect(() => {
+    let cancelled = false;
+    getBusinessId().then((bid) => {
+      if (cancelled || bid === null || bid === undefined) return;
+      if (hasVisibleDataRef.current) return;
+      const snap = readDashboardSnapshot(bid, todayISO());
+      if (!snap || cancelled || hasVisibleDataRef.current) return;
+      hasVisibleDataRef.current = true;
+      setRefreshing(true);
+      setState({ loading: false, metrics: snap.metrics, recentSales: snap.recentSales || [], error: "", fromCache: true });
+      setUpdatedNote(`Updated ${formatSnapshotTime(snap.savedAt)}`);
+    });
+    load(false);
+    return () => { cancelled = true; };
+  }, [load]);
 
   // Starter tier, for the CSV export gate (same gate as Reports).
   useEffect(() => {
@@ -146,7 +211,29 @@ export default function DashboardPage() {
     setExporting(false);
   }
 
-  if (state.loading) return <div className="loading">Loading your live dashboard...</div>;
+  // No snapshot and no fresh data yet: a skeleton, never money zeros
+  // presented as data. The bars use theme tokens only, so the skeleton
+  // reads the same in light and dark mode. No figures, no counts.
+  if (state.loading) {
+    return (
+      <div className="page-fade" role="status" aria-busy="true" aria-label="Loading your live dashboard">
+        <PinInvite />
+        <div className="page-head">
+          <h1>Dashboard</h1>
+        </div>
+        <p className="loading">Loading your live dashboard...</p>
+        <div className="metric-grid" aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="metric-card" style={{ minHeight: 86 }}>
+              <div style={{ height: 12, width: "55%", background: "var(--line)", borderRadius: 4 }} />
+              <div style={{ height: 26, width: "75%", background: "var(--line)", borderRadius: 4, marginTop: 10 }} />
+            </div>
+          ))}
+        </div>
+        <p className="hint">Your figures load here. Nothing is shown as zero until the real figures arrive.</p>
+      </div>
+    );
+  }
   if (state.error || !state.metrics) return <div className="alert alert-error">{state.error || "Could not load dashboard."}</div>;
 
   const m = state.metrics;
@@ -195,6 +282,12 @@ export default function DashboardPage() {
         </div>
       )}
       {updatedNote && !refreshing && <p className="ptr-note" style={{ marginTop: 0 }}>{updatedNote}</p>}
+      {state.fromCache && (
+        <p className="ptr-note" style={{ marginTop: 0 }}>Showing last saved figures while fresh figures load.</p>
+      )}
+      {loadError && (
+        <div className="alert alert-error" role="alert">Could not refresh. Showing last saved figures.</div>
+      )}
 
       <div className="metric-grid">
         <div className="metric-card dash-card-enter" style={{ animationDelay: "0ms" }}><span>Sales today</span><strong><CountUp value={m.todaySalesTotal} money /></strong></div>
@@ -214,7 +307,7 @@ export default function DashboardPage() {
             <small>
               <a href="/app/products">See low-stock products</a>
               {Number(m.lowStockCount || 0) <= 3 && (m.lowStockNames || []).length > 0 && (
-                <> — {(m.lowStockNames || []).join(", ")}</>
+                <> - {(m.lowStockNames || []).join(", ")}</>
               )}
             </small>
           )}
@@ -286,7 +379,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="card dash-card-enter" style={{ animationDelay: "320ms" }}>
-          <h3>Sales trend — last 7 days</h3>
+          <h3>Sales trend: last 7 days</h3>
           {trend.length === 0 || trend.every((t) => Number(t.revenue || 0) === 0) ? (
             <p className="empty">No sales in the last 7 days.</p>
           ) : (

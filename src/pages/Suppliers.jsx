@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, todayISO } from "../lib/api";
 
 function statusPill(status) {
@@ -39,9 +42,12 @@ function Stars({ value, onRate, small }) {
 }
 
 export default function SuppliersPage({ session }) {
-  const [suppliers, setSuppliers] = useState([]);
+  const [suppliers, setSuppliers] = useState(() => { const c = getCachedList("suppliers", session?.business?.id); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("suppliers", session?.business?.id); return c ? c.updatedAt : null; });
   const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("suppliers", session?.business?.id));
+  const debouncedQ = useDebouncedValue(q, 300);
+  const firstSearch = useRef(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -59,10 +65,12 @@ export default function SuppliersPage({ session }) {
   const isOwner = ["owner", "partner"].includes(session.business?.role);
 
   async function load(search) {
-    setLoading(true);
+    const cached = !search ? getCachedList("suppliers", session?.business?.id) : null;
+    if (!cached) setLoading(true);
     try {
       const d = await api.get("/api/suppliers" + (search ? `?q=${encodeURIComponent(search)}` : ""));
       setSuppliers(d.suppliers);
+      if (!search) { setCachedList("suppliers", session?.business?.id, d.suppliers); setUpdatedAt(Date.now()); }
       setError("");
     } catch (e) {
       setError(e.message);
@@ -70,6 +78,10 @@ export default function SuppliersPage({ session }) {
     setLoading(false);
   }
   useEffect(() => { load(""); }, []);
+  useEffect(() => {
+    if (firstSearch.current) { firstSearch.current = false; return; }
+    load(debouncedQ);
+  }, [debouncedQ]);
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
   function pset(k, v) { setPform((f) => ({ ...f, [k]: v })); }
@@ -163,15 +175,16 @@ export default function SuppliersPage({ session }) {
           className="search"
           placeholder="Search suppliers..."
           value={q}
-          onChange={(e) => { setQ(e.target.value); load(e.target.value); }}
+          onChange={(e) => setQ(e.target.value)}
         />
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load(q)} />}
       {notice && <div className="alert" onClick={() => setNotice("")}>{notice}</div>}
 
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load(q)} />
       {loading ? (
-        <div className="loading">Loading...</div>
+        <ListSkeleton label="Loading suppliers..." />
       ) : suppliers.length === 0 ? (
         <p className="empty">No suppliers yet. Add your first supplier above.</p>
       ) : (

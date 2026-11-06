@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, todayISO } from "../lib/api";
 import { staffRolesFor } from "../lib/businessTypes";
 
@@ -32,8 +34,9 @@ function shortTime(s) {
 }
 
 export default function StaffPage({ session }) {
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [members, setMembers] = useState(() => { const c = getCachedList("staff", session?.business?.id); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("staff", session?.business?.id); return c ? c.updatedAt : null; });
+  const [loading, setLoading] = useState(() => !getCachedList("staff", session?.business?.id));
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ fullName: "", email: "", password: "", role: "", phone: "" });
@@ -77,8 +80,8 @@ export default function StaffPage({ session }) {
 
   async function load() {
     if (!canManageStaff) { setLoading(false); return; }
-    setLoading(true);
-    try { const d = await api.get("/api/staff"); setMembers(d.members); setError(""); }
+    if (!getCachedList("staff", session?.business?.id)) setLoading(true);
+    try { const d = await api.get("/api/staff"); setMembers(d.members); setCachedList("staff", session?.business?.id, d.members); setUpdatedAt(Date.now()); setError(""); }
     catch (e) { setError(e.message); }
     setLoading(false);
   }
@@ -210,7 +213,7 @@ export default function StaffPage({ session }) {
     return (
       <>
         <div className="page-head"><h1>Staff</h1></div>
-        {error && <div className="alert alert-error">{error}</div>}
+        {error && <LoadError message={error} onRetry={() => load()} />}
         {clockCard()}
       </>
     );
@@ -223,7 +226,7 @@ export default function StaffPage({ session }) {
         {canManageStaff && <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Invite staff</button>}
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load()} />}
 
       {clockCard()}
 
@@ -237,7 +240,8 @@ export default function StaffPage({ session }) {
         </p>
       </div>
 
-      {loading ? <div className="loading">Loading...</div> : (
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load()} />
+      {loading ? <ListSkeleton label="Loading staff..." /> : (
         <>
           <div className="table-wrap" style={{ marginBottom: 18 }}>
             <table className="data">

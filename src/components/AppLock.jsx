@@ -226,6 +226,10 @@ function LockScreen({ onUnlocked }) {
       const d = await api.post("/api/auth/app-lock", { action: "verify", pin: candidate });
       busyRef.current = false;
       setBusy(false);
+      // Open at once on the verify response: it already carries the
+      // fresh lock state, so no second state fetch is serialised after
+      // the PIN check. The Dashboard behind the lock is already
+      // mounted and loaded; the gate only has to unhide it.
       onUnlocked(d.appLock);
     } catch (e) {
       busyRef.current = false;
@@ -462,6 +466,16 @@ export function AppLockGate({ session, children }) {
     return () => { active = false; };
   }, [userId, engage, applyState]);
 
+  // While the lock is up, the page behind it must not scroll: a
+  // scrollable Dashboard under a fixed lock screen is one more way
+  // the two layers can visibly mix.
+  useEffect(() => {
+    if (phase !== "locked") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [phase]);
+
   useEffect(() => {
     function onAnnounced(e) {
       applyState(e && e.detail);
@@ -495,8 +509,10 @@ export function AppLockGate({ session, children }) {
         // The single background trigger: a genuine absence that meets
         // the account's own setting, floored at 30 seconds so brief
         // peeks and flickers never count, whatever the setting says.
+        // Fresh read, not the session cache: the owner may have turned
+        // the lock off in another tab while this one was away.
         if (hiddenAt && Date.now() - hiddenAt >= effectiveRelockMs(relockMsRef.current)) {
-          api.get("/api/auth/app-lock")
+          api.getFresh("/api/auth/app-lock")
             .then((d) => {
               applyState(d.appLock);
               if (d.appLock && d.appLock.enabled) engage("background");
@@ -527,9 +543,30 @@ export function AppLockGate({ session, children }) {
     );
   }
 
+  // Speed + dismiss (2026-11-06). The gate used to render {children}
+  // live behind the lock screen, so the Dashboard mounted, fetched and
+  // painted underneath it; on unlock the lock layer vanished in the
+  // same instant the Dashboard was revealed, and the recording showed
+  // the two mixed: lock text ghosted over Dashboard text. The children
+  // are still mounted while locked, so the Dashboard data is already
+  // fetched by the time the PIN lands, but they are now display:none,
+  // inert and aria-hidden until the gate opens, so nothing behind the
+  // lock can ever paint, receive focus, or scroll. Unlock is one
+  // commit: the lock unmounts and this wrapper unhides together, and
+  // the Dashboard entrance animations, which do not run under
+  // display:none, start cleanly on the reveal instead of behind the
+  // lock. No fade is ever put on the lock screen itself: a fading lock
+  // over a fading-in Dashboard is exactly the ghost this fixes.
   return (
     <>
-      {children}
+      <div
+        className="app-lock-content"
+        hidden={phase !== "open"}
+        inert={phase !== "open" ? true : undefined}
+        aria-hidden={phase !== "open" ? true : undefined}
+      >
+        {children}
+      </div>
       {phase === "locked" && (
         <LockScreen onUnlocked={(appLock) => { applyState(appLock); setSessionPassed(userId, true); writeHiddenAt(null); engagedRef.current = false; setPhase("open"); }} />
       )}

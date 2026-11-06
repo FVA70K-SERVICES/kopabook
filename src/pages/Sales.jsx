@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton } from "../components/ListState";
 import { api, fmt, todayISO } from "../lib/api";
 import { waLink, receiptText } from "../lib/whatsapp";
 import { receiptCardUrl, shareCard, downloadCard, dataUrlToBlob } from "../lib/shareCards";
@@ -12,16 +14,18 @@ import { ShipmentModal, ShipmentsTab } from "../components/Shipments";
 export default function SalesPage({ session }) {
   const canVoid = ["owner", "partner"].includes(session?.business?.role);
   const [view, setView] = useState("new"); // new | history
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => { const c = getCachedList("products", session?.business?.id); return c ? c.data : []; });
   const [catalog, setCatalog] = useState("products"); // products | services
-  const [services, setServices] = useState([]);
+  const [services, setServices] = useState(() => { const c = getCachedList("services", session?.business?.id); return c ? c.data : []; });
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState([]);
   const [customerPick, setCustomerPick] = useState(""); // "" = walk-in, "new" = new buyer, else customer id
   const [customerName, setCustomerName] = useState("");
-  const [customers, setCustomers] = useState([]);
+  const [customers, setCustomers] = useState(() => { const c = getCachedList("customers", session?.business?.id); return c ? c.data : []; });
   const [payments, setPayments] = useState([{ mode: "Cash", amount: "" }]);
-  const [payModes, setPayModes] = useState([]);
+  const [payModes, setPayModes] = useState(() => { const c = getCachedList("payment-modes", session?.business?.id); return c ? c.data : []; });
+  const [catalogLoading, setCatalogLoading] = useState(() => !getCachedList("products", session?.business?.id) && !getCachedList("services", session?.business?.id));
+  const [histLoading, setHistLoading] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(null);
@@ -33,8 +37,8 @@ export default function SalesPage({ session }) {
   const [receiptPhone, setReceiptPhone] = useState("");
   const [receiptEmail, setReceiptEmail] = useState("");
   const [receiptTelegram, setReceiptTelegram] = useState("");
-  const [bizName, setBizName] = useState("");
-  const [brand, setBrand] = useState({ name: "", color: "#166534", tagline: "" });
+  const [bizName, setBizName] = useState(() => { const c = getCachedList("business", session?.business?.id); return c ? (c.data.name || "") : ""; });
+  const [brand, setBrand] = useState(() => { const c = getCachedList("business", session?.business?.id); const b = c ? c.data : {}; return { name: b.name || "", color: b.brand_color || "#166534", tagline: b.tagline || "", contactLines: buildContactLines(b), footer: b.receipt_footer || "" }; });
   const [doneMethods, setDoneMethods] = useState([]);
   const [doneCustomerId, setDoneCustomerId] = useState(null);
   const [doneContactBlank, setDoneContactBlank] = useState({ phone: true, email: true, telegram: true });
@@ -44,33 +48,49 @@ export default function SalesPage({ session }) {
   const [doneHasChatId, setDoneHasChatId] = useState(false);
   const salePanelRef = useRef(null);
 
+  // The five lookups are independent: one parallel fetch instead of
+  // five separate ones, each writing its fresh list back to the shared
+  // cache so the next visit paints instantly.
   useEffect(() => {
-    api.get("/api/products").then((d) => setProducts(d.products)).catch(() => {});
-    api.get("/api/services").then((d) => setServices(d.services)).catch(() => {});
-    api.get("/api/customers").then((d) => setCustomers(d.customers || [])).catch(() => {});
-    api.get("/api/payment-modes").then((d) => {
-      const modes = (d.modes || []).filter((m) => m.enabled);
-      setPayModes(modes);
-      if (modes.length) setPayments([{ mode: modes[0].name, amount: "" }]);
-    }).catch(() => {});
-    api.get("/api/business").then((d) => {
-      const b = d.business || {};
-      setBizName(b.name || "");
-      setBrand({
-        name: b.name || "",
-        color: b.brand_color || "#166534",
-        tagline: b.tagline || "",
-        contactLines: buildContactLines(b),
-        footer: b.receipt_footer || "",
-      });
-    }).catch(() => {});
+    Promise.allSettled([
+      api.get("/api/products"),
+      api.get("/api/services"),
+      api.get("/api/customers"),
+      api.get("/api/payment-modes"),
+      api.get("/api/business"),
+    ]).then(([prods, svcs, custs, modesRes, bizRes]) => {
+      if (prods.status === "fulfilled") { setProducts(prods.value.products || []); setCachedList("products", session?.business?.id, prods.value.products || []); }
+      if (svcs.status === "fulfilled") { setServices(svcs.value.services || []); setCachedList("services", session?.business?.id, svcs.value.services || []); }
+      if (custs.status === "fulfilled") { setCustomers(custs.value.customers || []); setCachedList("customers", session?.business?.id, custs.value.customers || []); }
+      if (modesRes.status === "fulfilled") {
+        const modes = (modesRes.value.modes || []).filter((m) => m.enabled);
+        setPayModes(modes);
+        setCachedList("payment-modes", session?.business?.id, modes);
+        if (modes.length) setPayments([{ mode: modes[0].name, amount: "" }]);
+      }
+      if (bizRes.status === "fulfilled") {
+        const b = bizRes.value.business || {};
+        setBizName(b.name || "");
+        setBrand({
+          name: b.name || "",
+          color: b.brand_color || "#166534",
+          tagline: b.tagline || "",
+          contactLines: buildContactLines(b),
+          footer: b.receipt_footer || "",
+        });
+        setCachedList("business", session?.business?.id, b);
+      }
+      setCatalogLoading(false);
+    });
   }, []);
 
   async function loadHistory() {
+    setHistLoading(true);
     try {
       const d = await api.get(`/api/sales?from=${dateFilter}&to=${dateFilter}&limit=100`);
       setHistory(d.sales);
     } catch (e) { setError(e.message); }
+    setHistLoading(false);
   }
 
   async function voidSale(id) {
@@ -243,7 +263,7 @@ export default function SalesPage({ session }) {
       getTelegramBotStatus().then(setTelegramBot).catch(() => {});
       setCart([]); setCustomerPick(""); setCustomerName("");
       setPayments([{ mode: payModes[0]?.name || "Cash", amount: "" }]);
-      const pd = await api.get("/api/products"); setProducts(pd.products);
+      const pd = await api.get("/api/products"); setProducts(pd.products); setCachedList("products", session?.business?.id, pd.products);
     } catch (e) { setError(e.message); }
     setSaving(false);
   }
@@ -499,7 +519,7 @@ export default function SalesPage({ session }) {
                 ))}
               </tbody>
             </table>
-            {history.length === 0 && <p className="empty">No sales on this date.</p>}
+            {histLoading ? <ListSkeleton rows={3} label="Loading sales..." /> : history.length === 0 && <p className="empty">No sales on this date.</p>}
           </div>
             <div className="print-only">
               <StatementPrint
@@ -524,6 +544,7 @@ export default function SalesPage({ session }) {
       ) : (
         <>
           <MessageSale products={products} services={services} onUseDraft={useMessageDraft} />
+          {catalogLoading && <ListSkeleton rows={3} label="Loading products and services..." />}
           <div className="toolbar">
             <button className={"btn btn-sm " + (catalog === "products" ? "btn-primary" : "btn-secondary")} onClick={() => setCatalog("products")}>Products</button>
             <button className={"btn btn-sm " + (catalog === "services" ? "btn-primary" : "btn-secondary")} onClick={() => setCatalog("services")}>Services</button>

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, todayISO } from "../lib/api";
 
 const TYPE_LABELS = {
@@ -27,9 +29,10 @@ export default function ProjectsPage({ session }) {
   const role = session?.business?.role || "";
   const isOwnerPartner = ["owner", "partner"].includes(role);
   const canManage = ["owner", "partner", "manager"].includes(role);
-  const [projects, setProjects] = useState([]);
-  const [shared, setShared] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState(() => { const c = getCachedList("projects", session?.business?.id); return c ? c.data : []; });
+  const [shared, setShared] = useState(() => { const c = getCachedList("projects-shared", session?.business?.id); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("projects", session?.business?.id); return c ? c.updatedAt : null; });
+  const [loading, setLoading] = useState(() => !getCachedList("projects", session?.business?.id) && !getCachedList("projects-shared", session?.business?.id));
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null); // { id, sharedRole, businessName }
   const [showCreate, setShowCreate] = useState(false);
@@ -38,13 +41,17 @@ export default function ProjectsPage({ session }) {
   const [saving, setSaving] = useState(false);
 
   async function load() {
-    setLoading(true);
+    // Both lists were already fetched in parallel; the change here is
+    // cached first paint plus writing the fresh lists back to the cache.
+    if (!getCachedList("projects", session?.business?.id) && !getCachedList("projects-shared", session?.business?.id)) setLoading(true);
     try {
       const results = await Promise.allSettled([api.get("/api/projects"), api.get("/api/projects/shared")]);
       const sh = results[1].status === "fulfilled" ? (results[1].value.projects || []) : [];
       setShared(sh);
+      if (results[1].status === "fulfilled") { setCachedList("projects-shared", session?.business?.id, sh); }
       if (results[0].status === "fulfilled") {
         setProjects(results[0].value.projects || []);
+        setCachedList("projects", session?.business?.id, results[0].value.projects || []); setUpdatedAt(Date.now());
         setError("");
       } else {
         const e = results[0].reason || new Error("Could not load projects.");
@@ -107,10 +114,11 @@ export default function ProjectsPage({ session }) {
         Track any project from start to finish. Record every naira in and out, hit milestones, then generate a full accountability report.
       </p>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load()} />}
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load()} />
 
       {loading ? (
-        <div className="loading">Loading projects...</div>
+        <ListSkeleton label="Loading projects..." />
       ) : projects.length === 0 ? (
         <div className="card"><p className="empty">No projects yet. {canManage ? "Create your first project to start tracking." : ""}</p></div>
       ) : (
@@ -215,10 +223,10 @@ function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack })
   const canAdd = isShared ? sharedRole === "contributor" : canManage;
   const canDelete = !isShared && canManage;
   const [tab, setTab] = useState("overview");
-  const [data, setData] = useState(null);
-  const [transactions, setTransactions] = useState([]);
-  const [milestones, setMilestones] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => { const c = getCachedList("project:" + projectId, ""); return c ? c.data.data : null; });
+  const [transactions, setTransactions] = useState(() => { const c = getCachedList("project:" + projectId, ""); return c ? c.data.transactions : []; });
+  const [milestones, setMilestones] = useState(() => { const c = getCachedList("project:" + projectId, ""); return c ? c.data.milestones : []; });
+  const [loading, setLoading] = useState(() => !getCachedList("project:" + projectId, ""));
   const [error, setError] = useState("");
   const [showTx, setShowTx] = useState(false);
   const [showMs, setShowMs] = useState(false);
@@ -229,7 +237,10 @@ function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack })
   const [report, setReport] = useState(null);
 
   async function load() {
-    setLoading(true);
+    // The three reads were already parallel; this adds cached first
+    // paint (memory only: the detail has no session prop) and writes
+    // the fresh bundle back to the cache.
+    if (!getCachedList("project:" + projectId, "")) setLoading(true);
     try {
       const [d, t, m] = await Promise.all([
         api.get(`/api/projects/${projectId}`),
@@ -239,6 +250,7 @@ function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack })
       setData(d);
       setTransactions(t.transactions || []);
       setMilestones(m.milestones || []);
+      setCachedList("project:" + projectId, "", { data: d, transactions: t.transactions || [], milestones: m.milestones || [] });
       setError("");
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -312,7 +324,7 @@ function ProjectDetail({ projectId, canManage, sharedRole, sharedFrom, onBack })
     return () => window.removeEventListener("afterprint", done);
   }, []);
 
-  if (loading) return <div className="loading">Loading project...</div>;
+  if (loading) return <ListSkeleton label="Loading project..." />;
   if (!data) return (<><button className="btn btn-secondary btn-sm" onClick={onBack}>← Back to projects</button><div className="alert alert-error">{error || "Project not found."}</div></>);
 
   const p = data.project;

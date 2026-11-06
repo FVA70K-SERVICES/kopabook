@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
 import { api, nav } from "../lib/api";
 import { modulesForType, NAV_MODULES, NAV_GROUPS, MOBILE_PRIORITY, modulesForRole } from "../lib/businessTypes";
 import BusinessSwitcher from "./BusinessSwitcher";
@@ -31,7 +32,9 @@ const ALL_LINKS = [
 
 export default function Layout({ session, children }) {
   const [open, setOpen] = useState(false);
-  const [billing, setBilling] = useState(null);
+  // Cached first paint for the billing chip: the sidebar renders
+  // with the last known plan instead of waiting on a fresh fetch.
+  const [billing, setBilling] = useState(() => { const c = getCachedList("billing", session?.business?.id); return c ? c.data : null; });
   const [displayName, setDisplayName] = useState(session.user?.fullName || "");
 
   // Refresh the sidebar name when the profile is saved in Settings (no reload).
@@ -74,7 +77,7 @@ export default function Layout({ session, children }) {
     .slice(0, 4);
 
   useEffect(() => {
-    api.get("/api/billing").then(setBilling).catch(() => {});
+    api.get("/api/billing").then((d) => { setBilling(d); setCachedList("billing", session?.business?.id, d); }).catch(() => {});
   }, []);
 
   // Marks the signed-in app so the chat widget can sit clear of the

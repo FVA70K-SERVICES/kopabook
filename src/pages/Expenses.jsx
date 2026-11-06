@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, todayISO } from "../lib/api";
 
 export default function ExpensesPage({ session }) {
   const canManageExpenses = session?.perms?.can_manage_expenses;
-  const [expenses, setExpenses] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [total, setTotal] = useState(0);
+  const [expenses, setExpenses] = useState(() => { const c = getCachedList("expenses:" + todayISO() + ":" + todayISO(), session?.business?.id); return c ? c.data.expenses : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("expenses:" + todayISO() + ":" + todayISO(), session?.business?.id); return c ? c.updatedAt : null; });
+  const [categories, setCategories] = useState(() => { const c = getCachedList("expenses:" + todayISO() + ":" + todayISO(), session?.business?.id); return c ? c.data.categories : []; });
+  const [total, setTotal] = useState(() => { const c = getCachedList("expenses:" + todayISO() + ":" + todayISO(), session?.business?.id); return c ? c.data.total : 0; });
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("expenses:" + todayISO() + ":" + todayISO(), session?.business?.id));
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ amount: "", categoryId: "", categoryName: "", note: "", incurredOn: todayISO() });
@@ -40,10 +43,12 @@ export default function ExpensesPage({ session }) {
   }
 
   async function load() {
-    setLoading(true);
+    const key = `expenses:${from}:${to}`;
+    if (!getCachedList(key, session?.business?.id)) setLoading(true);
     try {
       const d = await api.get(`/api/expenses?from=${from}&to=${to}`);
       setExpenses(d.expenses); setCategories(d.categories); setTotal(d.total);
+      setCachedList(key, session?.business?.id, { expenses: d.expenses, categories: d.categories, total: d.total }); setUpdatedAt(Date.now());
       setError("");
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -83,8 +88,10 @@ export default function ExpensesPage({ session }) {
         <span className="pill pill-gray">Total: <strong className="money">{fmt(total)}</strong></span>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {loading ? <div className="loading">Loading...</div> : (
+      {error && <LoadError message={error} onRetry={() => load()} />}
+      {loading ? <ListSkeleton label="Loading expenses..." /> : (
+        <>
+        <UpdatedNote updatedAt={updatedAt} onRefresh={() => load()} />
         <div className="table-wrap">
           <table className="data">
             <thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Amount</th><th>Receipt</th>{canManageExpenses && <th></th>}</tr></thead>
@@ -126,6 +133,7 @@ export default function ExpensesPage({ session }) {
           </table>
           {expenses.length === 0 && <p className="empty">No expenses in this range.</p>}
         </div>
+        </>
       )}
 
       {showForm && (

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, nav } from "../lib/api";
 
 function fmtDateTime(s) {
@@ -20,13 +22,14 @@ function metaSummary(meta) {
 }
 
 export default function ActivityPage({ session }) {
-  const [entries, setEntries] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [actors, setActors] = useState([]);
-  const [actions, setActions] = useState([]);
+  const [entries, setEntries] = useState(() => { const c = getCachedList("activity::", session?.business?.id); return c ? c.data.entries : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("activity::", session?.business?.id); return c ? c.updatedAt : null; });
+  const [total, setTotal] = useState(() => { const c = getCachedList("activity::", session?.business?.id); return c ? c.data.total : 0; });
+  const [actors, setActors] = useState(() => { const c = getCachedList("activity::", session?.business?.id); return c ? c.data.actors : []; });
+  const [actions, setActions] = useState(() => { const c = getCachedList("activity::", session?.business?.id); return c ? c.data.actions : []; });
   const [filters, setFilters] = useState({ action: "", actor: "", from: "", to: "" });
   const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("activity::", session?.business?.id));
   const [error, setError] = useState("");
   const limit = 50;
 
@@ -34,7 +37,9 @@ export default function ActivityPage({ session }) {
   const canView = ["owner", "partner"].includes(role);
 
   async function load(off, f) {
-    setLoading(true); setError("");
+    const cacheKey = off === 0 && !f.action && !f.actor ? `activity:${f.from || ""}:${f.to || ""}` : null;
+    if (!cacheKey || !getCachedList(cacheKey, session?.business?.id)) setLoading(true);
+    setError("");
     try {
       const q = new URLSearchParams({ limit: String(limit), offset: String(off) });
       if (f.action) q.set("action", f.action);
@@ -44,6 +49,7 @@ export default function ActivityPage({ session }) {
       const d = await api.get("/api/activity?" + q.toString());
       setEntries(d.entries || []); setTotal(d.total || 0);
       setActors(d.actors || []); setActions(d.actions || []);
+      if (cacheKey) { setCachedList(cacheKey, session?.business?.id, { entries: d.entries || [], total: d.total || 0, actors: d.actors || [], actions: d.actions || [] }); setUpdatedAt(Date.now()); }
     } catch (e) { setError(e.message); }
     setLoading(false);
   }
@@ -77,7 +83,8 @@ export default function ActivityPage({ session }) {
         <button className="btn btn-secondary btn-sm" onClick={() => nav("/app/settings")}>Back to Settings</button>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load(0, filters)} />}
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load(0, filters)} />
 
       <div className="card" style={{ marginBottom: 16 }}>
         <form onSubmit={apply}>
@@ -101,7 +108,7 @@ export default function ActivityPage({ session }) {
         </form>
       </div>
 
-      {loading ? <div className="loading">Loading...</div> : (
+      {loading ? <ListSkeleton label="Loading activity..." /> : (
         <>
           <div className="table-wrap">
             <table className="data">

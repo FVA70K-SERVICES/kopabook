@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import AdminAiPanel from "../components/AdminAiPanel";
 
 // The merged chat home. One chat, two clear doors for every store, plus a
@@ -14,6 +14,11 @@ import AdminAiPanel from "../components/AdminAiPanel";
 export default function ChatPage({ side, session }) {
   const isPlatformOwner = !!(session && session.user && session.user.isPlatformAdmin);
   const active = side === "ai" ? "ai" : side === "support" ? "support" : side === "admin" && isPlatformOwner ? "admin" : null;
+  // The chat panel itself lives in the FVAChat widget (owned by round 5).
+  // This page only tracks whether it has opened yet, so the support side
+  // shows a clear opening state and a retry instead of silence.
+  const [chatReady, setChatReady] = useState(false);
+  const [chatWaited, setChatWaited] = useState(false);
 
   useEffect(() => {
     if (!active) return;
@@ -26,10 +31,12 @@ export default function ChatPage({ side, session }) {
       }
       return false;
     };
-    if (openIt()) return;
+    if (openIt()) { setChatReady(true); return; }
     const t = setInterval(() => {
       tries++;
-      if (openIt() || tries > 20) clearInterval(t);
+      const ok = openIt();
+      if (ok) { setChatReady(true); clearInterval(t); }
+      else if (tries > 20) { setChatWaited(true); clearInterval(t); }
     }, 300);
     return () => clearInterval(t);
   }, [active]);
@@ -100,10 +107,22 @@ export default function ChatPage({ side, session }) {
                 ? "You are on the Kopa Support side. As platform owner you see the support inbox: cases from business owners, newest and needing attention first."
                 : "You are on the Kopa Support side. A person from the FVA70K team can join this same chat when you need one."}
           </p>
+          {!chatReady && (
+            <p className="hint">
+              {chatWaited
+                ? "Chat did not open. Check your connection and try again."
+                : "Opening chat..."}
+            </p>
+          )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button className="btn btn-primary btn-sm" onClick={openPanel}>
               Open {active === "ai" ? "Ask Kopa AI" : "Kopa Support"}
             </button>
+            {chatWaited && (
+              <button className="btn btn-secondary btn-sm" onClick={openPanel}>
+                Retry opening chat
+              </button>
+            )}
             <a className="btn btn-secondary btn-sm" href={active === "ai" ? "/app/chat/support" : "/app/chat/ai"}>
               Switch to {active === "ai" ? "Kopa Support" : "Ask Kopa AI"}
             </a>

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, LoadError } from "../components/ListState";
 import { api, fmt, nav } from "../lib/api";
 import { waLink, receiptText } from "../lib/whatsapp";
 import "../print.css";
@@ -259,7 +261,8 @@ function canvasToBlob(canvas) {
 }
 
 export function SaleReceiptPage({ saleId }) {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(() => { const c = getCachedList("receipt:sale:" + saleId, ""); return c ? c.data : null; });
+  const [reloadKey, setReloadKey] = useState(0);
   const [error, setError] = useState("");
   const [waPhone, setWaPhone] = useState("");
   const [emailAddr, setEmailAddr] = useState("");
@@ -287,19 +290,30 @@ export function SaleReceiptPage({ saleId }) {
       }).catch((e) => setError(e.message));
       return;
     }
-    api.get(`/api/receipts/sale?id=${saleId}`)
-      .then((d) => {
+    // Receipt and Telegram status are independent: fetch them in
+    // parallel, and write the fresh receipt back to the cache so a
+    // re-open (or a share tap back) paints instantly.
+    setError("");
+    Promise.allSettled([
+      api.get(`/api/receipts/sale?id=${saleId}`),
+      getTelegramBotStatus(),
+    ]).then(([receipt, bot]) => {
+      if (receipt.status === "fulfilled") {
+        const d = receipt.value;
         setData(d);
+        setCachedList("receipt:sale:" + saleId, "", d);
         setWaPhone(d.sale?.customer_phone || "");
         setEmailAddr(d.customer?.email || "");
         setTelegramHandle(d.customer?.telegram || "");
-      })
-      .catch((e) => setError(e.message));
-    getTelegramBotStatus().then(setTelegramBot).catch(() => {});
-  }, [saleId]);
+      } else {
+        setError(receipt.reason?.message || "Could not load the receipt.");
+      }
+      if (bot.status === "fulfilled") setTelegramBot(bot.value);
+    });
+  }, [saleId, reloadKey]);
 
-  if (error) return <div className="receipt-screen"><div className="alert alert-error">{error}</div></div>;
-  if (!data) return <div className="receipt-screen"><div className="loading">Loading receipt...</div></div>;
+  if (error && !data) return <div className="receipt-screen"><LoadError message={error} onRetry={() => setReloadKey((k) => k + 1)} /></div>;
+  if (!data) return <div className="receipt-screen"><ListSkeleton rows={6} label="Loading receipt..." /></div>;
 
   const { business, sale, items, payments } = data;
   const width = business.receipt_paper_width || "80mm";
@@ -545,21 +559,25 @@ export function SaleReceiptPage({ saleId }) {
 }
 
 export function HotelReceiptPage({ bookingId }) {
-  const [data, setData] = useState(null);
-  const [business, setBusiness] = useState({});
+  const [data, setData] = useState(() => { const c = getCachedList("receipt:hotel:" + bookingId, ""); return c ? c.data : null; });
+  const [business, setBusiness] = useState(() => { const c = getCachedList("business", ""); return c ? c.data : {}; });
   const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     Promise.all([
       api.get(`/api/hotel/folio?bookingId=${bookingId}`),
       api.get("/api/business"),
     ])
-      .then(([folio, biz]) => { setData(folio); setBusiness(biz.business || {}); })
+      .then(([folio, biz]) => {
+        setData(folio); setCachedList("receipt:hotel:" + bookingId, "", folio);
+        setBusiness(biz.business || {}); setCachedList("business", "", biz.business || {});
+      })
       .catch((e) => setError(e.message));
-  }, [bookingId]);
+  }, [bookingId, reloadKey]);
 
-  if (error) return <div className="receipt-screen"><div className="alert alert-error">{error}</div></div>;
-  if (!data) return <div className="receipt-screen"><div className="loading">Loading receipt...</div></div>;
+  if (error && !data) return <div className="receipt-screen"><LoadError message={error} onRetry={() => setReloadKey((k) => k + 1)} /></div>;
+  if (!data) return <div className="receipt-screen"><ListSkeleton rows={6} label="Loading receipt..." /></div>;
 
   const { booking, charges, payments, totalCharged, totalPaid, balance } = data;
   const width = business.receipt_paper_width || "80mm";

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, todayISO } from "../lib/api";
 
 function csvCell(value) {
@@ -57,17 +59,21 @@ function buildCsv(data) {
 export default function ReportsPage() {
   const [from, setFrom] = useState(new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10));
   const [to, setTo] = useState(todayISO());
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // No session prop on this page: the cache stays in memory only for
+  // this page load, so one business can never paint inside another.
+  const [data, setData] = useState(() => { const c = getCachedList(`reports:${new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10)}:${todayISO()}`, ""); return c ? c.data : null; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList(`reports:${new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10)}:${todayISO()}`, ""); return c ? c.updatedAt : null; });
+  const [loading, setLoading] = useState(() => !getCachedList(`reports:${new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10)}:${todayISO()}`, ""));
   const [error, setError] = useState("");
   const [byQty, setByQty] = useState(false);
   const [needsUpgrade, setNeedsUpgrade] = useState(false);
 
   async function load() {
-    setLoading(true);
+    const key = `reports:${from}:${to}`;
+    if (!getCachedList(key, "")) setLoading(true);
     try {
       const d = await api.get(`/api/reports?from=${from}&to=${to}`);
-      setData(d); setError(""); setNeedsUpgrade(false);
+      setData(d); setCachedList(key, "", d); setUpdatedAt(Date.now()); setError(""); setNeedsUpgrade(false);
     } catch (e) {
       if (e.upgradeRequired) { setNeedsUpgrade(true); setError(""); }
       else setError(e.message);
@@ -106,14 +112,15 @@ export default function ReportsPage() {
         <button className="btn btn-sm" onClick={downloadCsv} disabled={!data || loading}>Download CSV</button>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load()} />}
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load()} />
       {needsUpgrade ? (
         <div className="card">
           <h2>Reports is a Starter feature</h2>
           <p className="hint">Upgrade to Starter or higher for full reports with CSV export.</p>
           <a className="btn btn-primary" href="/app/settings">View plans</a>
         </div>
-      ) : loading ? <div className="loading">Loading...</div> : data && (
+      ) : loading ? <ListSkeleton label="Loading report..." /> : data && (
         <>
           <div className="metric-grid">
             <div className="metric-card"><span>Sales</span><strong>{fmt(data.totals.salesTotal)}</strong></div>

@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, nav } from "../lib/api";
 import { normalizeNaijaPhone } from "../lib/whatsapp";
 
@@ -22,9 +25,15 @@ function parseContactsCsv(text) {
 }
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState([]);
+  // No session prop on this page, so the business id is empty and the
+  // cache stays in memory only for this page load: never localStorage,
+  // so one business can never paint inside another.
+  const [customers, setCustomers] = useState(() => { const c = getCachedList("customers", ""); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("customers", ""); return c ? c.updatedAt : null; });
   const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("customers", ""));
+  const debouncedQ = useDebouncedValue(q, 300);
+  const firstSearch = useRef(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", notes: "" });
@@ -44,14 +53,20 @@ export default function CustomersPage() {
   }
 
   async function load(search) {
-    setLoading(true);
+    const cached = !search ? getCachedList("customers", "") : null;
+    if (!cached) setLoading(true);
     try {
       const d = await api.get("/api/customers" + (search ? `?q=${encodeURIComponent(search)}` : ""));
       setCustomers(d.customers); setError("");
+      if (!search) { setCachedList("customers", "", d.customers); setUpdatedAt(Date.now()); }
     } catch (e) { setError(e.message); }
     setLoading(false);
   }
   useEffect(() => { load(""); loadContacts(); }, []);
+  useEffect(() => {
+    if (firstSearch.current) { firstSearch.current = false; return; }
+    load(debouncedQ);
+  }, [debouncedQ]);
 
   const contactDigits = new Set(phoneContacts.map((c) => normalizeNaijaPhone(c.phone)).filter(Boolean));
   const isInContacts = (phone) => {
@@ -133,11 +148,13 @@ export default function CustomersPage() {
 
       <div className="toolbar">
         <input className="search" placeholder="Search name, phone or tag..." value={q}
-          onChange={(e) => { setQ(e.target.value); load(e.target.value); }} />
+          onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {loading ? <div className="loading">Loading...</div> : (
+      {error && <LoadError message={error} onRetry={() => load(q)} />}
+      {loading ? <ListSkeleton label="Loading customers..." /> : (
+        <>
+        <UpdatedNote updatedAt={updatedAt} onRefresh={() => load(q)} />
         <div className="table-wrap">
           <table className="data">
             <thead><tr><th>Name</th><th>Phone</th><th>Tags</th><th>Outstanding</th><th></th></tr></thead>
@@ -165,6 +182,7 @@ export default function CustomersPage() {
           </table>
           {customers.length === 0 && <p className="empty">No customers yet. Add your first one above.</p>}
         </div>
+        </>
       )}
 
       {showContacts && (

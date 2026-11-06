@@ -9,6 +9,8 @@
 // upgrade lands; older records stay on their own pages (Sales, Debts,
 // Expenses) — see the note under the heading.
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, todayISO } from "../lib/api";
 import StatementPrint from "../components/StatementPrint";
 import {
@@ -44,13 +46,14 @@ function contactFor(biz) {
 }
 
 export default function HistoryPage({ session }) {
-  const [events, setEvents] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [actors, setActors] = useState([]);
-  const [startedAt, setStartedAt] = useState(todayISO());
+  const [events, setEvents] = useState(() => { const c = getCachedList("history:" + thirtyDaysAgo() + ":" + todayISO(), session?.business?.id); return c ? c.data.events : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("history:" + thirtyDaysAgo() + ":" + todayISO(), session?.business?.id); return c ? c.updatedAt : null; });
+  const [total, setTotal] = useState(() => { const c = getCachedList("history:" + thirtyDaysAgo() + ":" + todayISO(), session?.business?.id); return c ? c.data.total : 0; });
+  const [actors, setActors] = useState(() => { const c = getCachedList("history:" + thirtyDaysAgo() + ":" + todayISO(), session?.business?.id); return c ? c.data.actors : []; });
+  const [startedAt, setStartedAt] = useState(() => { const c = getCachedList("history:" + thirtyDaysAgo() + ":" + todayISO(), session?.business?.id); return c ? c.data.startedAt : todayISO(); });
   const [filters, setFilters] = useState({ from: thirtyDaysAgo(), to: todayISO(), type: "", person: "", q: "" });
   const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("history:" + thirtyDaysAgo() + ":" + todayISO(), session?.business?.id));
   const [error, setError] = useState("");
   const [needsUpgrade, setNeedsUpgrade] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -63,7 +66,12 @@ export default function HistoryPage({ session }) {
   const hasFilters = !!(filters.type || filters.person || filters.q);
 
   async function load(off, f) {
-    setLoading(true); setError("");
+    // Cache covers the unfiltered first page only: a filtered or paged
+    // view always fetches, so a cached list can never stand in for a
+    // different filter.
+    const cacheKey = off === 0 && !f.type && !f.person && !f.q ? `history:${f.from}:${f.to}` : null;
+    if (!cacheKey || !getCachedList(cacheKey, session?.business?.id)) setLoading(true);
+    setError("");
     try {
       const q = new URLSearchParams({ limit: String(limit), offset: String(off) });
       if (f.from) q.set("from", f.from);
@@ -74,6 +82,7 @@ export default function HistoryPage({ session }) {
       const d = await api.get("/api/history?" + q.toString());
       setEvents(d.events || []); setTotal(d.total || 0);
       setActors(d.actors || []); setStartedAt(d.startedAt || todayISO());
+      if (cacheKey) { setCachedList(cacheKey, session?.business?.id, { events: d.events || [], total: d.total || 0, actors: d.actors || [], startedAt: d.startedAt || todayISO() }); setUpdatedAt(Date.now()); }
     } catch (e) { setError(e.message); }
     setLoading(false);
   }
@@ -158,7 +167,8 @@ export default function HistoryPage({ session }) {
         <p className="hint">You see sales, expenses, payments, debts, stock and customer events. Staff and settings changes are only visible to the owner.</p>
       )}
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load(0, filters)} />}
+      <UpdatedNote updatedAt={updatedAt} onRefresh={() => load(0, filters)} />
       {needsUpgrade && (
         <div className="card">
           <h2>CSV export is a Starter feature</h2>
@@ -197,7 +207,7 @@ export default function HistoryPage({ session }) {
         </form>
       </div>
 
-      {loading ? <div className="loading">Loading...</div> : (
+      {loading ? <ListSkeleton label="Loading history..." /> : (
         <>
           <div className="table-wrap">
             <table className="data">

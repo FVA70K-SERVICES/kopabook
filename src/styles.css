@@ -440,12 +440,26 @@ a:focus-visible, button:focus-visible {
 }
 
 /* ---------- PIN app lock ---------- */
+/* Dismiss (2026-11-06): the lock screen must be one opaque layer and
+   nothing else. background-color repeats the background shorthand on
+   purpose, isolation puts the whole screen in its own stacking
+   context, and contain: paint keeps its painting inside its own box,
+   so no Dashboard paint can show through it at any size or theme.
+   Never add a fade-out transition or animation to this screen: a
+   fading lock over the fading-in Dashboard is exactly the ghost that
+   showed lock text over Dashboard text. Unlock is an instant unmount. */
 .app-lock-screen {
   position: fixed; inset: 0; z-index: 3000;
-  background: var(--bg); color: var(--ink);
+  background: var(--bg); background-color: var(--bg); color: var(--ink);
+  opacity: 1; isolation: isolate; contain: paint;
   display: flex; align-items: center; justify-content: center;
   padding: 20px 16px; overflow-y: auto;
 }
+/* The app content behind the lock (see AppLockGate): hidden while the
+   gate is closed, so it can never paint through the lock screen. The
+   hidden attribute alone implies display:none; the rule makes it
+   explicit against any other display rule. */
+.app-lock-content[hidden] { display: none !important; }
 .app-lock-card {
   width: 100%; max-width: 400px; margin: auto;
   background: var(--surface); border: 1px solid var(--line);

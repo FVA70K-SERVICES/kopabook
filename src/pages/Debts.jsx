@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt, nav } from "../lib/api";
 import { waLink, fillReminderTemplate } from "../lib/whatsapp";
 import { sendVia } from "../lib/channels";
@@ -27,8 +29,9 @@ function isOverdueDebt(lastActivity, overdueDays) {
 }
 
 export default function DebtsPage({ session }) {
-  const [data, setData] = useState({ total: 0, count: 0, debtors: [] });
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => { const c = getCachedList("debts", session?.business?.id); return c ? c.data : { total: 0, count: 0, debtors: [] }; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("debts", session?.business?.id); return c ? c.updatedAt : null; });
+  const [loading, setLoading] = useState(() => !getCachedList("debts", session?.business?.id));
   const [error, setError] = useState("");
   // loadError/loadedOk track the main debts list load: the "clean book"
   // empty state only shows when the load actually succeeded with zero debts.
@@ -63,24 +66,26 @@ export default function DebtsPage({ session }) {
   const [tier, setTier] = useState(null);
   const canRemind = tier !== null && tier !== "free";
 
+  // One parallel fetch for the three independent lookups the page needs
+  // (payment modes, business profile, billing tier) instead of three
+  // separate mount effects firing one after another.
   useEffect(() => {
-    api.get("/api/payment-modes").then((d) => {
-      const modes = (d.modes || []).filter((m) => m.enabled);
-      setPayModes(modes);
-      if (modes.length) setMethod(modes[0].name);
-    }).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    api.get("/api/business")
-      .then((d) => setBiz({ name: d.business?.name || "", reminderTemplate: d.business?.reminder_template || "", overdueDays: d.business?.overdue_days ?? 7 }))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    api.get("/api/billing")
-      .then((d) => setTier(d.tier || "free"))
-      .catch(() => setTier("free"));
+    Promise.allSettled([
+      api.get("/api/payment-modes"),
+      api.get("/api/business"),
+      api.get("/api/billing"),
+    ]).then(([modes, bizRes, bill]) => {
+      if (modes.status === "fulfilled") {
+        const list = (modes.value.modes || []).filter((m) => m.enabled);
+        setPayModes(list);
+        if (list.length) setMethod(list[0].name);
+      }
+      if (bizRes.status === "fulfilled") {
+        const b = bizRes.value.business || {};
+        setBiz({ name: b.name || "", reminderTemplate: b.reminder_template || "", overdueDays: b.overdue_days ?? 7 });
+      }
+      setTier(bill.status === "fulfilled" ? (bill.value.tier || "free") : "free");
+    });
   }, []);
 
   function reminderText(debtor) {
@@ -107,12 +112,14 @@ export default function DebtsPage({ session }) {
   }
 
   async function load() {
-    setLoading(true);
+    if (!getCachedList("debts", session?.business?.id)) setLoading(true);
     setLoadedOk(false);
     setLoadError("");
     try {
       const d = await api.get("/api/debts");
-      setData({ total: d.total || 0, count: d.count || 0, debtors: d.debtors || [] });
+      const next = { total: d.total || 0, count: d.count || 0, debtors: d.debtors || [] };
+      setData(next);
+      setCachedList("debts", session?.business?.id, next); setUpdatedAt(Date.now());
       setError("");
       setLoadedOk(true);
     } catch (e) {
@@ -222,7 +229,7 @@ export default function DebtsPage({ session }) {
         </div>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <LoadError message={error} onRetry={() => load()} />}
       {loadError && (
         <div className="alert alert-error" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span>{loadError}</span>
@@ -241,12 +248,14 @@ export default function DebtsPage({ session }) {
       )}
 
       <div className="metric-grid">
-        <div className="metric-card bad"><span>Total outstanding</span><strong>{fmt(data.total)}</strong></div>
-        <div className="metric-card"><span>Customers owing</span><strong>{data.count}</strong></div>
-        <div className="metric-card"><span>Due a reminder</span><strong>{dueDebtors.length}</strong></div>
+        <div className="metric-card bad"><span>Total outstanding</span><strong>{loading && !updatedAt ? "…" : fmt(data.total)}</strong></div>
+        <div className="metric-card"><span>Customers owing</span><strong>{loading && !updatedAt ? "…" : data.count}</strong></div>
+        <div className="metric-card"><span>Due a reminder</span><strong>{loading && !updatedAt ? "…" : dueDebtors.length}</strong></div>
       </div>
 
-      {loading ? <div className="loading">Loading...</div> : (
+      {loading ? <ListSkeleton label="Loading debts..." /> : (
+        <>
+        <UpdatedNote updatedAt={updatedAt} onRefresh={() => load()} />
         <div className="table-wrap">
           <table className="data">
             <thead><tr><th>Customer</th><th>Phone</th><th>Owing</th><th>Last activity</th><th>Reminder</th><th></th></tr></thead>
@@ -332,6 +341,7 @@ export default function DebtsPage({ session }) {
           </table>
           {!loading && loadedOk && data.debtors.length === 0 && <p className="empty">No outstanding debts. Clean book.</p>}
         </div>
+        </>
       )}
 
       {queue && current && (

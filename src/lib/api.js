@@ -3,11 +3,34 @@
 // Every request gets a 30s ceiling so a stalled network can never hang the app.
 const REQUEST_TIMEOUT_MS = 30000;
 
-async function request(path, options = {}) {
+// Speed (2026-11-06): cold open used to run api.me() and then, only
+// after it resolved, the app-lock state GET, and any second identical
+// GET started a whole new request. Two fixes, both scoped narrowly:
+//   - In-flight GET dedupe: concurrent identical GETs share one fetch.
+//   - A short-lived cache for the two slow-changing session reads only
+//     (/api/auth/me and /api/auth/app-lock, 60s). Nothing else is
+//     cached: dashboard, sales, products and every other read still
+//     hits the network every time, so figures never go stale. Any
+//     mutation (POST/PUT/PATCH/DELETE) clears the session cache, so a
+//     PIN setup, change or reset is never followed by a stale read.
+//     Error responses are never cached.
+const SESSION_CACHE_TTL_MS = 60000;
+const SESSION_CACHE_PATHS = ["/api/auth/me", "/api/auth/app-lock"];
+const sessionCache = new Map();
+const inflightGets = new Map();
+
+function isSessionCachePath(path) {
+  return SESSION_CACHE_PATHS.includes(String(path).split("?")[0]);
+}
+
+export function invalidateSessionCache() {
+  sessionCache.clear();
+}
+
+async function doRequest(path, fetchOptions, _timeoutMs) {
   const controller = new AbortController();
   // Per-call override for long-running calls only (Admin AI chat, 100s).
   // Every other call keeps the 30s ceiling below.
-  const { timeoutMs: _timeoutMs, ...fetchOptions } = options || {};
   const timeoutMs = typeof _timeoutMs === "number" ? _timeoutMs : REQUEST_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -36,8 +59,45 @@ async function request(path, options = {}) {
   }
 }
 
+async function request(path, options = {}) {
+  const { timeoutMs: _timeoutMs, ...fetchOptions } = options || {};
+  const method = String(fetchOptions.method || "GET").toUpperCase();
+  if (method === "GET" && isSessionCachePath(path)) {
+    const cached = sessionCache.get(path);
+    if (cached && cached.expiresAt > Date.now()) return cached.data;
+    const inflight = inflightGets.get(path);
+    if (inflight) return inflight;
+    const p = doRequest(path, fetchOptions, _timeoutMs);
+    inflightGets.set(path, p);
+    try {
+      const data = await p;
+      sessionCache.set(path, { data, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
+      return data;
+    } finally {
+      if (inflightGets.get(path) === p) inflightGets.delete(path);
+    }
+  }
+  const data = await doRequest(path, fetchOptions, _timeoutMs);
+  if (method !== "GET") invalidateSessionCache();
+  return data;
+}
+
+// Fresh session read: skips the cache and any in-flight duplicate, hits
+// the network, and refreshes the cache with what comes back. For checks
+// where a seconds-old answer is the wrong answer (the background-return
+// re-lock check: the owner may have turned the lock off elsewhere).
+async function requestFresh(path, options = {}) {
+  const { timeoutMs: _timeoutMs, ...fetchOptions } = options || {};
+  const data = await doRequest(path, fetchOptions, _timeoutMs);
+  if (isSessionCachePath(path)) {
+    sessionCache.set(path, { data, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
+  }
+  return data;
+}
+
 export const api = {
   get: (path) => request(path),
+  getFresh: (path) => requestFresh(path),
   post: (path, body, opts) => request(path, { method: "POST", body: JSON.stringify(body || {}), timeoutMs: opts && opts.timeoutMs }),
   put: (path, body) => request(path, { method: "PUT", body: JSON.stringify(body || {}) }),
   patch: (path, body) => request(path, { method: "PATCH", body: JSON.stringify(body || {}) }),

@@ -3,9 +3,11 @@
 
 // Bump this version on shell-affecting releases: the activate handler
 // deletes every other cache, so installed apps drop the old shell and
-// pick up the current bundle (v6: PIN app lock gate restored in the
-// shell, with the owner's own re-lock timer).
-const SHELL_CACHE = "kopabook-shell-v6";
+// pick up the current bundle (v7: PIN app lock gate restored in the
+// shell, with the owner's own re-lock timer; navigation is now
+// stale-while-revalidate so a repeat cold open paints from the cached
+// shell at once instead of waiting on the network first).
+const SHELL_CACHE = "kopabook-shell-v7";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 
@@ -13,7 +15,11 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(SHELL_CACHE)
-      .then((cache) => cache.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", "/logo.png", "/founder.jpg", "/icon-maskable-512.png"]))
+      // Speed (2026-11-06): founder.jpg is marketing-only (the About
+      // story), not shell, so it no longer rides the install precache;
+      // it still loads normally from the network when that page opens.
+      // logo.png stays: it is the sidebar brand on every app screen.
+      .then((cache) => cache.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", "/logo.png", "/icon-maskable-512.png"]))
       .then(() => self.skipWaiting())
       .catch(() => self.skipWaiting())
   );
@@ -47,15 +53,29 @@ async function cacheFirst(request) {
 }
 
 // Navigation requests (page loads and deep links like /app/*, /login, /pricing):
-// try the network first for freshness, but fall back to the cached /index.html
-// so offline refreshes never show the browser error page.
-async function navigationHandler(request) {
-  try {
-    const res = await fetch(request);
-    if (res && res.ok) return res;
-  } catch (err) { /* offline: serve the cached shell below */ }
+// serve the cached shell at once when there is one, and refresh it in
+// the background, so a repeat cold open paints immediately instead of
+// waiting a full network round trip first. With no cached shell yet,
+// fall back to the network, then the cached shell, then the offline
+// message. The background refresh never delays the paint; waitUntil
+// keeps the worker alive long enough to finish writing it.
+async function navigationHandler(request, event) {
   const shell = await caches.match("/index.html", { cacheName: SHELL_CACHE });
-  if (shell) return shell;
+  const networkUpdate = fetch(request)
+    .then(async (res) => {
+      if (res && res.ok) {
+        const cache = await caches.open(SHELL_CACHE);
+        cache.put("/index.html", res.clone());
+      }
+      return res;
+    })
+    .catch(() => null);
+  if (shell) {
+    if (event && event.waitUntil) event.waitUntil(networkUpdate);
+    return shell;
+  }
+  const res = await networkUpdate;
+  if (res && res.ok) return res;
   return new Response("You are offline", { status: 503, headers: { "Content-Type": "text/plain" } });
 }
 
@@ -94,7 +114,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.method === "GET" && request.mode === "navigate") {
-    event.respondWith(navigationHandler(request));
+    event.respondWith(navigationHandler(request, event));
     return;
   }
 

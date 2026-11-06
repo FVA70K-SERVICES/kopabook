@@ -196,10 +196,22 @@ export async function onRequestPost(context) {
       if (!validPin(body.pin)) return json({ ok: false, message: "Enter your 4-digit PIN." }, 400);
       const okPin = await verifyPassword(String(body.pin), row.pin_hash);
       if (!okPin) return failPinAttempt(db, auth, row, "verify");
-      await clearPinFailures(db, auth.user.id);
-      await auditAppLock(db, auth, "auth.app_lock.unlock", { source: "pin" });
-      const fresh = await getAppLockRow(db, auth.user.id);
-      return stateResponse(fresh, { message: "Unlocked." });
+      // Speed (2026-11-06): the success path used to do three more
+      // serial D1 round trips after the hash (clear failures, audit
+      // insert, then a full re-read of the row just to answer). The
+      // re-read is gone: the cleared state is known here (failures 0,
+      // no lockout stamp), so the response is built from the row
+      // already in hand. The two writes are independent (different
+      // tables), so they run together instead of one after the other.
+      // Nothing about security changes: the PBKDF2 check above, the
+      // failure counting, the lockout ladder and the failure audit in
+      // failPinAttempt are exactly as they were.
+      const clearedRow = { ...row, failed_attempts: 0, lockout_until: null };
+      await Promise.all([
+        clearPinFailures(db, auth.user.id),
+        auditAppLock(db, auth, "auth.app_lock.unlock", { source: "pin" }),
+      ]);
+      return stateResponse(clearedRow, { message: "Unlocked." });
     }
 
     if (action === "change") {

@@ -25,16 +25,19 @@ export async function onRequestGet(context) {
     if (to) { sql += ` AND e.incurred_on <= ?`; params.push(to); }
     sql += ` ORDER BY e.incurred_on DESC, e.id DESC LIMIT 200`;
 
-    const result = await context.env.KOPABOOK_DB.prepare(sql).bind(...params).all();
-
-    const totalRow = await context.env.KOPABOOK_DB.prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE business_id = ?` +
-      (from ? ` AND incurred_on >= ?` : ``) + (to ? ` AND incurred_on <= ?` : ``)
-    ).bind(...params).first();
-
-    const cats = await context.env.KOPABOOK_DB.prepare(
-      `SELECT id, name FROM expense_categories WHERE business_id = ? ORDER BY name ASC`
-    ).bind(auth.business.id).all();
+    // The three reads are independent: run them in parallel instead of
+    // one after another so the list, its total and its categories arrive
+    // in a single round trip. Same rows, same shape, same auth.
+    const [result, totalRow, cats] = await Promise.all([
+      context.env.KOPABOOK_DB.prepare(sql).bind(...params).all(),
+      context.env.KOPABOOK_DB.prepare(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE business_id = ?` +
+        (from ? ` AND incurred_on >= ?` : ``) + (to ? ` AND incurred_on <= ?` : ``)
+      ).bind(...params).first(),
+      context.env.KOPABOOK_DB.prepare(
+        `SELECT id, name FROM expense_categories WHERE business_id = ? ORDER BY name ASC`
+      ).bind(auth.business.id).all(),
+    ]);
 
     return json({
       ok: true,

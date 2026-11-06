@@ -40,7 +40,17 @@ export const PIN_BACKGROUND_LOCK_MS = PIN_RELOCK_DEFAULT_MINUTES * 60 * 1000;
 // migration normally seeds them at 2).
 const FEATURE_EPOCH = "2026-10-20 16:56:00";
 
+// The lock table is created by migration in production; this is a
+// self-heal for rows created before it existed. It used to run a
+// CREATE TABLE IF NOT EXISTS plus an ALTER TABLE attempt on EVERY
+// read, so a single PIN verify paid for it three times over. The DDL
+// is idempotent, so one successful pass per isolate is enough: later
+// calls in the same isolate skip it. The flag is set only after both
+// statements succeed, so a transient failure retries on the next call.
+let appLockTableEnsured = false;
+
 export async function ensureAppLockTable(db) {
+  if (appLockTableEnsured) return;
   await db.prepare(
     `CREATE TABLE IF NOT EXISTS user_app_locks (
        user_id INTEGER PRIMARY KEY REFERENCES users(id),
@@ -65,6 +75,7 @@ export async function ensureAppLockTable(db) {
       `ALTER TABLE user_app_locks ADD COLUMN relock_minutes INTEGER NOT NULL DEFAULT 5`
     ).run();
   } catch { /* column already present */ }
+  appLockTableEnsured = true;
 }
 
 // The account's chosen re-lock delay in minutes, validated against the

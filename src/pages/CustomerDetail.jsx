@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton } from "../components/ListState";
 import { api, fmt, nav, todayISO } from "../lib/api";
 import StatementPrint from "../components/StatementPrint";
 import { requestStatementPrint } from "../lib/statement";
@@ -16,29 +18,35 @@ function daysSince(iso) {
 
 export default function CustomerDetailPage({ customerId, session }) {
   const canDelete = ["owner", "partner"].includes(session?.business?.role);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => { const c = getCachedList("customer:" + customerId, session?.business?.id); return c ? c.data.profile : null; });
+  const [loading, setLoading] = useState(() => !getCachedList("customer:" + customerId, session?.business?.id));
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", notes: "", tags: "", email: "", credit_limit: "" });
+  const [form, setForm] = useState(() => { const c = getCachedList("customer:" + customerId, session?.business?.id); const cu = c?.data?.profile?.customer || {}; return { name: cu.name || "", phone: cu.phone || "", notes: cu.notes || "", tags: cu.tags || "", email: cu.email || "", credit_limit: cu.credit_limit === null || cu.credit_limit === undefined ? "" : String(cu.credit_limit) }; });
   const isOwnerPartner = ["owner", "partner"].includes(session?.business?.role);
   const [saving, setSaving] = useState(false);
-  const [biz, setBiz] = useState({ name: "", reminder_template: "", brand_color: "#166534", tagline: "" });
+  const [biz, setBiz] = useState(() => { const c = getCachedList("business", session?.business?.id); return c ? { name: c.data.name || "", reminder_template: c.data.reminder_template || "", brand_color: c.data.brand_color || "#166534", tagline: c.data.tagline || "" } : { name: "", reminder_template: "", brand_color: "#166534", tagline: "" }; });
   const [channel, setChannel] = useState("whatsapp");
   const [photoFile, setPhotoFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   // WORLD-BEST: Customer statement — start
   const [stmtFrom, setStmtFrom] = useState(() => todayISO().slice(0, 8) + "01");
   const [stmtTo, setStmtTo] = useState(() => todayISO());
-  const [stmt, setStmt] = useState(null);
+  const [stmt, setStmt] = useState(() => { const c = getCachedList("customer:" + customerId, session?.business?.id); return c ? c.data.stmt : null; });
   const [stmtLoading, setStmtLoading] = useState(false);
   const [stmtError, setStmtError] = useState("");
   // WORLD-BEST: Customer statement — end
 
   async function load() {
-    setLoading(true);
+    if (!getCachedList("customer:" + customerId, session?.business?.id)) setLoading(true);
     try {
-      const d = await api.get(`/api/customer-profile?id=${customerId}`);
+      const [prof, st, bizRes] = await Promise.allSettled([
+        api.get(`/api/customer-profile?id=${customerId}`),
+        api.get(`/api/customers/${customerId}/statement?from=${stmtFrom}&to=${stmtTo}`),
+        api.get("/api/business"),
+      ]);
+      if (prof.status === "rejected") throw prof.reason;
+      const d = prof.value;
       setData(d);
       setForm({
         name: d.customer.name || "", phone: d.customer.phone || "", notes: d.customer.notes || "",
@@ -46,11 +54,14 @@ export default function CustomerDetailPage({ customerId, session }) {
         email: d.customer.email || "",
         credit_limit: d.customer.credit_limit === null || d.customer.credit_limit === undefined ? "" : String(d.customer.credit_limit),
       });
+      if (st.status === "fulfilled") { setStmt(st.value); setStmtError(""); }
+      else setStmtError(st.reason?.message || "Could not load the statement.");
+      if (bizRes.status === "fulfilled") { setBiz(bizRes.value.business || {}); setCachedList("business", session?.business?.id, bizRes.value.business || {}); }
+      setCachedList("customer:" + customerId, session?.business?.id, { profile: d, stmt: st.status === "fulfilled" ? st.value : null });
       setError("");
     } catch (e) { setError(e.message); }
     setLoading(false);
   }
-
   useEffect(() => { load(); }, [customerId]);
   // WORLD-BEST: Customer statement — start
   async function loadStatement(from, to) {
@@ -62,11 +73,7 @@ export default function CustomerDetailPage({ customerId, session }) {
     } catch (e) { setStmtError(e.message); }
     setStmtLoading(false);
   }
-  useEffect(() => { loadStatement(stmtFrom, stmtTo); }, [customerId]);
   // WORLD-BEST: Customer statement — end
-  useEffect(() => {
-    api.get("/api/business").then((d) => setBiz(d.business || {})).catch(() => {});
-  }, []);
 
   async function save(e) {
     e.preventDefault();
@@ -113,7 +120,7 @@ export default function CustomerDetailPage({ customerId, session }) {
     set("tags", cur.includes(t) ? cur.filter((x) => x !== t).join(", ") : [...cur, t].join(", "));
   }
 
-  if (loading) return <div className="loading">Loading customer...</div>;
+  if (loading) return <ListSkeleton label="Loading customer..." />;
   if (error && !data) return <><div className="alert alert-error">{error}</div><button className="btn btn-secondary" onClick={() => nav("/app/customers")}>Back to customers</button></>;
   const { customer, stats, recent } = data;
   const tags = String(customer.tags || "").split(",").map((t) => t.trim()).filter(Boolean);

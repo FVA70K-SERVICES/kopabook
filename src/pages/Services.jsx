@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
+import { getCachedList, setCachedList } from "../lib/listCache";
+import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
 import { api, fmt } from "../lib/api";
 
 const UNITS = ["per job", "per hour", "per day", "per item"];
 const emptyForm = { name: "", description: "", price: "", unit: "per job" };
 
 export default function ServicesPage({ session }) {
-  const [services, setServices] = useState([]);
+  const [services, setServices] = useState(() => { const c = getCachedList("services", session?.business?.id); return c ? c.data : []; });
+  const [updatedAt, setUpdatedAt] = useState(() => { const c = getCachedList("services", session?.business?.id); return c ? c.updatedAt : null; });
   const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedList("services", session?.business?.id));
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -17,10 +20,11 @@ export default function ServicesPage({ session }) {
   const canManage = session.perms?.can_manage_products;
 
   async function load() {
-    setLoading(true);
+    if (!getCachedList("services", session?.business?.id)) setLoading(true);
     try {
       const d = await api.get("/api/services?active=all");
       setServices(d.services);
+      setCachedList("services", session?.business?.id, d.services); setUpdatedAt(Date.now());
       setError("");
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -82,8 +86,10 @@ export default function ServicesPage({ session }) {
           onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {loading ? <div className="loading">Loading services...</div> : (
+      {error && <LoadError message={error} onRetry={() => load()} />}
+      {loading ? <ListSkeleton label="Loading services..." /> : (
+        <>
+        <UpdatedNote updatedAt={updatedAt} onRefresh={() => load()} />
         <div className="table-wrap">
           <table className="data">
             <thead><tr><th>Service</th><th>Price</th><th>Status</th><th></th></tr></thead>
@@ -116,6 +122,7 @@ export default function ServicesPage({ session }) {
           </table>
           {filtered.length === 0 && <p className="empty">No services yet. Add your first service to start selling it.</p>}
         </div>
+        </>
       )}
 
       {showForm && (
