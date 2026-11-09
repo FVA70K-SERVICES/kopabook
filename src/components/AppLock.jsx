@@ -230,6 +230,17 @@ function LockScreen({ onUnlocked }) {
       // fresh lock state, so no second state fetch is serialised after
       // the PIN check. The Dashboard behind the lock is already
       // mounted and loaded; the gate only has to unhide it.
+      // Round 6: a successful PIN verify is a login, so Ask Kopa AI
+      // starts fresh. Remove the stored chat session and tell the
+      // widget to empty the thread and clear it on the server, before
+      // the unlock paints. Synchronous, so the old questions can never
+      // flash first; the server call lives in the widget and never
+      // blocks this step.
+      try {
+        const sid = localStorage.getItem("fva_chat_session_kopabook");
+        if (sid) localStorage.removeItem("fva_chat_session_kopabook");
+        window.dispatchEvent(new CustomEvent("kopabook:login-clear", { detail: { sessionId: sid || null } }));
+      } catch (e) { /* a missed clear never blocks the unlock */ }
       onUnlocked(d.appLock);
     } catch (e) {
       busyRef.current = false;
@@ -274,6 +285,14 @@ function LockScreen({ onUnlocked }) {
     const d = await api.post("/api/auth/app-lock", {
       action: "reset", password, newPin, confirmPin: newPin,
     });
+    // Round 6: a PIN reset that unlocks the app is a login too, so Ask
+    // Kopa AI starts fresh. Same dispatch as the verify-success path
+    // above, before the unlock paints.
+    try {
+      const sid = localStorage.getItem("fva_chat_session_kopabook");
+      if (sid) localStorage.removeItem("fva_chat_session_kopabook");
+      window.dispatchEvent(new CustomEvent("kopabook:login-clear", { detail: { sessionId: sid || null } }));
+    } catch (e) { /* a missed clear never blocks the unlock */ }
     onUnlocked(d.appLock);
   }
 

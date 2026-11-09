@@ -13,6 +13,16 @@
   let visitorEmail = localStorage.getItem('fva_chat_email') || '';
   let lastMsgId = 0;
   let pollTimer = null;
+  // ---- Clear on login (round 6) ----
+  // Fortune (2026-11-06): on any login the Ask Kopa AI thread starts
+  // fresh and never first shows old questions. The login dispatch
+  // (Auth.jsx / AppLock.jsx) removes the stored session id and fires
+  // 'kopabook:login-clear'; this widget owns the server call. The
+  // in-flight clear promise is the no-flash guard: loadHistory and
+  // poll await it and re-check the session id before appending
+  // anything, so a chat opened within milliseconds of an unlock
+  // cannot paint stale rows.
+  let loginClearPromise = null;
   let isOpen = false;
   let unread = 0;
   let soundOn = localStorage.getItem('fva_chat_sound') !== 'off';
@@ -438,6 +448,13 @@
 
   invite.querySelector('#fva-invite-go').addEventListener('click', () => { invite.style.display = 'none'; openChat(); });
   invite.querySelector('#fva-invite-no').addEventListener('click', () => { invite.style.display = 'none'; });
+
+  // Round 6: clear the thread on login (handleLoginClear, next to
+  // loadHistory). Registered at init so the event is caught even
+  // when the panel is closed.
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('kopabook:login-clear', handleLoginClear);
+  }
 
   function toggleSound() {
     soundOn = !soundOn;
@@ -1878,7 +1895,7 @@
           '<button id="fva-history-back" type="button">Back to chat</button>' +
           '<strong>Past support chats</strong>' +
         '</div>' +
-        '<p class="fva-history-note">Support conversations are kept as a record for you and the FVA70K team. Ask Kopa AI keeps the last 24 hours.</p>' +
+        '<p class="fva-history-note">Support conversations are kept as a record for you and the FVA70K team. Ask Kopa AI starts fresh each time you sign in.</p>' +
         '<div id="fva-history-list"></div>' +
         '<div id="fva-history-detail" style="display:none;"></div>' +
       '</div>' +
@@ -1895,7 +1912,7 @@
         '<div class="fva-door-title">Who do you want to talk to?</div>' +
         '<button class="fva-door-btn" data-mode="ai"><strong>Ask Kopa AI</strong><span>Your shop assistant. Records sales and expenses, and answers from your own records.</span></button>' +
         '<button class="fva-door-btn" data-mode="support"><strong>Kopa Support</strong><span>Chat with the FVA70K team about KopaBook itself. Quick platform answers first, a real person when you need one.</span></button>' +
-        '<div class="fva-door-note">One chat, two doors. Ask Kopa AI keeps the last 24 hours. Kopa Support conversations are kept as a record, so you and the FVA70K team can always look back at what was said.</div>' +
+        '<div class="fva-door-note">One chat, two doors. Ask Kopa AI starts fresh each time you sign in. Kopa Support conversations are kept as a record, so you and the FVA70K team can always look back at what was said.</div>' +
       '</div>' +
       '<div id="fva-chat-messages"></div>' +
       '<div id="fva-typing">Someone is typing...</div>' +
@@ -1976,12 +1993,84 @@
     applyTabInset();
   }
 
+  // ---- Clear on login (round 6) ----
+  // Dispatched by LoginPage (Auth.jsx) right after a successful login
+  // and by LockScreen (AppLock.jsx) right after a successful PIN
+  // verify, in both cases before the next screen paints. The old
+  // session id comes in the event detail; when it is null the
+  // widget's own session id is the one to clear. Supersedes the
+  // rolling 24-hour history: every login starts the chat fresh.
+  function handleLoginClear(event) {
+    let detailId = null;
+    try { detailId = (event && event.detail && event.detail.sessionId) || null; } catch (e) {}
+    const targetId = detailId || sessionId;
+    // 1. Empty the visible thread SYNCHRONOUSLY, before any paint can
+    // show old questions. This covers the panel-open-across-lock case:
+    // the lock engaged while the panel was open, and the Dashboard is
+    // about to paint behind it.
+    try {
+      const wrap = body.querySelector('#fva-chat-messages');
+      if (wrap) wrap.innerHTML = '';
+      const legacy = body.querySelector('.fva-messages');
+      if (legacy && legacy !== wrap) legacy.innerHTML = '';
+    } catch (e) {}
+    // 2. Drop every in-memory trace of the old thread, so no in-flight
+    // read can append into the fresh one.
+    lastMsgId = 0;
+    sessionId = null;
+    activeProposal = null;
+    try { renderedProposalIds.clear(); } catch (e) {}
+    typingSeq = 0;
+    thinkingFailedSeq = 0;
+    replyDeliveredSeq = 0;
+    try { clearThinkingTimers(); } catch (e) {}
+    // 3. Ask the server to delete the old session's rows. Never throws
+    // into the widget and never blocks the login: the localStorage key
+    // is already gone, so the next open starts a fresh session even if
+    // this request fails. With no id at all there is nothing to clear
+    // server-side, so no request is sent.
+    if (targetId) {
+      try {
+        // Bounded like every other widget fetch: if the clear hangs,
+        // the abort ends it and the widget carries on. The local key
+        // is already gone, so the next open starts fresh either way.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => { try { controller.abort(); } catch (e) {} }, 10000);
+        const p = fetch(API + '/clear-on-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: targetId, ownerCtx: (window.FVAChatOwner || undefined) }),
+          signal: controller.signal,
+        }).catch(() => null).finally(() => { try { clearTimeout(timeoutId); } catch (e) {} });
+        loginClearPromise = p;
+        p.then(
+          () => { if (loginClearPromise === p) loginClearPromise = null; },
+          () => { if (loginClearPromise === p) loginClearPromise = null; });
+      } catch (e) {}
+    }
+    // 4. If the panel is already open, start the fresh session at once:
+    // the thread is empty now and the greeting is the first thing the
+    // user sees. If it is closed, the next open starts it (openChat
+    // calls startSession when there is no session id). No extra
+    // "chat cleared" line is ever added.
+    if (isOpen) { try { startSession(); } catch (e) {} }
+  }
+
   // Load full chat history on open
   async function loadHistory() {
-    if (!sessionId) return;
+    // Round 6: a login clear in flight wins over this read. Wait for
+    // it, then only append rows that still belong to the current
+    // session; rows fetched for the cleared session are dropped.
+    if (loginClearPromise) { try { await loginClearPromise; } catch (e) {} }
+    const mySid = sessionId;
+    if (!mySid) return;
     try {
-      const res = await fetch(API + '/poll?sessionId=' + sessionId + '&since=0');
+      const res = await fetch(API + '/poll?sessionId=' + mySid + '&since=0');
       const data = await res.json();
+      // The clear may have landed while this fetch was in flight, so
+      // re-check after the fetch too, not only before it.
+      if (loginClearPromise) { try { await loginClearPromise; } catch (e) {} }
+      if (!sessionId || sessionId !== mySid) return;
       (data.messages || []).forEach(m => {
         if (m.id > lastMsgId) {
           lastMsgId = m.id;
@@ -2024,6 +2113,10 @@
     // Local language switch mirror (for example "speak Yoruba"), so voice
     // recognition and speech switch in this session straight away.
     if (IS_KOPABOOK && isOwnerMode()) detectLanguageSwitch(text);
+    // Round 6: the session this send belongs to. If a login clear lands
+    // mid-send, the reply (and any failure line) belongs to the cleared
+    // session and must not paint into the fresh thread.
+    const sendSessionId = sessionId;
     const normText = String(text || '').trim().toLowerCase();
     if (activeProposal && ['confirm', 'cancel', 'yes', 'no', 'na so'].indexOf(normText) !== -1) {
       activeProposal = null;
@@ -2068,20 +2161,24 @@
         hideBotTyping(mySeq);
         // Mark our message as read when bot replies (bot saw it)
         if (data.ok) markRead(msgId);
-        if (data.botReply && data.botReply.quickReplies && data.botReply.quickReplies.length) {
+        // Round 6: if a login clear landed mid-send, this reply belongs
+        // to the cleared session. Its cards, buttons and quick replies
+        // must not paint into the fresh thread.
+        const sessionAlive = !!sessionId && sessionId === sendSessionId;
+        if (sessionAlive && data.botReply && data.botReply.quickReplies && data.botReply.quickReplies.length) {
           showQuickReplies(data.botReply.quickReplies);
         }
-        if (data.botReply && data.botReply.escalate) {
+        if (sessionAlive && data.botReply && data.botReply.escalate) {
           supportState = Object.assign({}, supportState || {}, { needsHuman: true });
           renderModeTabs(); updateHeaderPersona();
         }
         // Handle action buttons (e.g. WhatsApp order link)
-        if (data.botReply && data.botReply.action) {
+        if (sessionAlive && data.botReply && data.botReply.action) {
           showActionButton(data.botReply.action);
         }
         // Speak the bot reply on the send path in voice mode. The poll path
         // speaks the same text by message id and by text, so it is not repeated.
-        if (data.botReply && data.botReply.answer) {
+        if (sessionAlive && data.botReply && data.botReply.answer) {
           maybeSpeakBotText(data.botReply.answer);
         }
         // Clear chat: the server wiped this session's thread and kept
@@ -2090,7 +2187,7 @@
         // the visible bubbles now so the old chat does not sit on
         // screen until the panel is reopened. Support case history
         // lives in its own view and is never touched by this.
-        if (data.botReply && data.botReply.clearChat) {
+        if (sessionAlive && data.botReply && data.botReply.clearChat) {
           const msgs = body.querySelector('.fva-messages');
           if (msgs) msgs.innerHTML = '';
         }
@@ -2098,7 +2195,7 @@
         // Confirm is a structured tap: the button sends confirmProposalId
         // with the proposal id. Cancel stays an ordinary chat message
         // "Cancel"; cancelling records nothing.
-        if (data.botReply && data.botReply.proposal) {
+        if (sessionAlive && data.botReply && data.botReply.proposal) {
           renderProposalCard(data.botReply.proposal);
         }
       }
@@ -2111,7 +2208,9 @@
       // do not add a second one.)
       hideBotTyping(mySeq);
       if (replyDeliveredSeq !== mySeq && thinkingFailedSeq !== mySeq) {
-        appendBotMsg(sendFailureText(), Date.now(), null);
+        // Round 6: a login clear mid-send must not land a failure line
+        // in the fresh thread.
+        if (sessionId && sessionId === sendSessionId) appendBotMsg(sendFailureText(), Date.now(), null);
       }
     }
   }
@@ -2412,9 +2511,14 @@
 
   async function poll() {
     if (!sessionId) return;
+    const pollSid = sessionId;
     try {
-      const res = await fetch(API + '/poll?sessionId=' + sessionId + '&since=' + lastMsgId);
+      const res = await fetch(API + '/poll?sessionId=' + pollSid + '&since=' + lastMsgId);
       const data = await res.json();
+      // Round 6: same guard as loadHistory. A login clear that landed
+      // while this fetch was in flight wins: its rows are dropped.
+      if (loginClearPromise) { try { await loginClearPromise; } catch (e) {} }
+      if (!sessionId || sessionId !== pollSid) return;
       const typingEl = body.querySelector('#fva-typing');
       if (typingEl) typingEl.classList.toggle('show', !!data.agentTyping);
 

@@ -27,6 +27,16 @@ export function LoginPage() {
     setStatus({ loading: true, error: "" });
     try {
       await api.login(identifier, password);
+      // Round 6: every login starts Ask Kopa AI fresh. Remove the stored
+      // chat session and tell the widget to empty the thread and clear
+      // it on the server, before navigation paints. Synchronous, so the
+      // old questions can never flash first; the server call lives in
+      // the widget and never blocks this step.
+      try {
+        const sid = localStorage.getItem("fva_chat_session_kopabook");
+        if (sid) localStorage.removeItem("fva_chat_session_kopabook");
+        window.dispatchEvent(new CustomEvent("kopabook:login-clear", { detail: { sessionId: sid || null } }));
+      } catch (e) { /* a missed clear never blocks sign-in */ }
       // A pending project invite survives sign-in: finish the join after auth.
       const pending = localStorage.getItem("kb_pending_invite");
       if (pending) {

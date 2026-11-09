@@ -347,9 +347,9 @@ export async function buildSnapshot(db, auth) {
   const VOIDED = "(status IS NULL OR status <> 'voided')";
   const salesWindow = async (startUtc, endUtc) => {
     const r = await q(async () => await db.prepare(
-      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ? AND ${VOIDED}`
+      `SELECT COALESCE(SUM(total_amount),0) AS total, COUNT(*) AS cnt, COALESCE(SUM(change_given),0) AS changeGiven FROM sales WHERE business_id = ? AND created_at >= ? AND created_at < ? AND ${VOIDED}`
     ).bind(businessId, startUtc, endUtc).first(), null);
-    return { total: Number(r && r.total) || 0, count: Number(r && r.cnt) || 0 };
+    return { total: Number(r && r.total) || 0, count: Number(r && r.cnt) || 0, changeGiven: Number(r && r.changeGiven) || 0 };
   };
   const expensesWindow = async (startDate, endDate) => {
     const r = await q(async () => await db.prepare(
@@ -359,6 +359,8 @@ export async function buildSnapshot(db, auth) {
   };
 
   snap.businessName = auth.business.name || "Your business";
+  snap.businessDate = todayW.date;
+  snap.timezone = tz;
   snap.businessType = auth.business.business_type || "general";
   snap.tier = (await q(async () => (await getBusinessOwnerTier(db, businessId)).tier, "free")) || "free";
 
@@ -399,9 +401,74 @@ export async function buildSnapshot(db, auth) {
   snap.salesYear = await salesWindow(yearStartUtc, yearEndUtc);
 
   snap.expensesToday = await expensesWindow(todayW.date, tomorrowDate);
+  snap.expensesYesterday = await expensesWindow(yestW.date, todayW.date);
   snap.expensesWeek = await expensesWindow(mondayDate, nextMondayDate);
   snap.expensesMonth = await expensesWindow(monthStartDate, nextMonthDate);
   snap.expensesYear = await expensesWindow(yearStartDate, nextYearDate);
+
+  // Sales by day for the last 31 business days, in one query: the
+  // date-sales and day-report reads need line items per day, not just
+  // window totals. Rows are bucketed in JS by business-local date, so
+  // a sale just after midnight WAT still lands on the Lagos day. Every
+  // day in the range gets an entry, even with no sales, so a quiet day
+  // reads as no sales rather than as missing data. Per day: total,
+  // count, change given, items aggregated by product name (cap 20),
+  // and debts for sales with a balance due (cap 10). Voided sales
+  // never count. On a query failure the field is null, so the date
+  // readers fall through instead of claiming no sales.
+  snap.salesByDay = await q(async () => {
+    const startMs = utcDay - 30 * dayMs;
+    const startDate = new Date(startMs).toISOString().slice(0, 10);
+    const startUtc = businessDayWindow(tz, startDate).startUtc;
+    const rs = await db.prepare(
+      `SELECT s.id, s.sale_number, COALESCE(c.name, 'Walk-in') AS customer,
+              s.total_amount, s.amount_paid, s.balance_due, COALESCE(s.change_given, 0) AS change_given,
+              s.created_at, si.quantity, si.line_total, p.name AS product_name
+       FROM sales s
+       LEFT JOIN sale_items si ON si.sale_id = s.id
+       LEFT JOIN products p ON p.id = si.product_id
+       LEFT JOIN customers c ON c.id = s.customer_id
+       WHERE s.business_id = ? AND s.created_at >= ? AND s.created_at < ? AND ${VOIDED}
+       ORDER BY s.created_at ASC`
+    ).bind(businessId, startUtc, todayW.endUtc).all();
+    const days = {};
+    const windows = [];
+    for (let i = 0; i < 31; i++) {
+      const d = new Date(startMs + i * dayMs).toISOString().slice(0, 10);
+      days[d] = { date: d, total: 0, count: 0, changeGiven: 0, items: [], debts: [] };
+      windows.push({ date: d, ...businessDayWindow(tz, d) });
+    }
+    const seen = new Set();
+    const agg = {};
+    for (const row of rs.results || []) {
+      const w = windows.find((x) => row.created_at >= x.startUtc && row.created_at < x.endUtc);
+      if (!w) continue;
+      const day = days[w.date];
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        day.total = Math.round((day.total + (Number(row.total_amount) || 0)) * 100) / 100;
+        day.count += 1;
+        day.changeGiven = Math.round((day.changeGiven + (Number(row.change_given) || 0)) * 100) / 100;
+        if ((Number(row.balance_due) || 0) > 0 && day.debts.length < 10) {
+          day.debts.push({ customer: row.customer || "Walk-in", amount: Number(row.balance_due) || 0, ref: row.sale_number || "" });
+        }
+      }
+      if (row.product_name) {
+        const key = w.date + "\n" + row.product_name;
+        const a = agg[key] || (agg[key] = { product: row.product_name, qty: 0, amount: 0 });
+        a.qty += Number(row.quantity) || 0;
+        a.amount = Math.round((a.amount + (Number(row.line_total) || 0)) * 100) / 100;
+      }
+    }
+    for (const [key, a] of Object.entries(agg)) {
+      days[key.slice(0, 10)].items.push(a);
+    }
+    for (const d of Object.keys(days)) {
+      days[d].items.sort((a, b) => b.amount - a.amount);
+      days[d].items = days[d].items.slice(0, 20);
+    }
+    return days;
+  }, null);
 
   snap.debtors = await q(async () => {
     const rs = await db.prepare(
@@ -491,6 +558,9 @@ export async function buildSnapshot(db, auth) {
 function snapshotText(snap, currency) {
   const L = [];
   L.push(`Business: ${snap.businessName} (${snap.businessType}), plan: ${snap.tier}, staff members: ${snap.staffCount}, customers: ${Number(snap.customerCount || 0)}.`);
+  if (snap.businessDate) {
+    L.push(`Today is ${snap.businessDate} (${snap.timezone || "Africa/Lagos"}).`);
+  }
   if (snap.products.length) {
     L.push("Products (name, price, unit, stock): " + snap.products.map((p) => `${p.name} ${fmt(p.price, currency)} per ${p.unit} (stock ${p.stock})`).join("; ") + ".");
   } else {
@@ -1457,8 +1527,19 @@ function requireProjectOwnerPartner(auth, action) {
 
 function normalizeProjectMilestones(params) {
   const raw = params && (params.milestones || params.steps);
+  // Round 6: no milestones yet is a plan with zero milestones, not an
+  // error. The executor used to ask "What milestones should the project
+  // plan include, in order?" whenever none were supplied, so the
+  // deterministic interview (name, type, goal, per the system prompt's
+  // own project interview) could never reach a dry-run proposal: the
+  // model path only worked because the model drafts a milestone list
+  // from the goal, and the fast path must never invent milestones.
+  // The proposal itself says "with 0 milestones", so the owner sees
+  // it before Confirm, and milestones can be added afterwards with
+  // project_add_milestone. Supplied milestones are still validated
+  // exactly as before, and the 50 cap is unchanged.
   if (!Array.isArray(raw) || !raw.length) {
-    return { error: "What milestones should the project plan include, in order?" };
+    return { milestones: [] };
   }
   if (raw.length > 50) return { error: "That project plan has too many milestones. Keep it to 50 or fewer." };
   const milestones = [];

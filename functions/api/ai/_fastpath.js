@@ -809,6 +809,40 @@ export function isQuestionWordsOnly(product) {
   return words.length > 0 && words.every((w) => QUESTION_WORDS.has(w));
 }
 
+// Weekday and month names, shared by the date mention parser and the
+// sale guard below. Month names cover full and abbreviated forms
+// (jan, sept); "may" is a month only next to a day number, so the
+// patterns that use this table always require one.
+const WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const MONTH_NUMBERS = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7,
+  august: 8, september: 9, october: 10, november: 11, december: 12,
+  jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9,
+  oct: 10, nov: 11, dec: 12,
+};
+const MONTH_PATTERN = "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec";
+const WEEKDAY_PATTERN = "monday|tuesday|wednesday|thursday|friday|saturday|sunday";
+
+// Words that only ever point at a date, never at a product: a weekday
+// or month name, "on", "of", or an ordinal suffix on its own ("2nd").
+// A bare number is a date word too, but it never triggers a drop on
+// its own: product names like "Product 1" reduce to a bare number
+// after the filler strip, and that number is the product.
+const DATE_WORDS = new Set([...WEEKDAY_NAMES, ...Object.keys(MONTH_NUMBERS), "on", "of"]);
+
+export function isQuestionOrDateOnly(product) {
+  const words = String(product || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^a-z0-9]/g, ""))
+    .filter(Boolean);
+  if (!words.length) return false;
+  const isDateWord = (w) => DATE_WORDS.has(w) || /^\d+(st|nd|rd|th)?$/.test(w) || /^(st|nd|rd|th)$/.test(w);
+  const isTriggerWord = (w) => QUESTION_WORDS.has(w) || DATE_WORDS.has(w)
+    || /^(st|nd|rd|th)$/.test(w) || /^\d+(st|nd|rd|th)$/.test(w);
+  return words.every((w) => QUESTION_WORDS.has(w) || isDateWord(w)) && words.some(isTriggerWord);
+}
+
 export function isQuestionText(text) {
   const t = normalizeFastText(text);
   return /^\s*(what|which|who|whom|whose|when|where|why|how)\b/.test(t) || /\?\s*$/.test(t);
@@ -818,6 +852,23 @@ export function isQuestionText(text) {
 // "laptop now" is the product Laptop plus the word "now", never a
 // product called "laptop now".
 const SALE_TIME_WORDS = /\b(now|today|just|yesterday|recently|tonight|this morning|this afternoon|this evening)\b/g;
+
+// Date phrases are never part of a product or customer name either:
+// "2 laptops on Friday" is 2 Laptops plus the word "Friday", never a
+// product called "laptops on friday". Stripped right after the time
+// words, before the customer and product are read. A leading "on"
+// goes with the date, so no dangling "on" is left behind to pollute
+// the name. DD/MM/YYYY is the Nigerian convention, so "2/11/2026"
+// is 2 November, never 11 February.
+const SALE_DATE_PATTERNS = [
+  new RegExp("\\b(?:on\\s+)?(?:last|this)\\s+(?:" + WEEKDAY_PATTERN + ")\\b", "g"),
+  new RegExp("\\b(?:on\\s+)?(?:" + WEEKDAY_PATTERN + ")\\b", "g"),
+  new RegExp("\\b(?:on\\s+)?\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:" + MONTH_PATTERN + ")\\b", "g"),
+  new RegExp("\\b(?:on\\s+)?(?:" + MONTH_PATTERN + ")\\s+\\d{1,2}(?:st|nd|rd|th)?\\b", "g"),
+  /\b(?:on\s+)?\d{4}-\d{2}-\d{2}\b/g,
+  /\b(?:on\s+)?\d{1,2}\/\d{1,2}\/\d{4}\b/g,
+  /\b(?:on\s+)?\d{1,2}-\d{1,2}-\d{4}\b/g,
+];
 
 // Payment methods the owner states in words. Only set when stated;
 // never invented.
@@ -848,6 +899,11 @@ export function parseSaleMention(text) {
   rest = rest.replace(/^(great|thanks|thank you|ok|okay|good|nice|hello|hi|hey)[,!\s]+/, "");
   // Time words out first: they pollute product and customer names.
   rest = rest.replace(SALE_TIME_WORDS, " ").replace(/\s+/g, " ").trim();
+  // Date phrases out next, for the same reason: a date can never be
+  // part of a product name, so "2 laptops on Friday" keeps 2 Laptops
+  // and "what did i sold on friday" keeps no product at all.
+  for (const re of SALE_DATE_PATTERNS) rest = rest.replace(re, " ");
+  rest = rest.replace(/\s+/g, " ").trim();
   // An unnamed buyer is a walk-in, never a name: strip the buyer words
   // before the customer and product are read, so "someone bought 5
   // fvamail" leaves the product "5 fvamail" and no customer.
@@ -959,11 +1015,12 @@ export function parseSaleMention(text) {
     }
   }
   // A question is never a product: drop any item made only of question
-  // words ("what did we sold today?" leaves "what did we"), and when a
+  // words plus date words ("what did we sold today?" leaves "what did
+  // we", "what did i sold on friday?" leaves "what did on"), and when a
   // question leaves nothing, return null so it never reaches the product
   // search. A bare "record a sale" is not a question, so its empty items
   // still flow to the executor's one targeted question.
-  const keptItems = items.filter((it) => !isQuestionWordsOnly(it.product));
+  const keptItems = items.filter((it) => !isQuestionOrDateOnly(it.product));
   if (keptItems.length !== items.length) {
     if (!keptItems.length && isQuestionText(t)) return null;
     items.splice(0, items.length, ...keptItems);
@@ -1385,35 +1442,128 @@ export function parseProjectReport(text) {
 // "Create project Shop Renovation", "New business project Ada Store to sell food".
 // Returns { name, type, goal } with whatever was found; missing fields are
 // asked one at a time by the executor's interview gate.
+// The name is taken from the raw (original-case) text, never lowercased
+// and never title-cased: "GOU project" stays "GOU project" and "gou
+// project" stays "gou project". Only the type and goal detection use
+// the normalized text. Name-introducing filler ("with the name",
+// "name it", "named", "called", ...) is stripped FIRST, so it can
+// never survive into the name the way "With Name Gou" and "Name It
+// Gou" did live (round 5 code lowercased everything, then title-cased
+// the leftover filler).
 export function parseProjectPlan(text) {
+  const raw = String(text || "").trim();
   const t = normalizeFastText(text);
   if (!/\b(create|new|start|plan)\b/.test(t) || !/\bproject\b/.test(t)) return null;
-  let rest = t;
   let type = "";
   for (const pt of PROJECT_TYPES) {
-    if (new RegExp("\\b" + pt + "\\b").test(rest)) { type = pt; break; }
+    if (new RegExp("\\b" + pt + "\\b").test(t)) { type = pt; break; }
   }
+  // Goal first, from the raw text with the same two shapes the old
+  // normalized parse used ("... to <goal>", "... goal is <goal>"), so
+  // the goal keeps the words as typed. The goal span is cut out of the
+  // raw rest before the name is read.
+  let rest = raw;
   let goal = "";
-  const goalMatch = rest.match(/\bto\s+([a-z][a-z' ]+?)\s*$/);
+  const goalMatch = rest.match(/\bto\s+([a-z][a-z' ]+?)\s*$/i);
   if (goalMatch) {
     goal = goalMatch[1].trim();
     rest = rest.replace(goalMatch[0], " ");
   } else {
-    const goalWord = rest.match(/\bgoal\s*(is|:)?\s*(.+)$/);
+    const goalWord = rest.match(/\bgoal\s*(is|:)?\s*(.+)$/i);
     if (goalWord) {
       goal = goalWord[2].trim();
       rest = rest.replace(goalWord[0], " ");
     }
   }
+  // Name-introducing filler, longest first, so "with the name" is gone
+  // before the bare words are read. Case-insensitive; the name itself
+  // keeps its original capitals.
   rest = rest
-    .replace(/\b(create|new|start|plan|project|a|an|the|please|kindly|business|event|charity|construction|custom)\b/g, " ")
+    .replace(/\bwith\s+the\s+name\b/gi, " ")
+    .replace(/\bwith\s+name\b/gi, " ")
+    .replace(/\bname\s+it\b/gi, " ")
+    .replace(/\bname\s+is\b/gi, " ")
+    .replace(/\bname\s*:/gi, " ")
+    .replace(/\bnamed\b/gi, " ")
+    .replace(/\bcalled\b/gi, " ")
+    .replace(/\bcall\s+it\b/gi, " ")
+    .replace(/\btitled\b/gi, " ");
+  // The word "project" is stripped exactly ONCE: the one that named the
+  // intent. Stripping it everywhere would eat it out of the name
+  // itself ("GOU project" would become "GOU").
+  rest = rest.replace(/\bproject\b/i, " ");
+  rest = rest
+    .replace(/\b(create|new|start|plan|a|an|the|please|kindly|business|event|charity|construction|custom)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
     .trim();
   const name = rest;
   if (!name && !type && !goal) return null;
-  return { name: name ? titleCaseName(name) : "", type, goal };
+  return { name, type, goal };
+}
+
+// Project interview continuation: the executor asks one missing field
+// at a time ("What type of project is "X"? Choose one: ..." then
+// "What is the goal of "X"? ..."), but the fast path kept no pending
+// state, so a bare "Business" answer fell to the model and failed.
+// This step reads the last bot question from the recent history and
+// answers it deterministically, never via the model:
+// - a bare project-type word after the type question returns the
+//   create action with that type, so the executor asks for the goal;
+// - any message after the goal question IS the goal, with the name
+//   from the question and the type from the earlier bare-type turn,
+//   so the executor proceeds to the dry-run proposal.
+// Confirm-first is unchanged: both steps only ever return an action,
+// which the executor dry-runs into a proposal card. A message that is
+// itself a new project creation is a fresh intent, not a goal answer.
+const PROJECT_TYPE_QUESTION_RE = /What type of project is "([^"]+)"\? Choose one: construction, event, charity, business, custom\./;
+const PROJECT_GOAL_QUESTION_RE = /What is the goal of "([^"]+)"\? Tell me what success should look like\./;
+
+export function findProjectInterviewAnswer(text, history) {
+  const hist = history || [];
+  let lastAssistant = null;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i];
+    if (h && h.role === "assistant" && typeof h.content === "string") {
+      lastAssistant = h.content;
+      break;
+    }
+  }
+  if (!lastAssistant) return null;
+  const typeQ = lastAssistant.match(PROJECT_TYPE_QUESTION_RE);
+  if (typeQ) {
+    const answer = normalizeFastText(text).replace(/[.!?]+$/, "").trim();
+    if (!PROJECT_TYPES.includes(answer)) return null;
+    return { kind: "action", tool: "create_project_plan", params: { name: typeQ[1], type: answer, goal: "" } };
+  }
+  const goalQ = lastAssistant.match(PROJECT_GOAL_QUESTION_RE);
+  if (goalQ) {
+    // A fresh creation sentence is a new project, not this one's goal.
+    if (parseProjectPlan(text)) return null;
+    const goal = String(text || "").trim();
+    if (!goal) return null;
+    // The type is the bare type word the user gave after the type
+    // question. Without it the executor asks for the type again, so
+    // the interview still never falls to the model.
+    let type = "";
+    for (let i = 0; i < hist.length; i++) {
+      const h = hist[i];
+      if (h && h.role === "assistant" && typeof h.content === "string" && PROJECT_TYPE_QUESTION_RE.test(h.content)) {
+        for (let j = i + 1; j < hist.length; j++) {
+          const u = hist[j];
+          if (u && u.role === "user" && typeof u.content === "string") {
+            const w = normalizeFastText(u.content).replace(/[.!?]+$/, "").trim();
+            if (PROJECT_TYPES.includes(w)) type = w;
+            break;
+          }
+        }
+        break;
+      }
+    }
+    return { kind: "action", tool: "create_project_plan", params: { name: goalQ[1], type, goal } };
+  }
+  return null;
 }
 
 // "Add milestone Buy shelves to project Shop Renovation",
@@ -1546,6 +1696,9 @@ export function classifyReadIntent(text) {
   if (includesAny(t, ["end of day", "day summary", "today's summary", "todays summary", "how did we do today", "close of day", "end of day summary"])) return "eod";
   if (includesAny(t, ["reminders due", "reminders", "what reminders", "any reminders", "remind me list", "due reminders", "what is due", "whats due"])) return "reminders";
   if (/\breminder\b/.test(t) && /\b(done|mark|complete|finished)\b/.test(t)) return "reminder_done";
+  // Day report: "Get me yesterday report" is a report for one day,
+  // never the model. The day is resolved by the step, from the words.
+  if (includesAny(t, ["get me yesterday report", "get me today's report", "get me todays report", "show me yesterday's report", "show me yesterday report", "give me the report for yesterday", "give me yesterday's report", "yesterday's report", "report for yesterday", "report for today", "today's report", "todays report"])) return "dayreport";
   // Business advice and planning: snapshot-based, never the model and
   // never Support. "Let's plan" on its own is business planning, not a
   // project to create: when the message also names a project, the
@@ -1560,6 +1713,11 @@ export function classifyReadIntent(text) {
   // price. Runs before the stock read on purpose: "what is my stock
   // worth" contains the word "stock" and would otherwise list stock.
   if (includesAny(t, ["how much total does i have in products", "how much total in products", "total in products", "inventory value", "total stock value", "stock value", "how much does everything in store worth", "everything in store worth", "what is my stock worth", "how much is my stock worth", "total value of my products", "what are my products worth", "how much are my products worth", "value of my products", "products worth", "everything in the store worth", "what is everything worth"])) return "inventoryvalue";
+  // Yes/no existence questions ("Do I have staff?"): answered from
+  // the snapshot counts. Runs before the debtors read on purpose:
+  // "do i have any debtors" contains the word "debtors" and would
+  // otherwise list them instead of answering yes or no.
+  if (includesAny(t, ["do i have staff", "do we have staff", "do i have any staff", "do we have any staff", "do i have customers", "do we have customers", "do i have any customers", "do we have any customers", "do i have products", "do we have products", "do i have any products", "do we have any products", "do i have debtors", "do we have debtors", "do i have any debtors", "do we have any debtors", "do i have sales", "do we have sales", "do i have any sales", "do we have any sales", "do i have projects", "do we have projects", "do i have any projects", "do we have any projects", "do i have expenses", "do we have expenses", "do i have any expenses", "do we have any expenses"])) return "yesno";
   if (includesAny(t, ["who owes", "who owe", "who dey owe", "who is owing", "who is owed", "debtors", "customers owing", "who owes me", "who owes us", "who still owes", "anyone owing", "who has not paid", "who hasn't paid", "unpaid customers"])) return "debtors";
   if (includesAny(t, ["low stock", "running low", "running out", "out of stock", "low on stock", "almost finished", "almost out"])) return "lowstock";
   if (includesAny(t, ["stock", "inventory", "how much stock", "what do we have in stock", "check stock", "stock levels", "stock level"])) return "stock";
@@ -1720,6 +1878,217 @@ export function formatYesterdaySales(snap, currency) {
   const count = Number(y.count) || 0;
   if (!count) return "No sales yesterday.";
   return `Sales yesterday: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`;
+}
+
+// ---------------------------------------------------------------------------
+// Dates: "on Friday", "on 02 of November", "last Friday", "Nov 2".
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 3600 * 1000;
+
+// A real calendar date, or null when the day does not exist ("30
+// February"). Returns YYYY-MM-DD.
+function isoDateFromParts(y, m, d) {
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return dt.toISOString().slice(0, 10);
+}
+
+export function addDaysISO(dateStr, n) {
+  const ms = Date.parse(String(dateStr || "").slice(0, 10) + "T00:00:00Z");
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms + n * DAY_MS).toISOString().slice(0, 10);
+}
+
+// "Friday, 6 November 2026": the label every date answer shows.
+export function dayLabel(dateStr) {
+  const ms = Date.parse(String(dateStr || "").slice(0, 10) + "T00:00:00Z");
+  if (!Number.isFinite(ms)) return String(dateStr || "");
+  const dt = new Date(ms);
+  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  return `${weekdays[dt.getUTCDay()]}, ${dt.getUTCDate()} ${months[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`;
+}
+
+// The date a message asks about, resolved against the business date
+// (today in the business timezone, YYYY-MM-DD). Returns
+// { date, label, future, relative } or null when the message names no
+// date. Relative is "today" or "yesterday" only when those exact words
+// were used, so a weekday that happens to fall on today is not one.
+// "last <weekday>" is the most recent one strictly before today;
+// "this <weekday>" is that weekday of the current Monday to Sunday
+// week; a bare weekday is the most recent one, today included. An
+// explicit date with no year takes the business date's year, and
+// DD/MM/YYYY follows the Nigerian convention (2/11/2026 is 2 November).
+export function parseDateMention(text, businessDate) {
+  const t = normalizeFastText(text);
+  const base = String(businessDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
+  const [by, bm, bd] = base.split("-").map(Number);
+  const baseMs = Date.UTC(by, bm - 1, bd);
+  const baseIdx = (new Date(baseMs).getUTCDay() + 6) % 7;
+  const make = (date, relative) => {
+    if (!date) return null;
+    return { date, label: dayLabel(date), future: date > base, relative: relative || null };
+  };
+  if (/\btoday\b/.test(t)) return make(base, "today");
+  if (/\byesterday\b/.test(t)) return make(addDaysISO(base, -1), "yesterday");
+  let m = t.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (m) return make(isoDateFromParts(Number(m[1]), Number(m[2]), Number(m[3])), null);
+  m = t.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+  if (m) return make(isoDateFromParts(Number(m[3]), Number(m[2]), Number(m[1])), null);
+  m = t.match(/\b(\d{1,2})-(\d{1,2})-(\d{4})\b/);
+  if (m) return make(isoDateFromParts(Number(m[3]), Number(m[2]), Number(m[1])), null);
+  m = t.match(new RegExp("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTH_PATTERN + ")\\b"));
+  if (m) return make(isoDateFromParts(by, MONTH_NUMBERS[m[2]], Number(m[1])), null);
+  m = t.match(new RegExp("\\b(" + MONTH_PATTERN + ")\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b"));
+  if (m) return make(isoDateFromParts(by, MONTH_NUMBERS[m[1]], Number(m[2])), null);
+  m = t.match(new RegExp("\\b(?:(last|this)\\s+)?(" + WEEKDAY_PATTERN + ")\\b"));
+  if (m) {
+    const wdIdx = WEEKDAY_NAMES.indexOf(m[2]);
+    if (m[1] === "last") {
+      const offset = ((baseIdx - wdIdx + 6) % 7) + 1;
+      return make(new Date(baseMs - offset * DAY_MS).toISOString().slice(0, 10), null);
+    }
+    if (m[1] === "this") {
+      const mondayMs = baseMs - baseIdx * DAY_MS;
+      return make(new Date(mondayMs + wdIdx * DAY_MS).toISOString().slice(0, 10), null);
+    }
+    const offset = (baseIdx - wdIdx + 7) % 7;
+    return make(new Date(baseMs - offset * DAY_MS).toISOString().slice(0, 10), null);
+  }
+  return null;
+}
+
+// Sales on one named day, from the snapshot's per-day map. Returns
+// null when the map is absent, so the caller falls through instead of
+// guessing. A day with no sales says so plainly; a future day and a
+// day older than the 31-day map each get their own plain line.
+export function formatSalesOnDate(snap, currency, date, label) {
+  const byDay = snap && snap.salesByDay;
+  if (!byDay || typeof byDay !== "object") return null;
+  const niceLabel = label || (date ? dayLabel(date) : String(date || ""));
+  const businessDate = snap && snap.businessDate;
+  if (businessDate && date > businessDate) {
+    return `${niceLabel} has not happened yet. Ask about today or an earlier day.`;
+  }
+  if (businessDate) {
+    const earliest = addDaysISO(businessDate, -30);
+    if (earliest && date < earliest) {
+      return `I can only look back 31 days, so I do not have sales for ${niceLabel}. Ask about a more recent day.`;
+    }
+  }
+  const entry = byDay[date] || null;
+  const total = entry ? Number(entry.total) || 0 : 0;
+  const count = entry ? Number(entry.count) || 0 : 0;
+  if (!count) return `No sales on ${niceLabel}.`;
+  const items = (entry.items || []).slice(0, 20);
+  const lines = items.map((it) => `- ${Number(it.qty) || 0} ${it.product}: ${formatMoney(it.amount, currency)}`);
+  lines.push(`Total: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`);
+  return `Sales on ${niceLabel}:\n${lines.join("\n")}`;
+}
+
+// One day's report: sales, expenses, profit, change given, best
+// sellers and new debts. Returns null when the per-day map is absent,
+// so the caller falls through instead of guessing. A figure the
+// snapshot does not carry is stated plainly, never invented.
+export function formatDayReport(snap, currency, day) {
+  const byDay = snap && snap.salesByDay;
+  if (!byDay || typeof byDay !== "object") return null;
+  const businessDate = snap && snap.businessDate;
+  if (!businessDate || !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return null;
+  const isYesterday = day === "yesterday";
+  const date = isYesterday ? addDaysISO(businessDate, -1) : businessDate;
+  const entry = byDay[date] || { total: 0, count: 0, changeGiven: 0, items: [], debts: [] };
+  const expenses = isYesterday ? snap.expensesYesterday : snap.expensesToday;
+  const salesTotal = Number(entry.total) || 0;
+  const salesCount = Number(entry.count) || 0;
+  const dayWord = isYesterday ? "yesterday" : "today";
+  const lines = [];
+  lines.push(`${isYesterday ? "Yesterday" : "Today"}'s report, ${dayLabel(date)}:`);
+  lines.push(salesCount
+    ? `Sales: ${formatMoney(salesTotal, currency)} across ${salesCount} ${salesCount === 1 ? "sale" : "sales"}.`
+    : `Sales: no sales ${dayWord}.`);
+  if (expenses && typeof expenses.total === "number") {
+    const eTotal = Number(expenses.total) || 0;
+    const eCount = Number(expenses.count) || 0;
+    lines.push(eCount
+      ? `Expenses: ${formatMoney(eTotal, currency)} across ${eCount} ${eCount === 1 ? "expense" : "expenses"}.`
+      : `Expenses: no expenses ${dayWord}.`);
+    lines.push(`Profit: ${formatMoney(Math.round((salesTotal - eTotal) * 100) / 100, currency)} (sales minus expenses).`);
+  } else {
+    lines.push(`Expenses: I do not have that figure for ${dayWord}.`);
+    lines.push("Profit: I do not have the expenses figure, so I cannot work out the profit.");
+  }
+  lines.push(`Change given: ${formatMoney(Number(entry.changeGiven) || 0, currency)}.`);
+  const best = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 3);
+  lines.push(best.length
+    ? `Best sellers: ${best.map((it) => `${it.product} (${Number(it.qty) || 0} sold)`).join(", ")}.`
+    : "Best sellers: none yet.");
+  const debts = entry.debts || [];
+  lines.push(debts.length
+    ? `New debts: ${debts.map((d) => `${d.customer} owes ${formatMoney(d.amount, currency)}`).join("; ")}.`
+    : "New debts: none.");
+  return lines.join("\n");
+}
+
+// A staff count the owner stated in the recent chat, as a number, or
+// null when none was stated. Digits and the words one to ten both
+// count; the most recent user turn wins.
+export function findMentionedStaffCount(history) {
+  const turns = (history || []).filter((h) => h && h.role === "user" && typeof h.content === "string");
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const m = normalizeFastText(turns[i].content).match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+staff\b/);
+    if (m) {
+      const c = m[1];
+      return /^\d+$/.test(c) ? Number(c) : NUMBER_WORD_ONES[c];
+    }
+  }
+  return null;
+}
+
+// Yes/no existence questions ("Do I have staff?"), answered from the
+// snapshot counts and stating the count, never just yes or no. For
+// staff only, a count the owner stated in the recent chat that differs
+// from the records is surfaced instead of guessed. Returns null when
+// the snapshot does not carry the count, so the caller falls through.
+export function formatYesNoCount(text, history, snap) {
+  const t = normalizeFastText(text);
+  let thing = null;
+  if (/\bstaff\b/.test(t)) thing = "staff";
+  else if (/\bcustomers?\b/.test(t)) thing = "customers";
+  else if (/\bproducts?\b/.test(t)) thing = "products";
+  else if (/\bdebtors?\b/.test(t)) thing = "debtors";
+  else if (/\bsales?\b/.test(t)) thing = "sales";
+  else if (/\bprojects?\b/.test(t)) thing = "projects";
+  else if (/\bexpenses?\b/.test(t)) thing = "expenses";
+  if (!thing) return null;
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const counts = {
+    staff: num(snap && snap.staffCount),
+    customers: num(snap && snap.customerCount),
+    products: Array.isArray(snap && snap.products) ? snap.products.length : null,
+    debtors: Array.isArray(snap && snap.debtors) ? snap.debtors.length : null,
+    sales: num(snap && snap.salesYear && snap.salesYear.count),
+    projects: Array.isArray(snap && snap.projects) ? snap.projects.length : null,
+    expenses: num(snap && snap.expensesYear && snap.expensesYear.count),
+  };
+  const n = counts[thing];
+  if (n === null || n === undefined) return null;
+  const singular = { staff: "staff member", customers: "customer", products: "product", debtors: "debtor", sales: "sale", projects: "project", expenses: "expense" }[thing];
+  const plural = { staff: "staff members", customers: "customers", products: "products", debtors: "debtors", sales: "sales", projects: "projects", expenses: "expenses" }[thing];
+  let out = n === 0
+    ? `No, you have no ${plural}.`
+    : `Yes, you have ${n} ${n === 1 ? singular : plural}.`;
+  if (thing === "staff") {
+    const mentioned = findMentionedStaffCount(history);
+    if (mentioned !== null && mentioned !== n) {
+      out += ` The records show ${n}, but you mentioned ${mentioned}. Which is right?`;
+    }
+  }
+  return out;
 }
 
 export function formatCountProjects(snap) {
@@ -2506,6 +2875,32 @@ export function resolveFastPath(message, history, snap, currency) {
     return { kind: "action", tool: "add_expense", params: withExpenseCategory({ amount: pending.amount, description: pending.description }) };
   }
 
+  // 1b. Project interview continuation: answer the executor's own
+  // type or goal question from the recent history, deterministically.
+  // A bare type word after the type question, or any message after
+  // the goal question, continues the interview instead of falling
+  // to the model.
+  const interview = findProjectInterviewAnswer(text, history);
+  if (interview) return interview;
+
+  // 1c. Sales on a named day: "What did I sell on Friday?", "What did
+  // I sell on 2 November?" A date question must never reach the
+  // payment or sale parsers: they would read the date as a product
+  // name. Today and yesterday, named by those exact words, stay on
+  // step 6, which already owns those phrasings; a weekday that happens
+  // to fall on today or yesterday still answers here, because step 6
+  // only owns the words "today" and "yesterday". When the per-day map
+  // is absent the formatter returns null and the message falls through,
+  // never a guessed figure.
+  const dateMention = parseDateMention(text, snap && snap.businessDate);
+  if (dateMention && !dateMention.relative) {
+    const isDateQuestion = /^\s*(what|how|show|list|tell)\b/.test(t) || /\?\s*$/.test(t);
+    if (isDateQuestion && /\b(sell|sold|sale|sales)\b/.test(t)) {
+      const dated = formatSalesOnDate(snap, currency, dateMention.date, dateMention.label);
+      if (dated !== null) return { kind: "reply", text: dated };
+    }
+  }
+
   // 2. Full-balance payment: "Favour have paid the full balance he owe
   // now", "Favour paid in full", "Favour cleared his balance". The
   // amount is the snapshot balance, never asked for, never invented.
@@ -2897,6 +3292,15 @@ export function resolveFastPath(message, history, snap, currency) {
   if (read === "yesterday") {
     const y = formatYesterdaySales(snap, currency);
     if (y !== null) return { kind: "reply", text: y };
+  }
+  if (read === "dayreport") {
+    const day = /\byesterday\b/.test(t) ? "yesterday" : "today";
+    const report = formatDayReport(snap, currency, day);
+    if (report !== null) return { kind: "reply", text: report };
+  }
+  if (read === "yesno") {
+    const answer = formatYesNoCount(text, history, snap);
+    if (answer !== null) return { kind: "reply", text: answer };
   }
   if (read === "month") return { kind: "reply", text: formatMonthSales(snap, currency) };
   if (read === "monthexpenses") return { kind: "reply", text: formatMonthExpenses(snap, currency) };

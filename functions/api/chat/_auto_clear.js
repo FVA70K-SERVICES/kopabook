@@ -77,3 +77,72 @@ export async function clearExpiredMergedChat(db, sessionId) {
     // Chat must never break because cleanup failed.
   }
 }
+
+// Login clear (round 6, Fortune 2026-11-06): on any login the Ask Kopa
+// AI chat starts fresh and never first shows old questions. The widget
+// calls POST /api/chat/clear-on-login with the session id it holds in
+// localStorage, and this helper wipes that session's thread. Best
+// effort like everything else here: it never throws, and a failure
+// leaves the thread alone instead of breaking the login.
+// Guard (mirrors the round-5 manual clear in chat.js, stricter on one
+// point): skip when a person is on the chat. The manual clear blocks
+// only on handled_by = 'human' or an 'agent' message, because a bare
+// needs_human flag can be set by ordinary AI-side words. The login
+// clear is background cleanup, so it errs the safe way and also skips
+// on needs_human = 1 and on any open support case for the session.
+// Only chat_messages rows for this session are deleted, nothing else:
+// no support table, no business record, no other session.
+export async function clearAskAiThreadOnLogin(db, sessionId) {
+  try {
+    if (!sessionId) return { cleared: 0, skipped: 'missing_session' };
+    const sess = await db
+      .prepare('SELECT site_id, needs_human, handled_by FROM chat_sessions WHERE id = ?')
+      .bind(sessionId)
+      .first()
+      .catch(() => null);
+    if (!sess) return { cleared: 0, skipped: 'unknown_session' };
+    if (sess.site_id !== 'kopabook') return { cleared: 0, skipped: 'wrong_site' };
+    let human = Number(sess.needs_human || 0) === 1 || sess.handled_by === 'human';
+    if (!human) {
+      try {
+        const agentMsg = await db
+          .prepare("SELECT id FROM chat_messages WHERE session_id = ? AND sender = 'agent' LIMIT 1")
+          .bind(sessionId)
+          .first();
+        human = !!agentMsg;
+      } catch (e) { /* if we cannot tell, the case check below still guards */ }
+    }
+    if (!human) {
+      try {
+        const openCase = await db
+          .prepare("SELECT id FROM support_cases WHERE session_id = ? AND status = 'open' LIMIT 1")
+          .bind(sessionId)
+          .first();
+        human = !!openCase;
+      } catch (e) { /* if we cannot tell, allow the clear: the case table itself is never touched */ }
+    }
+    if (human) return { cleared: 0, skipped: 'human' };
+    // Count first: D1 run() meta.changes is not relied on, so the
+    // audited count is exact even where the driver omits it.
+    let counted = null;
+    try {
+      const rows = await db
+        .prepare('SELECT id FROM chat_messages WHERE session_id = ?')
+        .bind(sessionId)
+        .all();
+      counted = (rows.results || []).length;
+    } catch (e) { counted = null; }
+    const res = await db
+      .prepare('DELETE FROM chat_messages WHERE session_id = ?')
+      .bind(sessionId)
+      .run();
+    let cleared = counted;
+    if (cleared === null) {
+      const changes = res && res.meta ? Number(res.meta.changes) : NaN;
+      cleared = Number.isFinite(changes) ? changes : 0;
+    }
+    return { cleared, skipped: null };
+  } catch (e) {
+    return { cleared: 0, skipped: 'error' };
+  }
+}
