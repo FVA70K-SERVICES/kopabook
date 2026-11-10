@@ -1991,6 +1991,13 @@
     // so re-derive the tab inset here too — the invariant is that after
     // showChatUI the inset always matches tab visibility.
     applyTabInset();
+    // Round 8: showChatUI also re-asserts the narrow sheet. The panel
+    // can reach here without openChat (a login clear while it is open
+    // restarts the session in place), and the welcome bubble paints
+    // right after, so the sheet geometry must hold here too, not only
+    // on open and resize. At wider widths this clears the inline
+    // styles, exactly like openChat does.
+    applyNarrowSheet();
   }
 
   // ---- Clear on login (round 6) ----

@@ -310,15 +310,23 @@ const PLATFORM_SIGNALS = [
 // Business planning is Ask Kopa AI's job, not Kopa Support's: "let's plan",
 // "plan to improve the business", "business planning for next month".
 // The bare word "plan" must not deflect those. A subscription tier
-// ("my plan", "the pro plan", "what plan am I on", "how much does a plan
-// cost") still deflects, so the exemption never applies when "plan" is
-// named as a tier.
+// ("my plan", "the pro plan", "how much does a plan cost") still
+// deflects, so the exemption never applies when "plan" is named as a
+// tier. The one exception is the current-plan question ("what plan am
+// I on"): Ask Kopa AI answers that one itself from the snapshot tier,
+// so it is exempted below and never deflects.
 const BUSINESS_PLANNING_WORDS = /\b(improve|improvement|grow|growth|business|stock|sales?|profit|revenue|customers?|expenses?|marketing|strategy|debts?|next month|this month)\b/;
 const SUBSCRIPTION_PLAN = /\b(my|your|the|this|that|a|an|what|which)\s+(pro\s+|starter\s+|solo\s+|free\s+)?plans?\b/;
+// The one plan question Ask Kopa AI answers itself: which plan this
+// business is on. The tier comes from the snapshot inside Ask Kopa AI,
+// so it never deflects to Kopa Support. Every other plan question
+// (change plan, plan prices, cancel plan) still deflects.
+const CURRENT_PLAN_QUESTION = /\bwhat (plan|tier|subscription) (am i|are we) on\b|\bwhich (plan|tier) (am i|are we) on\b|\bwhat is my (plan|tier|subscription)\b|\bam i on (the )?(free|starter|solo|pro)( plan| tier)?\b|\bwhich plan do i have\b|\bmy current (plan|tier)\b/;
 
 export function isPlatformQuestion(message) {
   const lower = String(message || '').toLowerCase();
   if (isBusinessActionCommand(lower) && !/kopabook|plan|subscription|upgrade|pricing/.test(lower)) return false;
+  if (CURRENT_PLAN_QUESTION.test(lower)) return false;
   const isBusinessPlanning =
     /\blet'?s plan\b/.test(lower) ||
     /\blet us plan\b/.test(lower) ||

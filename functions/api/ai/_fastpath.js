@@ -828,7 +828,7 @@ const WEEKDAY_PATTERN = "monday|tuesday|wednesday|thursday|friday|saturday|sunda
 // A bare number is a date word too, but it never triggers a drop on
 // its own: product names like "Product 1" reduce to a bare number
 // after the filler strip, and that number is the product.
-const DATE_WORDS = new Set([...WEEKDAY_NAMES, ...Object.keys(MONTH_NUMBERS), "on", "of"]);
+const DATE_WORDS = new Set([...WEEKDAY_NAMES, ...Object.keys(MONTH_NUMBERS), "on", "of", "last", "this", "next", "month"]);
 
 export function isQuestionOrDateOnly(product) {
   const words = String(product || "")
@@ -868,6 +868,13 @@ const SALE_DATE_PATTERNS = [
   /\b(?:on\s+)?\d{4}-\d{2}-\d{2}\b/g,
   /\b(?:on\s+)?\d{1,2}\/\d{1,2}\/\d{4}\b/g,
   /\b(?:on\s+)?\d{1,2}-\d{1,2}-\d{4}\b/g,
+  // Month phrases are never part of a product or customer name either:
+  // "what did i sold last month" keeps no product at all, and "i sold
+  // 2 laptops in october" keeps 2 Laptops. A leading "in" goes with
+  // the month, so no dangling "in" is left behind.
+  new RegExp("\\b(?:in\\s+)?(?:last|this|next)\\s+month\\b", "g"),
+  new RegExp("\\b(?:in\\s+)?(?:" + MONTH_PATTERN + ")\\s+\\d{4}\\b", "g"),
+  new RegExp("\\b(?:in\\s+)?(?:" + MONTH_PATTERN + ")\\b", "g"),
 ];
 
 // Payment methods the owner states in words. Only set when stated;
@@ -1344,8 +1351,20 @@ export function parseBalanceQuery(text) {
 
 export function parseDraftDebtor(text) {
   const t = normalizeFastText(text);
-  if (!/\b(draft|write|message|remind|reminder|chase|follow up)\b/.test(t)) return null;
-  if (!/\b(to|for)\b/.test(t) && !/\bremind\b/.test(t)) return null;
+  if (!/\b(draft|write|message|text|remind|reminder|chase|follow up)\b/.test(t)) return null;
+  if (!/\b(to|for)\b/.test(t) && !/\bremind\b/.test(t)) {
+    // A bare "Message Favour" / "Text Ada" names the customer right
+    // after the verb, with no "to" or "for". Anything longer than a
+    // name is not one.
+    const bare = t.match(/^\s*(message|text|draft|write)\s+([a-z][a-z' ]+?)\s*[.!?]*$/);
+    if (!bare) return null;
+    const words = bare[2].trim().split(/\s+/);
+    if (words.length > 4) return null;
+    // "Message me the sales" is not a draft to a customer called
+    // "Me The Sales": a name never starts with a pronoun or a thing.
+    if (["me", "us", "it", "that", "this", "him", "her", "them", "my", "our", "sales", "sale", "expense", "payment", "reminder"].includes(words[0])) return null;
+    return { customer_name: titleCaseName(bare[2].trim()), tone: "polite" };
+  }
   let tone = "polite";
   if (/\b(final|last warning|last reminder)\b/.test(t)) tone = "final";
   else if (/\b(firm|strong|serious|strict)\b/.test(t)) tone = "firm";
@@ -1699,6 +1718,17 @@ export function classifyReadIntent(text) {
   // Day report: "Get me yesterday report" is a report for one day,
   // never the model. The day is resolved by the step, from the words.
   if (includesAny(t, ["get me yesterday report", "get me today's report", "get me todays report", "show me yesterday's report", "show me yesterday report", "give me the report for yesterday", "give me yesterday's report", "yesterday's report", "report for yesterday", "report for today", "today's report", "todays report"])) return "dayreport";
+  // Month report: "Get me last month report" is a report for one
+  // month, same shape as the day report. The month is resolved by the
+  // step, from the words.
+  if (includesAny(t, ["get me last month report", "get me this month report", "get me the report for last month", "get me the report for this month", "show me last month's report", "show me last month report", "show me this month's report", "show me this month report", "give me last month's report", "give me the report for last month", "last month's report", "last month report", "this month's report", "this month report", "report for last month", "report for this month"])) return "monthreport";
+  // A named-month report: "Get me October report", "Report for
+  // October 2026". The month is resolved by the step.
+  if (/report\s+(for\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b/.test(t)) return "monthreport";
+  // The plan this business is on: the snapshot tier answers it inside
+  // Ask Kopa AI, never Kopa Support. Runs before the advice check on
+  // purpose: "what plan am I on" contains the word "plan".
+  if (/what (plan|tier|subscription) (am i|are we) on\b/.test(t) || /which (plan|tier) (am i|are we) on\b/.test(t) || /\bwhat is my (plan|tier|subscription)\b/.test(t) || /\bam i on (the )?(free|starter|solo|pro)( plan| tier)?\b/.test(t) || /\bwhich plan do i have\b/.test(t) || /\bmy current (plan|tier)\b/.test(t)) return "myplan";
   // Business advice and planning: snapshot-based, never the model and
   // never Support. "Let's plan" on its own is business planning, not a
   // project to create: when the message also names a project, the
@@ -1712,14 +1742,52 @@ export function classifyReadIntent(text) {
   // Inventory value: what everything in store is worth at selling
   // price. Runs before the stock read on purpose: "what is my stock
   // worth" contains the word "stock" and would otherwise list stock.
-  if (includesAny(t, ["how much total does i have in products", "how much total in products", "total in products", "inventory value", "total stock value", "stock value", "how much does everything in store worth", "everything in store worth", "what is my stock worth", "how much is my stock worth", "total value of my products", "what are my products worth", "how much are my products worth", "value of my products", "products worth", "everything in the store worth", "what is everything worth"])) return "inventoryvalue";
+  // "At cost" questions are excluded here: they go to the stockcost
+  // read below, which answers honestly that no cost figure exists.
+  // Without the exclusion, "how much is my stock worth" would swallow
+  // "how much is my stock worth at cost".
+  if (!/\bat cost\b/.test(t) && includesAny(t, ["how much total does i have in products", "how much total in products", "total in products", "inventory value", "total stock value", "stock value", "how much does everything in store worth", "everything in store worth", "what is my stock worth", "how much is my stock worth", "total value of my products", "what are my products worth", "how much are my products worth", "value of my products", "products worth", "everything in the store worth", "what is everything worth"])) return "inventoryvalue";
+  // Stock value at cost: there is no cost figure, so this is an honest
+  // no-cost answer plus the selling-price value, never the plain
+  // inventory value. Runs before the inventory value read would swallow
+  // it: "worth at cost" contains "stock worth".
+  if (/\bworth at cost\b/.test(t) || /\bat cost\b/.test(t) && /\bstock\b/.test(t)) return "stockcost";
+  // What the owner owes suppliers: never the debtors list, which is
+  // what customers owe the business, the opposite direction.
+  if (includesAny(t, ["what are my debts", "what debts do i have", "what debts do we have", "how much do i owe suppliers", "how much do we owe suppliers", "how much do i owe my suppliers", "how much do i owe the suppliers", "do i owe suppliers", "my supplier debts", "supplier debts", "what do i owe suppliers"])) return "mydebts";
   // Yes/no existence questions ("Do I have staff?"): answered from
   // the snapshot counts. Runs before the debtors read on purpose:
   // "do i have any debtors" contains the word "debtors" and would
   // otherwise list them instead of answering yes or no.
   if (includesAny(t, ["do i have staff", "do we have staff", "do i have any staff", "do we have any staff", "do i have customers", "do we have customers", "do i have any customers", "do we have any customers", "do i have products", "do we have products", "do i have any products", "do we have any products", "do i have debtors", "do we have debtors", "do i have any debtors", "do we have any debtors", "do i have sales", "do we have sales", "do i have any sales", "do we have any sales", "do i have projects", "do we have projects", "do i have any projects", "do we have any projects", "do i have expenses", "do we have expenses", "do i have any expenses", "do we have any expenses"])) return "yesno";
+  // Who owes the most, and the total owed: from the debtors list.
+  // Runs before the debtors read on purpose: "who owes the most"
+  // contains "who owes" and would otherwise list every debtor.
+  if (includesAny(t, ["who owes the most", "who owes most", "who is the biggest debtor", "biggest debtor", "largest debtor", "who owes the highest", "who owes the largest amount"])) return "topdebtor";
+  if (includesAny(t, ["how much am i owed in total", "how much am i owed", "how much are we owed", "how much are we owed in total", "total owed to me", "total amount owed to me", "how much do customers owe me in total", "how much do they owe me in total"])) return "totalowed";
+  // Overdue: KopaBook sets no due dates, so the answer lists last
+  // activity instead of inventing a due date. Runs before the debtors
+  // read: "who is overdue" is about the debtors, not the whole list.
+  if (includesAny(t, ["who is overdue", "who are overdue", "overdue debts", "overdue customers", "overdue payments", "who has overdue", "any overdue"])) return "overdue";
   if (includesAny(t, ["who owes", "who owe", "who dey owe", "who is owing", "who is owed", "debtors", "customers owing", "who owes me", "who owes us", "who still owes", "anyone owing", "who has not paid", "who hasn't paid", "unpaid customers"])) return "debtors";
   if (includesAny(t, ["low stock", "running low", "running out", "out of stock", "low on stock", "almost finished", "almost out"])) return "lowstock";
+  // Staff names: the snapshot now carries the staff list with roles.
+  // Runs before the stock read: "show me my staff" contains no stock
+  // word, but the names question must never fall to the model.
+  if (includesAny(t, ["show me my staff", "show my staff", "show me our staff", "list my staff", "list our staff", "list the staff", "who works for me", "who works for us", "who works here", "what are my staff names", "what are the staff names", "names of my staff", "staff names", "my staff names", "who are my staff", "who are the staff"])) return "staffnames";
+  // A bare names question ("What is there names"): the step checks the
+  // thread for what "their" refers to (the staff question just asked),
+  // so this only classifies here and the step asks when there is no
+  // staff context at all.
+  if (/^\s*what (is|are) (their|there) names?\s*[.!?]*$/.test(t) || /^\s*(their|there) names?\s*[.!?]*$/.test(t) || /^\s*what are the names\s*[.!?]*$/.test(t) || /^\s*who are they\s*[.!?]*$/.test(t) || /^\s*name them\s*[.!?]*$/.test(t)) return "staffnames";
+  // One product's price: "How much is a laptop?" Runs before the
+  // stock read: the question names one product, not the whole stock.
+  if (/^\s*how much (is|are)\s+/.test(t) && !/\b(stock|plan|subscription|delivery|month|week|year|today|yesterday|sales|expenses|profit)\b/.test(t)) return "productprice";
+  // One product's stock: "How many laptops do I have in stock?"
+  // Runs before the stock read, so one product answers with its own
+  // count instead of the whole stock list. "How many products in
+  // stock" is the whole list, so it stays on the stock read.
+  if (/^\s*how many\b/.test(t) && /\bin stock\b/.test(t) && !/\bproducts?\b/.test(t)) return "productstock";
   if (includesAny(t, ["stock", "inventory", "how much stock", "what do we have in stock", "check stock", "stock levels", "stock level"])) return "stock";
   // Product list: the snapshot already carries every product with price
   // and stock, so this is a read, never a model call. formatStock lists
@@ -1740,11 +1808,11 @@ export function classifyReadIntent(text) {
   if (includesAny(t, ["what projects are do i have", "what projects do i have", "list my projects", "show my projects", "list projects", "show projects", "what projects", "projects list", "project list", "list out my projects", "list out projects", "list out the projects"])) return "projects";
   // Bare "<thing> list" as a whole message, singular or plural, with
   // or without "my": "project list", "product list", "customer list",
-  // "sales list", "expense list", "staff list". The snapshot carries
-  // only a staff count, not staff names, so "staff list" answers with
-  // the count and says so plainly through formatCountStaff, never by
-  // inventing names. This runs before the count questions below so a
-  // bare list phrase is never read as a product lookup.
+  // "sales list", "expense list", "staff list". The snapshot now
+  // carries staff names, so "staff list" answers with the names
+  // through formatStaffList, never by inventing them. This runs before
+  // the count questions below so a bare list phrase is never read as a
+  // product lookup.
   const bareThingList = t.match(/^\s*(my\s+)?(projects?|products?|customers?|sales?|expenses?|staff)\s+list\s*[.!?]*$/);
   if (bareThingList) {
     const thing = bareThingList[2];
@@ -1753,7 +1821,7 @@ export function classifyReadIntent(text) {
     if (/^customers?$/.test(thing)) return "customers";
     if (/^sales?$/.test(thing)) return "recentsales";
     if (/^expenses?$/.test(thing)) return "recentexpenses";
-    if (/^staff$/.test(thing)) return "countstaff";
+    if (/^staff$/.test(thing)) return "staffnames";
   }
   // Bare "My <things>" as a whole message: "My products", "My customers",
   // "My projects", "My sales", "My expenses". Anchored, so a longer
@@ -1764,26 +1832,70 @@ export function classifyReadIntent(text) {
     return { products: "products", customers: "customers", projects: "projects", sales: "recentsales", expenses: "recentexpenses" }[bareList[1]];
   }
   // Count questions: "how many" is a count read, never a sale or a
-  // product lookup. Each count comes from its own snapshot list.
+  // product lookup. Each count comes from its own snapshot list, and a
+  // sales count uses the window asked for, never today's count.
   if (/^\s*how many\b/.test(t)) {
     if (/\bprojects?\b/.test(t)) return "countprojects";
     if (/\bstaffs?\b/.test(t) || /\bco[- ]?owners?\b/.test(t)) return "countstaff";
     if (/\bcustomers?\b/.test(t)) return "countcustomers";
-    if (/\bsales?\b/.test(t)) return "countsalestoday";
+    if (/\bsales?\b/.test(t)) {
+      if (/\bthis month\b/.test(t)) return "countsalesmonth";
+      if (/\blast week\b/.test(t)) return "countsaleslastweek";
+      if (/\bthis week\b/.test(t)) return "countsalesweek";
+      if (/\bthis year\b/.test(t)) return "countsalesyear";
+      return "countsalestoday";
+    }
     if (/\bproducts?\b/.test(t)) return "countproducts";
   }
-  if (includesAny(t, ["sales today", "today's sales", "todays sales", "sales so far today", "how much did we sell today", "how much we sell today", "wetin we sell today", "what did we sell today", "what did i sell today", "what have i sold today", "what have we sold today", "today sales", "sales for today", "what did we sold today", "what did i sold today", "what have we sold today", "what have i sold today", "what sold today", "what we sold today"])) return "today";
+  // Best seller by revenue: this week, last week, this month, last
+  // month, or the last 31 days when no window is named. Runs before
+  // the month read: "what sold best this month" contains "sold" and
+  // "this month" and would otherwise answer as the month sales list.
+  if (includesAny(t, ["what sold best this month", "what sold best last month", "what sold best this week", "what sold best last week", "what is my best seller", "what is our best seller", "what is the best seller", "best selling product", "best-selling product", "what sells best", "what sold best", "what is my best selling product", "which product sells best", "which product sold best"])) return "bestseller";
+  // Month sales: "What did I sold last month?", "What did we sell in
+  // October?" The month is resolved by the step, from the words, and
+  // the question never reaches the sale parser as a product name.
+  // Question form only: a statement ("I sold 2 laptops in May") is a
+  // sale to record, never a read, and the bare phrase "Sales this
+  // month" keeps its total-only answer below.
+  if (/\b(sell|sold|sale|sales)\b/.test(t) && (/\blast month\b/.test(t) || /\bthis month\b/.test(t) || /\bnext month\b/.test(t) || new RegExp("\\b(in\\s+)?(" + MONTH_PATTERN + ")(\\s+\\d{4})?\\b").test(t))
+    && (/^\s*(what|how|show|list|tell)\b/.test(t) || /\?\s*$/.test(t))) return "monthsales";
+  if (includesAny(t, ["sales today", "today's sales", "todays sales", "sales so far today", "how much did we sell today", "how much we sell today", "wetin we sell today", "what did we sell today", "what did i sell today", "what have i sold today", "what have we sold today", "today sales", "sales for today", "what did we sold today", "what did i sold today", "what have we sold today", "what have i sold today", "what sold today", "what we sold today", "how much have we made today", "how much did we make today", "how much have i made today", "how much did i make today", "how much we made today"])) return "today";
   // Yesterday: the snapshot now carries salesYesterday in the business
   // timezone. A snapshot without that field is answered by falling
   // through (the read step returns null for it), never by guessing.
-  if (includesAny(t, ["what did we sell yesterday", "what have we sold yesterday", "what did i sell yesterday", "what have i sold yesterday", "yesterday's sales", "yesterdays sales", "yesterday sales", "sales yesterday", "how much did we sell yesterday", "how much did i sell yesterday", "what sold yesterday"])) return "yesterday";
+  // "sold" wordings are listed too: "What did I sold yesterday" is a
+  // read, never a sale to record.
+  if (includesAny(t, ["what did we sell yesterday", "what have we sold yesterday", "what did i sell yesterday", "what have i sold yesterday", "yesterday's sales", "yesterdays sales", "yesterday sales", "sales yesterday", "how much did we sell yesterday", "how much did i sell yesterday", "what sold yesterday", "what did i sold yesterday", "what did we sold yesterday", "what have i sold yesterday", "what have we sold yesterday", "how much did we sold yesterday", "how much did i sold yesterday", "what did we sold yesterday"])) return "yesterday";
+  // This week and last week: relative-date sales reads, answered from
+  // the per-day map with the window totals as fallback.
+  if (includesAny(t, ["what did we sell this week", "what did i sell this week", "what have we sold this week", "what have i sold this week", "what did i sold this week", "what did we sold this week", "how much did we sell this week", "how much did i sell this week", "sales this week", "this week sales", "what sold this week", "what did we sell last week", "what did i sell last week", "what have we sold last week", "what did i sold last week", "what did we sold last week", "how much did we sell last week", "how much did i sell last week", "sales last week", "last week sales", "what sold last week"])) return /\blast week\b/.test(t) ? "lastweek" : "thisweek";
+  // This year: the snapshot carries the year window.
+  if (includesAny(t, ["how much did we sell this year", "how much did i sell this year", "what did we sell this year", "what did i sell this year", "sales this year", "this year sales", "how much have we made this year", "how much did we make this year"])) return "year";
+  // Sales each day this week, and the best day this week: from the
+  // per-day map. Runs before the week read: "sales each day this week"
+  // contains "sales this week".
+  if (includesAny(t, ["sales each day this week", "sales by day this week", "sales for each day this week", "each day this week", "daily sales this week"])) return "weekseries";
+  if (includesAny(t, ["which day sold most this week", "which day did we sell most this week", "which day sold the most this week", "best day this week", "what day sold most this week", "which day was best this week"])) return "bestdayweek";
   // Bare "what did we sold" / "what have we sold" (no "today") as a whole
   // message still means today: a substring match would also catch "...
   // yesterday", which is a different day and has its own read above.
   // Anchored, so "what did we sell yesterday" never lands here.
   if (/^\s*what (did|have) (we|i) (sold|sell)\s*[.!?]*$/.test(t)) return "today";
   if (includesAny(t, ["sales this month", "sales for the month", "this month sales", "how much did we sell this month", "monthly sales", "sales month"])) return "month";
+  // Expenses by description word this month: "What did I spend on
+  // transport this month?" Runs before the month-expenses read: the
+  // word after "spend on" is the filter, not a category.
+  if (/^\s*(what did (i|we) spend on|how much did (i|we) spend on)\s+(.+?)\s+this month\s*[.!?]*$/.test(t)) return "monthexpenseword";
   if (includesAny(t, ["how much did i spend this month", "how much did we spend this month", "what did i spend this month", "my spending this month", "spending this month", "expenses this month", "expenses for the month"])) return "monthexpenses";
+  // Expenses by window: today, this week, this year.
+  if (includesAny(t, ["how much did i spend today", "how much did we spend today", "what did i spend today", "what did we spend today", "expenses today", "spending today"])) return "todayexpenses";
+  if (includesAny(t, ["how much did i spend this week", "how much did we spend this week", "what did i spend this week", "what did we spend this week", "expenses this week", "spending this week"])) return "weekexpenses";
+  if (includesAny(t, ["how much did i spend this year", "how much did we spend this year", "what did i spend this year", "what did we spend this year", "expenses this year", "spending this year"])) return "yearexpenses";
+  // Gross profit: no cost figures exist, so this is an honest answer
+  // plus the profit-after-expenses figure. Runs before the profit read:
+  // "gross profit" contains the word "profit".
+  if (includesAny(t, ["gross profit", "gross margin", "what is my gross profit", "what is our gross profit", "how much gross profit"])) return "grossprofit";
   // Profit: sales minus expenses, per window. There is no cost_price in
   // the snapshot, so a gross margin from cost is not computable and is
   // never invented; the formatter says plainly when a window is missing.
@@ -1870,13 +1982,17 @@ export function formatProjects(snap, currency) {
 
 // Yesterday's sales, from the snapshot's business-timezone window.
 // Returns null when the snapshot does not carry the window: the caller
-// falls through instead of guessing.
+// falls through instead of guessing. A day with no sales names the
+// date, so "What did I sold yesterday" never answers with a bare line.
 export function formatYesterdaySales(snap, currency) {
   const y = snap && snap.salesYesterday;
   if (!y || typeof y !== "object") return null;
   const total = Number(y.total) || 0;
   const count = Number(y.count) || 0;
-  if (!count) return "No sales yesterday.";
+  if (!count) {
+    const date = snap && snap.businessDate ? addDaysISO(snap.businessDate, -1) : null;
+    return date ? `No sales yesterday (${dayLabel(date)}).` : "No sales yesterday.";
+  }
   return `Sales yesterday: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`;
 }
 
@@ -1962,6 +2078,299 @@ export function parseDateMention(text, businessDate) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Months: "last month", "this month", "in October", "October 2026".
+// ---------------------------------------------------------------------------
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// The month a message asks about, resolved against the business date.
+// Returns { key, label, start, end, future, kind } or null when the
+// message names no month. key is YYYY-MM, label is "October 2026",
+// start/end are YYYY-MM-DD bounds, kind is "last", "this", "next" or
+// "named". A named month with no year takes the business year; a named
+// month after the business month in that year is in the future.
+export function parseMonthMention(text, businessDate) {
+  const t = normalizeFastText(text);
+  const base = String(businessDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
+  const [by, bm] = base.split("-").map(Number);
+  const make = (year, month, kind) => {
+    if (month < 1 || month > 12) return null;
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const start = `${key}-01`;
+    const end = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+    const future = key > `${by}-${String(bm).padStart(2, "0")}`;
+    return { key, label: `${MONTH_NAMES[month - 1]} ${year}`, start, end, future, kind };
+  };
+  if (/\blast month\b/.test(t)) {
+    const month = bm === 1 ? 12 : bm - 1;
+    const year = bm === 1 ? by - 1 : by;
+    return make(year, month, "last");
+  }
+  if (/\bthis month\b/.test(t)) return make(by, bm, "this");
+  if (/\bnext month\b/.test(t)) {
+    const month = bm === 12 ? 1 : bm + 1;
+    const year = bm === 12 ? by + 1 : by;
+    return make(year, month, "next");
+  }
+  let m = t.match(new RegExp("\\b(" + MONTH_PATTERN + ")\\s+(\\d{4})\\b"));
+  if (m) return make(Number(m[2]), MONTH_NUMBERS[m[1]], "named");
+  m = t.match(new RegExp("\\b(?:in\\s+)?(" + MONTH_PATTERN + ")\\b"));
+  if (m) return make(by, MONTH_NUMBERS[m[1]], "named");
+  return null;
+}
+
+// The seven dates of a week (Monday to Sunday), from the business
+// date: "this" is the current week, "last" is the previous week.
+// Returns an array of YYYY-MM-DD strings, or null without a valid
+// business date.
+export function weekDayRange(businessDate, which) {
+  const base = String(businessDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
+  const [by, bm, bd] = base.split("-").map(Number);
+  const baseMs = Date.UTC(by, bm - 1, bd);
+  const baseIdx = (new Date(baseMs).getUTCDay() + 6) % 7;
+  const mondayMs = baseMs - baseIdx * DAY_MS - (which === "last" ? 7 * DAY_MS : 0);
+  const out = [];
+  for (let i = 0; i < 7; i++) out.push(new Date(mondayMs + i * DAY_MS).toISOString().slice(0, 10));
+  return out;
+}
+
+// Sum the per-day map over a list of dates: { total, count, items }
+// with items aggregated by product name, amount-desc. Returns null
+// when the map is absent.
+export function sumSalesByDayRange(snap, dates) {
+  const byDay = snap && snap.salesByDay;
+  if (!byDay || typeof byDay !== "object") return null;
+  let total = 0;
+  let count = 0;
+  const agg = {};
+  for (const d of dates || []) {
+    const entry = byDay[d];
+    if (!entry) continue;
+    total = Math.round((total + (Number(entry.total) || 0)) * 100) / 100;
+    count += Number(entry.count) || 0;
+    for (const it of entry.items || []) {
+      const a = agg[it.product] || (agg[it.product] = { product: it.product, qty: 0, amount: 0 });
+      a.qty += Number(it.qty) || 0;
+      a.amount = Math.round((a.amount + (Number(it.amount) || 0)) * 100) / 100;
+    }
+  }
+  const items = Object.values(agg).sort((a, b) => b.amount - a.amount);
+  return { total, count, items };
+}
+
+// Sales in one named month, from the per-month map. Returns null when
+// the map is absent, so the caller falls through instead of guessing.
+// A future month and a month older than the 3-month map each get their
+// own plain line; a month with no sales says so plainly.
+export function formatMonthSalesDetail(snap, currency, month) {
+  const byMonth = snap && snap.salesByMonth;
+  if (!byMonth || typeof byMonth !== "object") return null;
+  if (month.future) return `${month.label} has not happened yet. Ask about this month or an earlier month.`;
+  const entry = byMonth[month.key] || null;
+  if (!entry) {
+    return `I can only look back 3 months, so I do not have sales for ${month.label}. Ask about a more recent month.`;
+  }
+  const total = Number(entry.total) || 0;
+  const count = Number(entry.count) || 0;
+  if (!count) return `No sales in ${month.label}.`;
+  const items = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 20);
+  const lines = items.map((it) => `- ${Number(it.qty) || 0} ${pluraliseProductName(it.product, it.qty)}: ${formatMoney(it.amount, currency)}`);
+  lines.push(`Total: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`);
+  return `Sales in ${month.label}:\n${lines.join("\n")}`;
+}
+
+// One month's report, same shape as the day report: sales, expenses,
+// profit after expenses, change given, best sellers, new debts.
+// Returns null when the per-month maps are absent. Out-of-range
+// months get a plain look-back line, never a guessed figure.
+export function formatMonthReport(snap, currency, month) {
+  const byMonth = snap && snap.salesByMonth;
+  if (!byMonth || typeof byMonth !== "object") return null;
+  if (month.future) return `${month.label} has not happened yet. Ask about this month or an earlier month.`;
+  const entry = byMonth[month.key] || null;
+  if (!entry) {
+    return `I can only look back 3 months, so I do not have a report for ${month.label}. Ask about a more recent month.`;
+  }
+  const expByMonth = snap && snap.expensesByMonth;
+  const expenses = expByMonth && expByMonth[month.key];
+  const salesTotal = Number(entry.total) || 0;
+  const salesCount = Number(entry.count) || 0;
+  const title = month.kind === "last" ? `Last month's report, ${month.label}:`
+    : month.kind === "this" ? `This month's report, ${month.label}:`
+    : `Report for ${month.label}:`;
+  const lines = [title];
+  lines.push(salesCount
+    ? `Sales: ${formatMoney(salesTotal, currency)} across ${salesCount} ${salesCount === 1 ? "sale" : "sales"}.`
+    : "Sales: no sales this month.");
+  if (expenses && typeof expenses.total === "number") {
+    const eTotal = Number(expenses.total) || 0;
+    const eCount = Number(expenses.count) || 0;
+    lines.push(eCount
+      ? `Expenses: ${formatMoney(eTotal, currency)} across ${eCount} ${eCount === 1 ? "expense" : "expenses"}.`
+      : "Expenses: no expenses this month.");
+    lines.push(`Profit after expenses: ${formatMoney(Math.round((salesTotal - eTotal) * 100) / 100, currency)} (sales minus expenses).`);
+  } else {
+    lines.push("Expenses: I do not have that figure for this month.");
+    lines.push("Profit after expenses: I do not have the expenses figure, so I cannot work out the profit.");
+  }
+  lines.push(`Change given: ${formatMoney(Number(entry.changeGiven) || 0, currency)}.`);
+  const best = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 3);
+  lines.push(best.length
+    ? `Best sellers: ${best.map((it) => `${pluraliseProductName(it.product, it.qty)} (${Number(it.qty) || 0} sold)`).join(", ")}.`
+    : "Best sellers: none yet.");
+  const debts = entry.debts || [];
+  lines.push(debts.length
+    ? `New debts: ${debts.map((d) => `${d.customer} owes ${formatMoney(d.amount, currency)}`).join("; ")}.`
+    : "New debts: none.");
+  return lines.join("\n");
+}
+
+// Sales for one week (this week or last week), from the per-day map
+// with the window totals as the fallback when the map is absent.
+// A week with no sales names its dates.
+export function formatWeekSales(snap, currency, which) {
+  const dates = weekDayRange(snap && snap.businessDate, which);
+  if (!dates) return null;
+  const label = which === "last" ? "last week" : "this week";
+  const rangeLabel = `${dayLabel(dates[0])} to ${dayLabel(dates[6])}`;
+  const summed = sumSalesByDayRange(snap, dates);
+  if (summed) {
+    if (!summed.count) return `No sales ${label} (${rangeLabel}).`;
+    const items = summed.items.slice(0, 20);
+    const lines = items.map((it) => `- ${Number(it.qty) || 0} ${pluraliseProductName(it.product, it.qty)}: ${formatMoney(it.amount, currency)}`);
+    lines.push(`Total: ${formatMoney(summed.total, currency)} across ${summed.count} ${summed.count === 1 ? "sale" : "sales"}.`);
+    return `Sales ${label} (${rangeLabel}):\n${lines.join("\n")}`;
+  }
+  const w = which === "last" ? null : snap.salesWeek;
+  if (!w || typeof w.total !== "number") return null;
+  if (!Number(w.count)) return `No sales ${label} (${rangeLabel}).`;
+  return `Sales ${label}: ${formatMoney(Number(w.total) || 0, currency)} across ${Number(w.count) || 0} ${Number(w.count) === 1 ? "sale" : "sales"}.`;
+}
+
+// Sales each day of this week, one line per day from the per-day map,
+// including days with no sales. Returns null when the map is absent.
+export function formatWeekSeries(snap, currency) {
+  const dates = weekDayRange(snap && snap.businessDate, "this");
+  if (!dates) return null;
+  const byDay = snap && snap.salesByDay;
+  if (!byDay || typeof byDay !== "object") return null;
+  const lines = dates.map((d) => {
+    const entry = byDay[d];
+    const total = entry ? Number(entry.total) || 0 : 0;
+    const count = entry ? Number(entry.count) || 0 : 0;
+    const short = dayLabel(d).split(", ")[0];
+    return count
+      ? `- ${short}, ${Number(d.slice(8, 10))} ${MONTH_NAMES[Number(d.slice(5, 7)) - 1]}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}`
+      : `- ${short}, ${Number(d.slice(8, 10))} ${MONTH_NAMES[Number(d.slice(5, 7)) - 1]}: no sales`;
+  });
+  return `Sales each day this week:\n${lines.join("\n")}`;
+}
+
+// The day that sold most this week, from the per-day map. Returns
+// null when the map is absent or nothing sold this week.
+export function formatBestDayWeek(snap, currency) {
+  const dates = weekDayRange(snap && snap.businessDate, "this");
+  if (!dates) return null;
+  const byDay = snap && snap.salesByDay;
+  if (!byDay || typeof byDay !== "object") return null;
+  let best = null;
+  let bestTotal = 0;
+  for (const d of dates) {
+    const total = Number((byDay[d] || {}).total) || 0;
+    if (total > bestTotal) { best = d; bestTotal = total; }
+  }
+  if (!best) return "Nothing sold this week yet, so there is no best day.";
+  const count = Number((byDay[best] || {}).count) || 0;
+  return `${dayLabel(best)} sold most this week: ${formatMoney(bestTotal, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`;
+}
+
+// Best seller by revenue: this week, last week, this month, last
+// month, or the last 31 days when no window is named. Returns null
+// when the maps are absent.
+export function formatBestSeller(snap, currency, window) {
+  let items = null;
+  let label = "";
+  if (window === "week") {
+    const dates = weekDayRange(snap && snap.businessDate, "this");
+    const summed = dates ? sumSalesByDayRange(snap, dates) : null;
+    if (!summed) return null;
+    items = summed.items;
+    label = "this week";
+  } else if (window === "lastweek") {
+    const dates = weekDayRange(snap && snap.businessDate, "last");
+    const summed = dates ? sumSalesByDayRange(snap, dates) : null;
+    if (!summed) return null;
+    items = summed.items;
+    label = "last week";
+  } else if (window === "month") {
+    const m = parseMonthMention("this month", snap && snap.businessDate);
+    const byMonth = snap && snap.salesByMonth;
+    if (!m || !byMonth || typeof byMonth !== "object" || !byMonth[m.key]) return null;
+    items = (byMonth[m.key].items || []).slice();
+    label = "this month";
+  } else if (window === "lastmonth") {
+    const m = parseMonthMention("last month", snap && snap.businessDate);
+    const byMonth = snap && snap.salesByMonth;
+    if (!m || !byMonth || typeof byMonth !== "object" || !byMonth[m.key]) return null;
+    items = (byMonth[m.key].items || []).slice();
+    label = "last month";
+  } else {
+    const byDay = snap && snap.salesByDay;
+    if (!byDay || typeof byDay !== "object") return null;
+    const agg = {};
+    for (const entry of Object.values(byDay)) {
+      for (const it of entry.items || []) {
+        const a = agg[it.product] || (agg[it.product] = { product: it.product, qty: 0, amount: 0 });
+        a.qty += Number(it.qty) || 0;
+        a.amount = Math.round((a.amount + (Number(it.amount) || 0)) * 100) / 100;
+      }
+    }
+    items = Object.values(agg).sort((a, b) => b.amount - a.amount);
+    label = "in the last 31 days";
+  }
+  if (!items || !items.length) return `Nothing sold ${label} yet, so there is no best seller.`;
+  const best = items.slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))[0];
+  return `Best seller ${label}: ${pluraliseProductName(best.product, best.qty)} (${Number(best.qty) || 0} sold) for ${formatMoney(best.amount, currency)}.`;
+}
+
+// Expenses this month whose description contains one word, summed
+// from the per-month expense items. The answer says plainly that the
+// match is by the description word, never by a category.
+export function formatMonthExpenseWord(snap, currency, word) {
+  const m = parseMonthMention("this month", snap && snap.businessDate);
+  const expByMonth = snap && snap.expensesByMonth;
+  if (!m || !expByMonth || typeof expByMonth !== "object" || !expByMonth[m.key]) return null;
+  const w = String(word || "").toLowerCase();
+  const items = (expByMonth[m.key].items || []).filter((it) => String(it.description || "").toLowerCase().includes(w));
+  const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  if (!items.length) return `No expenses for ${w} this month.`;
+  return `You spent ${formatMoney(Math.round(total * 100) / 100, currency)} on ${w} this month, across ${items.length} ${items.length === 1 ? "expense" : "expenses"} (matched by the description word "${w}").`;
+}
+
+// Pluralise a product name for a quantity over 1, conservatively:
+// only the last token, only when it is a plain word. Numeric tokens
+// ("Product 1", "Rice 5kg", "Sugar 1kg") never change, short tokens
+// ("Live SIM card uk") never change, and words already ending in s
+// never change. "Laptop" becomes "Laptops", "Fvamail" becomes
+// "Fvamails". Used only in date and month report item lines and best
+// seller lines, never in sale proposals or executor summaries.
+export function pluraliseProductName(name, qty) {
+  if (!(Number(qty) > 1)) return String(name || "");
+  const parts = String(name || "").split(/\s+/).filter(Boolean);
+  if (!parts.length) return String(name || "");
+  const last = parts[parts.length - 1];
+  if (last.length < 3) return String(name || "");
+  if (/\d/.test(last)) return String(name || "");
+  if (last.toLowerCase().endsWith("s")) return String(name || "");
+  parts[parts.length - 1] = last + "s";
+  return parts.join(" ");
+}
+
 // Sales on one named day, from the snapshot's per-day map. Returns
 // null when the map is absent, so the caller falls through instead of
 // guessing. A day with no sales says so plainly; a future day and a
@@ -1984,8 +2393,8 @@ export function formatSalesOnDate(snap, currency, date, label) {
   const total = entry ? Number(entry.total) || 0 : 0;
   const count = entry ? Number(entry.count) || 0 : 0;
   if (!count) return `No sales on ${niceLabel}.`;
-  const items = (entry.items || []).slice(0, 20);
-  const lines = items.map((it) => `- ${Number(it.qty) || 0} ${it.product}: ${formatMoney(it.amount, currency)}`);
+  const items = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 20);
+  const lines = items.map((it) => `- ${Number(it.qty) || 0} ${pluraliseProductName(it.product, it.qty)}: ${formatMoney(it.amount, currency)}`);
   lines.push(`Total: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`);
   return `Sales on ${niceLabel}:\n${lines.join("\n")}`;
 }
@@ -2017,15 +2426,15 @@ export function formatDayReport(snap, currency, day) {
     lines.push(eCount
       ? `Expenses: ${formatMoney(eTotal, currency)} across ${eCount} ${eCount === 1 ? "expense" : "expenses"}.`
       : `Expenses: no expenses ${dayWord}.`);
-    lines.push(`Profit: ${formatMoney(Math.round((salesTotal - eTotal) * 100) / 100, currency)} (sales minus expenses).`);
+    lines.push(`Profit after expenses: ${formatMoney(Math.round((salesTotal - eTotal) * 100) / 100, currency)} (sales minus expenses).`);
   } else {
     lines.push(`Expenses: I do not have that figure for ${dayWord}.`);
-    lines.push("Profit: I do not have the expenses figure, so I cannot work out the profit.");
+    lines.push("Profit after expenses: I do not have the expenses figure, so I cannot work out the profit.");
   }
   lines.push(`Change given: ${formatMoney(Number(entry.changeGiven) || 0, currency)}.`);
   const best = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 3);
   lines.push(best.length
-    ? `Best sellers: ${best.map((it) => `${it.product} (${Number(it.qty) || 0} sold)`).join(", ")}.`
+    ? `Best sellers: ${best.map((it) => `${pluraliseProductName(it.product, it.qty)} (${Number(it.qty) || 0} sold)`).join(", ")}.`
     : "Best sellers: none yet.");
   const debts = entry.debts || [];
   lines.push(debts.length
@@ -2122,6 +2531,156 @@ export function formatCountSalesToday(snap, currency) {
   return `You made ${count} ${count === 1 ? "sale" : "sales"} today, totalling ${formatMoney(total, currency)}.`;
 }
 
+// A sales count for one window (today, this week, this month, this
+// year, last week), from that window's own count, never today's count.
+// Last week is summed from the per-day map and returns null without it.
+export function formatCountSalesWindow(snap, currency, window) {
+  const pick = (w) => (snap && snap[w]) || null;
+  let st = null;
+  let label = "";
+  if (window === "today") { st = pick("salesToday"); label = "today"; }
+  else if (window === "week") { st = pick("salesWeek"); label = "this week"; }
+  else if (window === "month") { st = pick("salesMonth"); label = "this month"; }
+  else if (window === "year") { st = pick("salesYear"); label = "this year"; }
+  else if (window === "lastweek") {
+    const dates = weekDayRange(snap && snap.businessDate, "last");
+    const summed = dates ? sumSalesByDayRange(snap, dates) : null;
+    if (!summed) return null;
+    if (!summed.count) return "No sales last week.";
+    return `You made ${summed.count} ${summed.count === 1 ? "sale" : "sales"} last week, totalling ${formatMoney(summed.total, currency)}.`;
+  }
+  if (!st || typeof st.count !== "number") return null;
+  const count = Number(st.count) || 0;
+  const total = Number(st.total) || 0;
+  if (!count) return `No sales yet ${label}.`;
+  return `You made ${count} ${count === 1 ? "sale" : "sales"} ${label}, totalling ${formatMoney(total, currency)}.`;
+}
+
+// Sales total for one window (this week, this year), from that
+// window's own figures.
+export function formatWindowSales(snap, currency, window) {
+  const w = window === "week" ? snap.salesWeek : window === "year" ? snap.salesYear : null;
+  if (!w || typeof w.total !== "number") return null;
+  const label = window === "week" ? "this week" : "this year";
+  const count = Number(w.count) || 0;
+  const total = Number(w.total) || 0;
+  if (!count) return `No sales yet ${label}.`;
+  return `Sales ${label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`;
+}
+
+// Expenses total for one window (today, this week, this year), from
+// that window's own figures.
+export function formatWindowExpenses(snap, currency, window) {
+  const w = window === "today" ? snap.expensesToday : window === "week" ? snap.expensesWeek : window === "year" ? snap.expensesYear : null;
+  if (!w || typeof w.total !== "number") return null;
+  const label = window === "today" ? "today" : window === "week" ? "this week" : "this year";
+  const count = Number(w.count) || 0;
+  const total = Number(w.total) || 0;
+  if (!count) return `No expenses yet ${label}.`;
+  return `Expenses ${label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "expense" : "expenses"}.`;
+}
+
+// Staff names, from the snapshot's staff list (members joined to
+// users, with their business role). When the list is absent the count
+// answers instead, and the gap is stated plainly, never filled with
+// invented names. When the list is present but a role is missing, the
+// name stands on its own.
+export function formatStaffList(snap) {
+  const staff = (snap && snap.staff) || null;
+  const n = snap && Number.isFinite(Number(snap.staffCount)) ? Number(snap.staffCount) : null;
+  if (!Array.isArray(staff)) {
+    if (n === null) return "I do not have your staff list for this business.";
+    if (n === 0) return "You have no staff members on this business.";
+    return `You have ${n} staff ${n === 1 ? "member" : "members"} on this business. I do not have their names in this snapshot, so I cannot list them.`;
+  }
+  if (!staff.length) return "You have no staff members on this business.";
+  const lines = staff.map((s) => `- ${s.name}${s.role ? ` (${s.role})` : ""}`);
+  return `Your staff (${staff.length}):\n${lines.join("\n")}`;
+}
+
+// The customer who owes the most, from the debtors list.
+export function formatTopDebtor(snap, currency) {
+  const debtors = (snap && snap.debtors) || [];
+  if (!debtors.length) return "Nobody owes money right now.";
+  const top = debtors.slice().sort((a, b) => (Number(b.balance) || 0) - (Number(a.balance) || 0))[0];
+  return `${top.name} owes the most: ${formatMoney(top.balance, currency)}.`;
+}
+
+// Total owed to the business, from the debtors list.
+export function formatTotalOwed(snap, currency) {
+  const debtors = (snap && snap.debtors) || [];
+  const total = debtors.reduce((s, d) => s + (Number(d.balance) || 0), 0);
+  if (!debtors.length) return "Nobody owes money right now, so you are owed nothing.";
+  return `You are owed ${formatMoney(Math.round(total * 100) / 100, currency)} in total, from ${debtors.length} ${debtors.length === 1 ? "customer" : "customers"}.`;
+}
+
+// Overdue debts, honestly: KopaBook sets no due dates, so no debtor
+// can be called overdue from a date. The snapshot carries each
+// debtor's last ledger activity, so the answer lists who owes, oldest
+// activity first, and says plainly that there is no due date to judge
+// against. Returns null when the debtors carry no activity dates.
+export function formatOverdue(snap, currency) {
+  const debtors = (snap && snap.debtors) || [];
+  if (!debtors.length) return "Nobody owes money right now, so nobody is overdue.";
+  const withActivity = debtors.filter((d) => d.lastActivity);
+  if (!withActivity.length) return null;
+  const sorted = withActivity.slice().sort((a, b) => String(a.lastActivity) < String(b.lastActivity) ? -1 : 1);
+  const lines = sorted.map((d) => `- ${d.name}: ${formatMoney(d.balance, currency)}, last activity ${d.lastActivity}`);
+  const missing = debtors.filter((d) => !d.lastActivity);
+  for (const d of missing) lines.push(`- ${d.name}: ${formatMoney(d.balance, currency)}, last activity not recorded`);
+  return `KopaBook does not set due dates, so I cannot say who is overdue. Last activity for each person owing, oldest first:\n${lines.join("\n")}`;
+}
+
+// The plan this business is on, from the snapshot tier. The tier is
+// the owner's own subscription, never a guess. Returns null when the
+// snapshot carries no tier, so the caller falls through.
+export function formatMyPlan(snap) {
+  const tier = snap && typeof snap.tier === "string" ? snap.tier.trim() : "";
+  if (!tier) return null;
+  const name = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
+  return `You are on the ${name} plan.`;
+}
+
+// What the owner owes suppliers: KopaBook does not track supplier
+// debts yet. This answer must never be the debtors list: the debtors
+// are what customers owe the business, the opposite direction.
+export const MY_DEBTS_ANSWER = "I do not track what you owe suppliers yet. KopaBook only records what customers owe you, so I cannot give a supplier debt figure.";
+
+// Stock value at cost, honestly: there is no cost figure in the
+// snapshot, so the cost value is not computable. The answer says so
+// and gives the selling-price value instead.
+export function formatStockCost(snap, currency) {
+  const products = (snap && snap.products) || [];
+  if (!products.length) return "No products added yet, so there is no stock value to work out.";
+  const total = products.reduce((s, p) => s + (Number(p.price) || 0) * (Number(p.stock) || 0), 0);
+  return `I do not have a cost figure for your stock, so I cannot give the value at cost. At selling price, your stock is worth ${formatMoney(Math.round(total * 100) / 100, currency)}.`;
+}
+
+// One product's price or stock, matched against the snapshot list.
+// The question words are stripped first; the remainder must match a
+// real product, or the answer lists the closest real names. Returns
+// null when the message names no product at all.
+export function formatProductQuestion(text, snap, currency, which) {
+  const products = (snap && snap.products) || [];
+  if (!products.length) return null;
+  let rest = normalizeFastText(text)
+    .replace(/\b(how|much|many|is|are|does|do|did|what|the|a|an|one|i|we|you|have|in|stock|left|remaining|for|of|it|its|this|per|each|price|cost|buy|sell|worth)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[.,;:!?]+|[.,;:!?]+$/g, "")
+    .trim();
+  if (!rest) return null;
+  const match = matchSnapshotProduct(normalizePluralProduct(rest, products), products);
+  if (!match) {
+    const names = products.slice(0, 5).map((p) => p.name).join(", ");
+    return `I do not have a product called "${titleCaseName(rest)}". Your products are: ${names}.`;
+  }
+  if (which === "price") {
+    return `${match.name} costs ${formatMoney(match.price, currency)} each.`;
+  }
+  return `You have ${Number(match.stock) || 0} ${pluraliseProductName(match.name, match.stock)} in stock.`;
+}
+
 export function formatCountProducts(snap, currency) {
   const products = (snap && snap.products) || [];
   if (!products.length) return "You have no products.";
@@ -2148,7 +2707,73 @@ export function formatProfit(snap, currency) {
     if (s !== null && e !== null) return `${label}: ${formatMoney(Math.round((s - e) * 100) / 100, currency)}`;
     return `${label}: I do not have that figure. The snapshot does not carry ${possessive} sales and expenses, so I cannot work out the profit.`;
   });
-  return `Profit (sales minus expenses):\n${lines.join("\n")}`;
+  return `Profit after expenses (sales minus expenses):\n${lines.join("\n")}`;
+}
+
+// One window's profit only, as sales minus expenses, labelled plainly.
+// "How much profit did I make last month?" answers last month, not all
+// four windows. The month windows come from the per-month maps; the
+// other windows come from the snapshot windows. Returns null when the
+// window asked for is not in the snapshot, so the caller falls through
+// instead of guessing.
+export function formatSingleProfit(snap, currency, window) {
+  const monthAgg = (key) => {
+    const byMonth = snap && snap.salesByMonth;
+    const expByMonth = snap && snap.expensesByMonth;
+    if (!byMonth || typeof byMonth !== "object" || !byMonth[key]) return null;
+    const s = byMonth[key];
+    const e = expByMonth && expByMonth[key];
+    if (!e || typeof e.total !== "number") return { sales: Number(s.total) || 0, expenses: null };
+    return { sales: Number(s.total) || 0, expenses: Number(e.total) || 0 };
+  };
+  const fromWindows = (sales, expenses) => {
+    if (!sales || typeof sales.total !== "number") return null;
+    if (!expenses || typeof expenses.total !== "number") return { sales: Number(sales.total) || 0, expenses: null };
+    return { sales: Number(sales.total) || 0, expenses: Number(expenses.total) || 0 };
+  };
+  let label = "";
+  let agg = null;
+  if (window === "today") { label = "today"; agg = fromWindows(snap.salesToday, snap.expensesToday); }
+  else if (window === "week") { label = "this week"; agg = fromWindows(snap.salesWeek, snap.expensesWeek); }
+  else if (window === "month") { label = "this month"; agg = fromWindows(snap.salesMonth, snap.expensesMonth); }
+  else if (window === "year") { label = "this year"; agg = fromWindows(snap.salesYear, snap.expensesYear); }
+  else if (window === "lastmonth") {
+    const m = parseMonthMention("last month", snap && snap.businessDate);
+    if (!m) return null;
+    label = m.label;
+    agg = monthAgg(m.key);
+  } else if (window === "lastweek") {
+    label = "last week";
+    agg = null;
+  }
+  if (window === "lastweek") {
+    const days = weekDayRange(snap && snap.businessDate, "last");
+    if (!days) return null;
+    const byDay = snap && snap.salesByDay;
+    if (!byDay || typeof byDay !== "object") return null;
+    let sales = 0;
+    for (const d of days) sales += Number((byDay[d] || {}).total) || 0;
+    return `Profit after expenses last week: I do not have last week's expenses broken out, so I cannot work out the profit. Sales last week were ${formatMoney(Math.round(sales * 100) / 100, currency)}.`;
+  }
+  if (!agg) return null;
+  if (agg.expenses === null) return `Profit after expenses ${label}: I do not have the expenses figure for ${label}, so I cannot work out the profit.`;
+  return `Profit after expenses ${label}: ${formatMoney(Math.round((agg.sales - agg.expenses) * 100) / 100, currency)} (sales minus expenses).`;
+}
+
+// Gross profit, honestly: there is no cost figure in the snapshot, so
+// gross profit from cost is not computable and is never invented. The
+// answer says so plainly and gives the profit-after-expenses figure
+// for this month instead.
+export function formatGrossProfit(snap, currency) {
+  const s = snap && snap.salesMonth;
+  const e = snap && snap.expensesMonth;
+  const profit = (s && typeof s.total === "number" && e && typeof e.total === "number")
+    ? formatMoney(Math.round((Number(s.total) - Number(e.total)) * 100) / 100, currency)
+    : null;
+  if (profit) {
+    return `I do not have cost figures for your products, so I cannot work out gross profit. Profit after expenses this month is ${profit} (sales minus expenses).`;
+  }
+  return "I do not have cost figures for your products, so I cannot work out gross profit, and I do not have this month's sales and expenses either, so I cannot give the profit after expenses.";
 }
 
 // Snapshot-based business advice: best seller, low stock, debtors,
@@ -2361,6 +2986,16 @@ export function parseSalePaymentAnswer(text, total) {
 export function acknowledgementReply(text) {
   const t = normalizeFastText(text).replace(/[.!?]+$/, "").trim();
   if (/^(thanks|thank you|thank you very much|thanks a lot|thanks so much)$/.test(t)) {
+    return "You are welcome. Anything else?";
+  }
+  // Multi-word thanks: "Thanks, that is all", "Great, thanks", "Thanks
+  // for now". Every word is an acknowledgement or a closing phrase, so
+  // the whole message is a sign-off, never a new request.
+  if (/^(thanks|thank you|great|good|nice|ok|okay)[, ]+(that is all|that is it|that will be all|thats all|that is everything|for now)$/.test(t)) {
+    return "You are welcome. Anything else?";
+  }
+  const ackWords = t.split(/[\s,]+/).filter(Boolean);
+  if (ackWords.length > 1 && ackWords.every((w) => ["thanks", "thank", "you", "great", "good", "nice", "ok", "okay", "awesome", "perfect", "lovely"].includes(w))) {
     return "You are welcome. Anything else?";
   }
   if (/^(hello|hi|hey|good morning|good afternoon|good evening)$/.test(t)) {
@@ -2626,7 +3261,7 @@ export function isChallenge(text) {
 export function recheckReadFromAnswer(answer, snap, currency) {
   const a = String(answer || "").trim();
   if (/^No sales yet today\./.test(a) || /^Sales today so far:/.test(a)) return formatTodaySales(snap, currency);
-  if (/^No sales yesterday\./.test(a) || /^Sales yesterday:/.test(a)) return formatYesterdaySales(snap, currency);
+  if (/^No sales yesterday/.test(a) || /^Sales yesterday:/.test(a)) return formatYesterdaySales(snap, currency);
   if (/^No sales yet this month\./.test(a) || /^Sales this month:/.test(a)) return formatMonthSales(snap, currency);
   if (/^No expenses yet this month\./.test(a) || /^Expenses this month:/.test(a)) return formatMonthExpenses(snap, currency);
   if (/^Nobody owes money right now\./.test(a) || /^Customers owing/.test(a)) return formatDebtors(snap, currency);
@@ -2675,14 +3310,19 @@ export function challengeReply(text, history, snap, currency) {
 // ---------------------------------------------------------------------------
 
 export function firstEmoji(text) {
-  const m = String(text || "").match(/\p{Extended_Pictographic}/u);
+  const m = String(text || "").match(/\p{Extended_Pictographic}|\p{Regional_Indicator}/u);
   return m ? m[0] : null;
 }
 
 export function isEmojiOnly(text) {
   const t = String(text || "").trim();
-  if (!t || !firstEmoji(t)) return false;
-  const stripped = t.replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\ufe0f\s.,!?:;]/gu, "");
+  if (!t || !(firstEmoji(t) || /[0-9#*]\uFE0F?\u20E3/u.test(t))) return false;
+  // Keycap sequences first ("1" + VS16 + U+20E3): a bare digit is not
+  // an emoji, but a digit that forms a keycap is. Regional indicators
+  // are flags ("NG" is two of them), not pictographs, so they count
+  // too. Anything else left over means the message is not emoji-only.
+  let stripped = t.replace(/[0-9#*]\uFE0F?\u20E3/gu, "");
+  stripped = stripped.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u200d\ufe0f\s.,!?:;]/gu, "");
   return stripped.length === 0;
 }
 
@@ -2706,9 +3346,15 @@ const EMOJI_REPLIES = {
 };
 
 export function emojiReply(text) {
-  const e = firstEmoji(text);
-  if (!e) return null;
-  return EMOJI_REPLIES[e] || `${e} Right with you.`;
+  const t = String(text || "").trim();
+  if (!t || !(firstEmoji(t) || /[0-9#*]\uFE0F?\u20E3/u.test(t))) return null;
+  // One known emoji on its own gets its own line. Anything else
+  // (a flag, a keycap, a skin-tone variant, several emojis) is echoed
+  // back whole, so a flag never comes back as half a flag.
+  const bare = t.replace(/\uFE0F/g, "");
+  if (Object.prototype.hasOwnProperty.call(EMOJI_REPLIES, t)) return EMOJI_REPLIES[t];
+  if (Object.prototype.hasOwnProperty.call(EMOJI_REPLIES, bare)) return EMOJI_REPLIES[bare];
+  return `${t} Right with you.`;
 }
 
 export function casualReply(text) {
@@ -3223,6 +3869,13 @@ export function resolveFastPath(message, history, snap, currency) {
       : "Who should I remind? Tell me the customer's name." };
   }
 
+  // 3b. What the owner owes suppliers: never a balance lookup for a
+  // customer called "Suppliers". Runs before the balance step on
+  // purpose: parseBalanceQuery would read "suppliers" as a name.
+  if (classifyReadIntent(text) === "mydebts") {
+    return { kind: "reply", text: MY_DEBTS_ANSWER };
+  }
+
   // 4. Balance question for one customer (including pronouns: "how much
   // does he owe", "what is his balance").
   const balance = parseBalanceQuery(text);
@@ -3252,9 +3905,12 @@ export function resolveFastPath(message, history, snap, currency) {
       const debtor = (snap.debtors || []).find((d) => String(d.name || "").toLowerCase() === draftReq.customer_name.toLowerCase())
         || (snap.debtors || []).find((d) => String(d.name || "").toLowerCase().includes(draftReq.customer_name.toLowerCase()));
       if (!debtor) {
-        // Not in the snapshot's debtor list: let the model path do the
-        // database lookup instead of guessing a balance.
-        return null;
+        // Not in the snapshot's debtor list: route the same way the
+        // debtor draft does, so the executor does the real database
+        // lookup and returns its one-line no-balance reply for a
+        // customer who owes nothing, or its not-found reply for a
+        // stranger. Never the model, never an invented balance.
+        return { kind: "action", tool: "draft_debtor_message", params: { customer_name: draftReq.customer_name, tone: draftReq.tone } };
       }
       if (!(Number(debtor.balance) > 0)) {
         return { kind: "reply", text: `${debtor.name} has no outstanding balance, so there is no reminder to write.` };
@@ -3293,6 +3949,49 @@ export function resolveFastPath(message, history, snap, currency) {
     const y = formatYesterdaySales(snap, currency);
     if (y !== null) return { kind: "reply", text: y };
   }
+  if (read === "thisweek") {
+    const w = formatWeekSales(snap, currency, "this");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "lastweek") {
+    const w = formatWeekSales(snap, currency, "last");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "year") {
+    const w = formatWindowSales(snap, currency, "year");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "weekseries") {
+    const s = formatWeekSeries(snap, currency);
+    if (s !== null) return { kind: "reply", text: s };
+  }
+  if (read === "bestdayweek") {
+    const s = formatBestDayWeek(snap, currency);
+    if (s !== null) return { kind: "reply", text: s };
+  }
+  if (read === "bestseller") {
+    const window = /\blast week\b/.test(t) ? "lastweek"
+      : /\blast month\b/.test(t) ? "lastmonth"
+      : /\bthis week\b/.test(t) ? "week"
+      : /\bthis month\b/.test(t) ? "month"
+      : "all";
+    const s = formatBestSeller(snap, currency, window);
+    if (s !== null) return { kind: "reply", text: s };
+  }
+  if (read === "monthsales") {
+    const m = parseMonthMention(text, snap && snap.businessDate);
+    if (m) {
+      const s = formatMonthSalesDetail(snap, currency, m);
+      if (s !== null) return { kind: "reply", text: s };
+    }
+  }
+  if (read === "monthreport") {
+    const m = parseMonthMention(text, snap && snap.businessDate);
+    if (m) {
+      const report = formatMonthReport(snap, currency, m);
+      if (report !== null) return { kind: "reply", text: report };
+    }
+  }
   if (read === "dayreport") {
     const day = /\byesterday\b/.test(t) ? "yesterday" : "today";
     const report = formatDayReport(snap, currency, day);
@@ -3302,9 +4001,85 @@ export function resolveFastPath(message, history, snap, currency) {
     const answer = formatYesNoCount(text, history, snap);
     if (answer !== null) return { kind: "reply", text: answer };
   }
+  if (read === "myplan") {
+    const plan = formatMyPlan(snap);
+    if (plan !== null) return { kind: "reply", text: plan };
+  }
+  if (read === "mydebts") return { kind: "reply", text: MY_DEBTS_ANSWER };
+  if (read === "stockcost") return { kind: "reply", text: formatStockCost(snap, currency) };
+  if (read === "topdebtor") return { kind: "reply", text: formatTopDebtor(snap, currency) };
+  if (read === "totalowed") return { kind: "reply", text: formatTotalOwed(snap, currency) };
+  if (read === "overdue") {
+    const o = formatOverdue(snap, currency);
+    if (o !== null) return { kind: "reply", text: o };
+  }
+  if (read === "staffnames") {
+    // A bare names question ("What is there names") only means staff
+    // when the thread just talked about staff: the previous assistant
+    // turn answered a staff question. An explicit staff phrase answers
+    // straight away; with no staff context the question is ambiguous
+    // and gets one short question instead of a guessed list.
+    const explicit = /\bstaff\b/.test(t) || /\bwho works\b/.test(t);
+    if (explicit) return { kind: "reply", text: formatStaffList(snap) };
+    const lastAssistant = [...(history || [])].reverse().find((h) => h && h.role === "assistant" && typeof h.content === "string");
+    if (lastAssistant && /\bstaff\b/i.test(lastAssistant.content)) {
+      return { kind: "reply", text: formatStaffList(snap) };
+    }
+    return { kind: "reply", text: "Whose names do you mean: your staff, your customers, or your products?" };
+  }
+  if (read === "productprice") {
+    const p = formatProductQuestion(text, snap, currency, "price");
+    if (p !== null) return { kind: "reply", text: p };
+  }
+  if (read === "productstock") {
+    const p = formatProductQuestion(text, snap, currency, "stock");
+    if (p !== null) return { kind: "reply", text: p };
+  }
   if (read === "month") return { kind: "reply", text: formatMonthSales(snap, currency) };
   if (read === "monthexpenses") return { kind: "reply", text: formatMonthExpenses(snap, currency) };
-  if (read === "profit") return { kind: "reply", text: formatProfit(snap, currency) };
+  if (read === "monthexpenseword") {
+    const m = text.match(/^\s*(what did (?:i|we) spend on|how much did (?:i|we) spend on)\s+(.+?)\s+this month\s*[.!?]*$/i);
+    if (m) {
+      const s = formatMonthExpenseWord(snap, currency, m[2]);
+      if (s !== null) return { kind: "reply", text: s };
+    }
+  }
+  if (read === "todayexpenses") {
+    const w = formatWindowExpenses(snap, currency, "today");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "weekexpenses") {
+    const w = formatWindowExpenses(snap, currency, "week");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "yearexpenses") {
+    const w = formatWindowExpenses(snap, currency, "year");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "grossprofit") return { kind: "reply", text: formatGrossProfit(snap, currency) };
+  if (read === "profit") {
+    // One window asked for gets one window's answer, never all four:
+    // "How much profit did I make last month?" answers last month.
+    // A bare "How much profit?" and a message naming several windows
+    // ("today, week, months and year") keep the all-window answer.
+    const has = (re) => re.test(t);
+    let windowAsked = null;
+    if (has(/\blast month\b/)) windowAsked = "lastmonth";
+    else if (has(/\blast week\b/)) windowAsked = "lastweek";
+    else {
+      const found = [];
+      if (has(/\btoday\b/)) found.push("today");
+      if (has(/\bweeks?\b/)) found.push("week");
+      if (has(/\bmonths?\b/)) found.push("month");
+      if (has(/\byears?\b/)) found.push("year");
+      if (found.length === 1) windowAsked = found[0];
+    }
+    if (windowAsked) {
+      const single = formatSingleProfit(snap, currency, windowAsked);
+      if (single !== null) return { kind: "reply", text: single };
+    }
+    return { kind: "reply", text: formatProfit(snap, currency) };
+  }
   if (read === "advice") return { kind: "reply", text: formatBusinessAdvice(snap, currency) };
   if (read === "inventoryvalue") return { kind: "reply", text: formatInventoryValue(snap, currency) };
   if (read === "activitylog") {
@@ -3315,6 +4090,22 @@ export function resolveFastPath(message, history, snap, currency) {
   if (read === "countstaff") return { kind: "reply", text: formatCountStaff(snap, currency) };
   if (read === "countcustomers") return { kind: "reply", text: formatCountCustomers(snap, currency) };
   if (read === "countsalestoday") return { kind: "reply", text: formatCountSalesToday(snap, currency) };
+  if (read === "countsalesmonth") {
+    const c = formatCountSalesWindow(snap, currency, "month");
+    if (c !== null) return { kind: "reply", text: c };
+  }
+  if (read === "countsalesweek") {
+    const c = formatCountSalesWindow(snap, currency, "week");
+    if (c !== null) return { kind: "reply", text: c };
+  }
+  if (read === "countsalesyear") {
+    const c = formatCountSalesWindow(snap, currency, "year");
+    if (c !== null) return { kind: "reply", text: c };
+  }
+  if (read === "countsaleslastweek") {
+    const c = formatCountSalesWindow(snap, currency, "lastweek");
+    if (c !== null) return { kind: "reply", text: c };
+  }
   if (read === "countproducts") return { kind: "reply", text: formatCountProducts(snap, currency) };
   if (read === "debtors") return { kind: "reply", text: formatDebtors(snap, currency) };
   if (read === "stock") return { kind: "reply", text: formatStock(snap, currency) };

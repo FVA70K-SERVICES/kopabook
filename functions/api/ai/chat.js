@@ -470,13 +470,134 @@ export async function buildSnapshot(db, auth) {
     return days;
   }, null);
 
+  // Sales by month for the current month plus the previous 2 months,
+  // in one query: the month-sales and month-report reads need line
+  // items per month, not just window totals. Rows are bucketed in JS
+  // by business-local month, the same way the per-day map buckets by
+  // day. Every month in the range gets an entry, even with no sales.
+  // Per month: total, count, change given, items aggregated by product
+  // name (cap 20), and debts for sales with a balance due (cap 10).
+  // Voided sales never count. On a query failure the field is null,
+  // so the month readers fall through instead of claiming no sales.
+  snap.salesByMonth = await q(async () => {
+    let my = tm - 2;
+    let yy = ty;
+    while (my < 1) { my += 12; yy -= 1; }
+    const monthsStartDate = yy + "-" + String(my).padStart(2, "0") + "-01";
+    const monthsStartUtc = businessDayWindow(tz, monthsStartDate).startUtc;
+    const rs = await db.prepare(
+      `SELECT s.id, s.sale_number, COALESCE(c.name, 'Walk-in') AS customer,
+              s.total_amount, s.amount_paid, s.balance_due, COALESCE(s.change_given, 0) AS change_given,
+              s.created_at, si.quantity, si.line_total, p.name AS product_name
+       FROM sales s
+       LEFT JOIN sale_items si ON si.sale_id = s.id
+       LEFT JOIN products p ON p.id = si.product_id
+       LEFT JOIN customers c ON c.id = s.customer_id
+       WHERE s.business_id = ? AND s.created_at >= ? AND s.created_at < ? AND ${VOIDED}
+       ORDER BY s.created_at ASC`
+    ).bind(businessId, monthsStartUtc, monthEndUtc).all();
+    const months = {};
+    const keys = [];
+    {
+      let cy = yy;
+      let cm = my;
+      for (let i = 0; i < 3; i++) {
+        const key = cy + "-" + String(cm).padStart(2, "0");
+        months[key] = { key, total: 0, count: 0, changeGiven: 0, items: [], debts: [] };
+        keys.push(key);
+        cm += 1;
+        if (cm > 12) { cm = 1; cy += 1; }
+      }
+    }
+    const startMs = Date.parse(monthsStartDate + "T00:00:00Z");
+    const endMs = Date.parse(nextMonthDate + "T00:00:00Z");
+    const dayCount = Math.round((endMs - startMs) / dayMs);
+    const windows = [];
+    for (let i = 0; i < dayCount; i++) {
+      const d = new Date(startMs + i * dayMs).toISOString().slice(0, 10);
+      windows.push({ date: d, ...businessDayWindow(tz, d) });
+    }
+    const seen = new Set();
+    const agg = {};
+    for (const row of rs.results || []) {
+      const w = windows.find((x) => row.created_at >= x.startUtc && row.created_at < x.endUtc);
+      if (!w) continue;
+      const month = months[w.date.slice(0, 7)];
+      if (!month) continue;
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        month.total = Math.round((month.total + (Number(row.total_amount) || 0)) * 100) / 100;
+        month.count += 1;
+        month.changeGiven = Math.round((month.changeGiven + (Number(row.change_given) || 0)) * 100) / 100;
+        if ((Number(row.balance_due) || 0) > 0 && month.debts.length < 10) {
+          month.debts.push({ customer: row.customer || "Walk-in", amount: Number(row.balance_due) || 0, ref: row.sale_number || "" });
+        }
+      }
+      if (row.product_name) {
+        const key = w.date.slice(0, 7) + "\n" + row.product_name;
+        const a = agg[key] || (agg[key] = { product: row.product_name, qty: 0, amount: 0 });
+        a.qty += Number(row.quantity) || 0;
+        a.amount = Math.round((a.amount + (Number(row.line_total) || 0)) * 100) / 100;
+      }
+    }
+    for (const [key, a] of Object.entries(agg)) {
+      months[key.slice(0, 7)].items.push(a);
+    }
+    for (const key of keys) {
+      months[key].items.sort((a, b) => b.amount - a.amount);
+      months[key].items = months[key].items.slice(0, 20);
+    }
+    return months;
+  }, null);
+
+  // Expenses by month for the same 3 months, with each expense's
+  // description: the expenses-by-word read ("what did I spend on
+  // transport this month") matches on the description word. On a query
+  // failure the field is null, so that read falls through instead of
+  // claiming no expenses.
+  snap.expensesByMonth = await q(async () => {
+    let my = tm - 2;
+    let yy = ty;
+    while (my < 1) { my += 12; yy -= 1; }
+    const monthsStartDate = yy + "-" + String(my).padStart(2, "0") + "-01";
+    const rs = await db.prepare(
+      `SELECT COALESCE(e.note, ec.name, 'Expense') AS description, e.amount, e.incurred_on
+       FROM expenses e LEFT JOIN expense_categories ec ON ec.id = e.category_id
+       WHERE e.business_id = ? AND e.incurred_on >= ? AND e.incurred_on < ?
+       ORDER BY e.incurred_on ASC`
+    ).bind(businessId, monthsStartDate, nextMonthDate).all();
+    const months = {};
+    {
+      let cy = yy;
+      let cm = my;
+      for (let i = 0; i < 3; i++) {
+        const key = cy + "-" + String(cm).padStart(2, "0");
+        months[key] = { key, total: 0, count: 0, items: [] };
+        cm += 1;
+        if (cm > 12) { cm = 1; cy += 1; }
+      }
+    }
+    for (const row of rs.results || []) {
+      const key = String(row.incurred_on || "").slice(0, 7);
+      const month = months[key];
+      if (!month) continue;
+      month.total = Math.round((month.total + (Number(row.amount) || 0)) * 100) / 100;
+      month.count += 1;
+      if (month.items.length < 50) {
+        month.items.push({ description: row.description, amount: Number(row.amount) || 0, date: row.incurred_on });
+      }
+    }
+    return months;
+  }, null);
+
   snap.debtors = await q(async () => {
     const rs = await db.prepare(
-      `SELECT c.name, COALESCE((SELECT balance_after FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), 0) AS bal
+      `SELECT c.name, COALESCE((SELECT balance_after FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1), 0) AS bal,
+              (SELECT created_at FROM customer_ledger WHERE customer_id = c.id ORDER BY id DESC LIMIT 1) AS last_activity
        FROM customers c WHERE c.business_id = ? ORDER BY bal DESC LIMIT 20`
     ).bind(businessId).all();
     return (rs.results || [])
-      .map((r) => ({ name: r.name, balance: Number(r.bal) || 0 }))
+      .map((r) => ({ name: r.name, balance: Number(r.bal) || 0, lastActivity: r.last_activity || null }))
       .filter((r) => r.balance > 0);
   }, []);
 
@@ -525,6 +646,19 @@ export async function buildSnapshot(db, auth) {
     return Number(r && r.n) || 0;
   }, 0);
 
+  // Staff names with their business role, from business_members joined
+  // to users: the staff-names read lists these, never invented names.
+  // On a query failure the field is null, so the read answers with the
+  // count instead and says the names are not in the snapshot.
+  snap.staff = await q(async () => {
+    const rs = await db.prepare(
+      `SELECT u.full_name AS name, bm.role AS role
+       FROM business_members bm INNER JOIN users u ON u.id = bm.user_id
+       WHERE bm.business_id = ? ORDER BY bm.id ASC`
+    ).bind(businessId).all();
+    return (rs.results || []).map((r) => ({ name: r.name, role: r.role || "" }));
+  }, null);
+
   // All customers, not just debtors: "how many customers do I have"
   // needs this count; snap.debtors above is owing customers only.
   snap.customerCount = await q(async () => {
@@ -571,6 +705,8 @@ function snapshotText(snap, currency) {
     L.push(`Sales yesterday: ${fmt(snap.salesYesterday.total, currency)} across ${snap.salesYesterday.count} sales.`);
   }
   L.push(`Sales this month: ${fmt(snap.salesMonth.total, currency)} across ${snap.salesMonth.count} sales.`);
+  L.push(`Sales this week: ${fmt(snap.salesWeek.total, currency)} across ${snap.salesWeek.count} sales.`);
+  L.push(`Sales this year: ${fmt(snap.salesYear.total, currency)} across ${snap.salesYear.count} sales.`);
   if (snap.expensesToday) {
     L.push(`Expenses today: ${fmt(snap.expensesToday.total, currency)} across ${snap.expensesToday.count} expenses.`);
     // Profit is sales minus expenses for the same window. No cost_price
@@ -578,6 +714,8 @@ function snapshotText(snap, currency) {
     L.push(`Profit today: ${fmt(Math.round((Number(snap.salesToday.total || 0) - Number(snap.expensesToday.total || 0)) * 100) / 100, currency)} (sales minus expenses).`);
   }
   L.push(`Expenses this month: ${fmt(snap.expensesMonth.total, currency)} across ${snap.expensesMonth.count} expenses.`);
+  L.push(`Expenses this week: ${fmt(snap.expensesWeek.total, currency)} across ${snap.expensesWeek.count} expenses.`);
+  L.push(`Expenses this year: ${fmt(snap.expensesYear.total, currency)} across ${snap.expensesYear.count} expenses.`);
   if (snap.debtors.length) {
     L.push("Customers owing (name: balance): " + snap.debtors.map((d) => `${d.name}: ${fmt(d.balance, currency)}`).join("; ") + ".");
   } else {
@@ -2877,7 +3015,7 @@ const LANGUAGE_NAME_TO_CODE = {
   "yoruba": "yo",
   "igbo": "ig",
 };
-const LANGUAGE_SWITCH_RE = /^\s*(?:please\s+)?(?:speak|switch|talk|use|change)(?:\s+to|\s+in)?\s+(english|nigerian pidgin|pidgin|hausa|yoruba|igbo)\s*[.!?]*\s*$/i;
+const LANGUAGE_SWITCH_RE = /^\s*(?:please\s+)?(?:(?:can you|could you|will you)\s+)?(?:speak|switch|talk|use|change)(?:\s+to)?(?:\s+me)?(?:\s+in)?\s+(english|nigerian pidgin|pidgin|hausa|yoruba|igbo)\s*[.!?]*\s*$/i;
 
 function detectLanguageSwitch(message) {
   const m = String(message || "").match(LANGUAGE_SWITCH_RE);
@@ -2993,7 +3131,7 @@ async function buildEodSummary(db, auth, snap, currency) {
     expensesCount = Number(e && e.cnt) || 0;
   } catch (err) {}
   L.push(`Expenses today: ${fmt(expensesToday, currency)} across ${expensesCount} ${expensesCount === 1 ? "expense" : "expenses"}.`);
-  L.push(`Profit today: ${fmt(Math.round((Number(snap.salesToday.total || 0) - expensesToday) * 100) / 100, currency)} (sales minus expenses).`);
+  L.push(`Profit after expenses today: ${fmt(Math.round((Number(snap.salesToday.total || 0) - expensesToday) * 100) / 100, currency)} (sales minus expenses).`);
   try {
     const rs = await db.prepare(
       `SELECT p.name AS name, COALESCE(SUM(si.quantity),0) AS qty

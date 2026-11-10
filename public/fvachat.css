@@ -185,6 +185,39 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
   #fva-chat-input-area { padding: 10px 12px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); gap: 6px; }
 }
 
+/* Round 8: the login welcome bubble must never be clipped off the left
+   edge (live 2026-11-09 18:28 WAT, Fortune on his phone: "elcome back,
+   Fortune", "h two clear doors", "penses": a uniform left clip of about
+   14px, the bubble's own padding width). The sheet rule above and the
+   JS inline enforcement already place the panel at left 0 on a narrow
+   phone, but the sheet rule can be outranked by a host rule (the app
+   shell's body.kb-in-app selector beats it for right and bottom) and
+   the JS enforcement only runs on open and resize, so a stale sheet, a
+   host override, or a missed call can still push the panel left. This
+   backstop pins the sheet geometry in the sheet itself with !important,
+   so no host stylesheet can move the panel off the left edge at 480px
+   and below, even if the JS never runs. Same values as the rule above
+   and the inline enforcement, so the normal render is unchanged. The
+   desktop floating card is untouched. */
+@media (max-width: 480px) {
+  #fva-chat-window.open,
+  body.kb-in-app #fva-chat-window.open {
+    left: 0 !important; right: 0 !important; width: auto !important; max-width: none !important;
+  }
+}
+/* Round 8: the messages column keeps its side padding, and no bubble in
+   it can carry a left margin, whatever a host stylesheet says. The
+   column padding is what keeps a left aligned bubble 16px inside the
+   panel, and a negative left margin on a bubble is the other way text
+   can reach past the panel edge. Both are re-asserted here at a
+   specificity no single-ID host rule can beat. Same values as the base
+   rules, so the normal render is unchanged. */
+#fva-chat-window #fva-chat-messages { padding-left: 16px; padding-right: 16px; }
+#fva-chat-window #fva-chat-messages .fva-msg,
+#fva-chat-window #fva-chat-messages .fva-proposal-card,
+#fva-chat-window #fva-chat-messages .fva-pa-card,
+#fva-chat-window #fva-chat-messages .fva-mode-note { margin-left: 0; }
+
 /* v2 features */
 #fva-chat-menu-dropdown {
   position: absolute; top: 60px; right: 12px; z-index: 1001;
