@@ -3,7 +3,7 @@ import { getBotResponse, shouldEscalate } from './fvabot.js';
 import { handleOrderMessage } from './order-flow.js';
 import { handleBookingMessage } from './booking-flow.js';
 import { DEFAULT_MEMORY } from './business-memory.js';
-import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName, nameWelcome, WARM_CLARIFIERS, isBusinessDataQuestion, PUBLIC_LOCKDOWN_ANSWER, isBusinessActionCommand, isPlatformQuestion, isFrustrated, BUSINESS_ACTION_POINTER, PLATFORM_SUPPORT_SUGGESTION, SIGNED_OUT_ACTION_POINTER } from './kopabook-knowledge.js';
+import { KOPABOOK_KNOWLEDGE, KOPABOOK_MEMORY, getEscalationResponse, detectName, nameWelcome, WARM_CLARIFIERS, isBusinessDataQuestion, PUBLIC_LOCKDOWN_ANSWER, isBusinessActionCommand, isPlatformQuestion, isFrustrated, BUSINESS_ACTION_POINTER, PLATFORM_SUPPORT_SUGGESTION, SIGNED_OUT_ACTION_POINTER, resolveSupportShortcut } from './kopabook-knowledge.js';
 import { getAuthContext } from '../_utils.js';
 import { runKopaAiChat } from '../ai/chat.js';
 import { handleOwnerCommand } from './bot-owner.js';
@@ -82,6 +82,12 @@ function matchKnowledge(message, entries) {
 }
 
 export async function getKopaBookResponse(message, db) {
+  // Shortcuts first: a bare chip number ("2") or loose phrasing ("Done
+  // next", "I can't do some more") answers directly, never with a
+  // repeat of the intro. D1 knowledge stays first for content rows
+  // after that, hardcoded second (fallback).
+  const shortcut = resolveSupportShortcut(message);
+  if (shortcut) return shortcut;
   // D1 knowledge first (fresh), hardcoded second (fallback). The D1 load
   // is raced against a 5s timeout: a hung D1 must never hang the support
   // reply, it just falls back to the hardcoded knowledge below.

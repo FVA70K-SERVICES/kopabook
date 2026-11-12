@@ -73,8 +73,20 @@ const BUSINESS_DATA_SIGNALS = [
   'customer owes', 'stock level', 'my expenses', 'my staff', 'my debts'
 ];
 
+// A how-to question ("how do I remind a customer who owes me",
+// "how do I send a receipt on WhatsApp") is platform help, not a
+// business-data ask and not a shop command. Without this exemption
+// the words "who owes me" inside a how-to question hit the lockdown
+// answer, which is wrong: the visitor is asking how the feature
+// works, not for any store's private data.
+export function isHowToQuestion(message) {
+  const lower = String(message || '').toLowerCase().trim();
+  return /^(how do i|how can i|how to|how do you|can you show me how|show me how)\b/.test(lower);
+}
+
 export function isBusinessDataQuestion(message) {
   const lower = String(message || '').toLowerCase();
+  if (isHowToQuestion(lower)) return false;
   if (BUSINESS_DATA_SIGNALS.some(s => lower.includes(s))) return true;
   // "how much is X" / "price of X" about a product, not about KopaBook plans
   if (/how much (is|are|does)/.test(lower) && !/kopabook|plan|subscription|starter|pro|solo|pricing|cost|start|free/.test(lower)) return true;
@@ -83,6 +95,35 @@ export function isBusinessDataQuestion(message) {
 }
 
 export const KOPABOOK_KNOWLEDGE = [
+  {
+    // Debtor-reminder how-to. This entry MUST stay before the lockdown
+    // entry below: the phrase "who owes me" inside a how-to question
+    // would otherwise match the lockdown patterns and answer wrongly.
+    // Kopa Support cannot see any shop's debtors, so it points to Ask
+    // Kopa AI and the Debts page instead of naming anyone.
+    patterns: ['how do i remind a customer', 'how to remind a customer', 'remind a customer who owes', 'remind a debtor', 'send a reminder to a customer', 'chase a debtor', 'payment reminder', 'remind customers who owe', 'how do i send a reminder'],
+    answer: 'To remind a customer who owes you, open your KopaBook app, go to Debts, open the customer, and tap the WhatsApp reminder button: it sends them a polite message with what they owe. You can also switch to Ask Kopa AI here and say "remind Favour of the balance on WhatsApp" and it will draft the message for you. This Kopa Support chat cannot see your customers or what anyone owes.',
+    quickReplies: ['Features', 'Talk to human']
+  },
+  {
+    // Expense how-to. These two entries MUST stay before the generic
+    // "how do I record" entry and the pay-with-card entry below: both
+    // of those match on a shared word ("record", "payment") and would
+    // answer a payment/expense how-to with the sale steps or the
+    // subscription payment text instead. Bare "record an expense" is
+    // a shop command and routes to Ask Kopa AI; only the "how do I"
+    // phrasing reaches here.
+    patterns: ['how do i record an expense', 'how to record an expense', 'how do i add an expense', 'how to add an expense', 'how do i log an expense', 'how to log an expense'],
+    answer: 'To record an expense, open your KopaBook app, go to Expenses, tap New Expense, add what you spent on and the amount, and save it. Your expense shows on the Dashboard right away, and Ask Kopa AI here can record it for you too: switch to Ask Kopa AI and say "I spent 5,000 on transport today".',
+    quickReplies: ['Features', 'How to start', 'Talk to human']
+  },
+  {
+    // Payment-recording how-to: KopaBook records payments, it never
+    // takes or collects them.
+    patterns: ['how do i record a payment', 'how to record a payment', 'how do i record a customer payment', 'how to record a customer payment', 'how do i record payment'],
+    answer: 'To record a payment from a customer, switch to Ask Kopa AI here and say who paid and how much, for example "Favour paid 10,000 today", then tap Confirm. Or open Debts in the app, open the customer, and record the payment there. KopaBook records the payment and updates what the customer owes. It never takes or collects money itself.',
+    quickReplies: ['Features', 'How to start', 'Talk to human']
+  },
   {
     // Lockdown entry (backup to the guard in send.js): never discuss private store data
     patterns: ['who owes me', 'debtors', 'my stock', 'my customers', 'my sales', 'find customer', 'my business', 'my inventory', 'my products'],
@@ -131,6 +172,81 @@ export const KOPABOOK_KNOWLEDGE = [
     quickReplies: ['How to start', 'Pricing', 'Talk to human']
   },
   {
+    // Receipt how-to, before the generic WhatsApp/receipt entry below:
+    // "how do I send a receipt on WhatsApp" must get steps, not the
+    // one-line feature mention.
+    patterns: ['how do i send a receipt', 'how to send a receipt', 'send a receipt', 'share a receipt', 'receipt on whatsapp', 'receipt by email', 'print a receipt', 'print receipt', 'email a receipt'],
+    answer: 'To send a receipt, open your KopaBook app, go to Sales, open the sale, and tap Share. You can send it on WhatsApp, by email, or print it. The receipt shows your business name, the items, the total, and what was paid.',
+    quickReplies: ['Features', 'How to start', 'Talk to human']
+  },
+  {
+    // WhatsApp contact, before the generic WhatsApp entry below.
+    patterns: ['whatsapp number', 'whatsapp us', 'chat on whatsapp', 'whatsapp contact', 'your whatsapp', 'whatsapp line'],
+    answer: 'You can reach us on WhatsApp at +234 813 024 4617. We reply quickly!',
+    quickReplies: ['Talk to human', 'Features']
+  },
+  {
+    // A reminder for yourself: Ask Kopa AI sets it, Kopa Support cannot.
+    patterns: ['set a reminder', 'remind me', 'remind me to', 'set reminder'],
+    answer: 'To set a reminder for yourself, switch to Ask Kopa AI here and say "remind me to ..." with what you want to be reminded about. Ask Kopa AI works with your own shop and keeps your reminders. Kopa Support cannot set reminders for you.',
+    quickReplies: ['Features', 'Talk to human']
+  },
+  {
+    // Product and stock how-to, before the generic stock entry below.
+    patterns: ['how do i add a product', 'how to add a product', 'how do i add stock', 'how to add stock', 'how do i restock', 'how to restock', 'low stock alert', 'how do i set a low stock alert'],
+    answer: 'To add a product, open your KopaBook app, go to Products, tap New Product, add the name, price and opening stock, and save it. To add stock later, open the product and tap Add Stock. When stock runs low, KopaBook alerts you before it runs out. Free plan handles 100 products, Starter 1,000, Solo 500, Pro unlimited.',
+    quickReplies: ['Features', 'Pricing', 'Talk to human']
+  },
+  {
+    // Customer how-to.
+    patterns: ['how do i add a customer', 'how to add a customer', 'how do i find a customer', 'how to find a customer'],
+    answer: 'To add a customer, open your KopaBook app, go to Customers, tap New Customer, add the name and phone number, and save it. To find one later, open Customers and search by name. When you record a sale, you can pick the customer so their debt is tracked.',
+    quickReplies: ['Features', 'How to start', 'Talk to human']
+  },
+  {
+    // Staff how-to, before the generic staff entry below: "how do I add
+    // staff" must get steps and plan limits, not the one-line mention.
+    patterns: ['how do i add staff', 'how to add staff', 'how do i add a staff member', 'staff roles', 'staff permissions', 'staff role', 'what can staff do'],
+    answer: 'To add staff, sign in, open Settings, open Staff accounts, and invite the person by name and phone number. You control what each person can see and do: owners see everything, staff see only what you allow, for that business only. Free plan allows 1 staff, Starter 5, Solo 3, Pro unlimited.',
+    quickReplies: ['Pricing', 'Features', 'Talk to human']
+  },
+  {
+    // Project how-to.
+    patterns: ['how do i create a project', 'how to create a project', 'create a project', 'add a project', 'project'],
+    answer: 'To create a project, open your KopaBook app, go to Projects, tap New Project, add the name and budget, and save it. You can record income and expenses against the project and see what it has spent and what is left. Ask Kopa AI here can also create and list your projects for you.',
+    quickReplies: ['Features', 'How to start', 'Talk to human']
+  },
+  {
+    // Plan specifics, before the generic price entry below: "what is
+    // the Starter plan" must get the Starter answer, not the full
+    // price list.
+    patterns: ['what is starter', 'starter plan', 'what is the starter plan', 'what is pro', 'pro plan', 'what is the pro plan', 'free plan', 'what is the free plan', 'what is free plan'],
+    answer: 'Free is NGN 0, free forever: 1 business, 100 products, 1 staff, Ask Kopa AI 5 questions a day, read-only. Starter is NGN 1,000 a month or NGN 10,000 a year: 5 businesses, 1,000 products, 5 staff, Ask Kopa AI 20 questions a day plus actions. Pro is NGN 10,000 a month or NGN 100,000 a year: unlimited businesses, products and staff, Ask Kopa AI 100 questions a day. Recording a sale is never blocked on any plan. Want help picking one?',
+    quickReplies: ['Pricing', 'Start free', 'Talk to human']
+  },
+  {
+    // Login help, before the generic support entry below ("sign in
+    // problem" contains "problem", which that entry would match).
+    patterns: ['forgot password', 'reset password', 'forgot my password', 'cannot log in', 'cant log in', "can't log in", 'can not log in', 'sign in problem', 'login problem', 'log in problem', 'i cannot sign in', 'i cant sign in', "i can't sign in", 'cannot sign in'],
+    answer: 'If you forgot your password, open the KopaBook sign-in screen and tap Forgot password, then follow the link we send to your email to set a new one. If you still cannot sign in, WhatsApp us at +234 813 024 4617 with the email on the account and we will help you get back in.',
+    quickReplies: ['Talk to human', 'How to start']
+  },
+  {
+    // Stuck: loose phrasing for "I cannot do this". This is the
+    // knowledge fallback for the same phrasing the shortcut answers
+    // first in getKopaBookResponse.
+    patterns: ["can't do", 'cant do', 'cannot do', 'can not do', 'stuck', 'confused', "don't understand", 'dont understand', 'do not understand', 'i cant do', 'i cannot do'],
+    answer: 'No problem, let us take it one step at a time. Tell me what you were trying to do, in your own words, and I will walk you through it. Or tap Talk to human and a person from the FVA70K team will help you right away.',
+    quickReplies: ['Talk to human', 'How to start', 'Features']
+  },
+  {
+    // "Done, what next": the visitor finished a step and wants the
+    // next one, not a repeat of the intro.
+    patterns: ['done next', 'what next', 'what is next', 'whats next', "what's next", 'next step', 'next steps', 'what now'],
+    answer: 'Good, here is what to do next: 1. Add your products, if you have not yet. 2. Record your first sale. 3. Check your Dashboard to see the day clearly. If you get stuck at any step, tell me which one and I will walk you through it.',
+    quickReplies: ['How to start', 'Features', 'Talk to human']
+  },
+  {
     patterns: ['what is my balance', 'my balance', 'check my balance', 'balance'],
     answer: 'For your own shop balance, sign in to your KopaBook account, open Chat, and choose Ask Kopa AI: it works with your own shop records and can tell you your balance there. This public Kopa Support chat cannot see or change any shop records. If you are already signed in, switch to Ask Kopa AI and ask there.',
     quickReplies: ['Pricing', 'Talk to human']
@@ -161,7 +277,7 @@ export const KOPABOOK_KNOWLEDGE = [
     quickReplies: ['Pricing', 'How to start', 'Talk to human']
   },
   {
-    patterns: ['how to start', 'sign up', 'register', 'create account', 'get started'],
+    patterns: ['how to start', 'how do i start', 'how can i start', 'how do i get started', 'how to begin', 'how do i begin', 'sign up', 'register', 'create account', 'get started'],
     answer: 'Getting started is easy:\n1. Create your free account\n2. Add your business\n3. Start recording sales\n\nNo card needed for the free plan. Want me to guide you?',
     quickReplies: ['Yes, guide me', 'Pricing', 'Talk to human']
   },
@@ -284,13 +400,15 @@ export const KOPABOOK_MEMORY = {
 export function isBusinessActionCommand(message) {
   const lower = String(message || '').toLowerCase().trim();
   if (!lower) return false;
-  if (/^(how|where|can i|can you show|what is|why)\b/.test(lower) && /record|add|use|find|see/.test(lower) && !lower.includes('record it')) return false;
+  if (isHowToQuestion(lower)) return false;
+  if (/^(how|where|can i|can you show|what is|why)\b/.test(lower) && /record|add|use|find|see|remind|send|share/.test(lower) && !lower.includes('record it')) return false;
   if (isBusinessDataQuestion(lower)) return true;
   const patterns = [
     /\bi sold\b/, /\bsold\b.+\bto\b/, /\brecord (it|this|that|a|the)/, /\brecord (a |the |my )?(sale|expense|payment)/,
     /\b(add|log|enter|create|put)\b.+\b(sale|expense|product|stock|customer)\b/,
     /\bspent\b.+\bon\b/, /\bexpense of\b/, /\brestock\b/, /\badd stock\b/,
     /\bhow much did i (sell|make|spend)\b/, /\bhow many sales\b/, /\btoday'?s sales\b/, /\bsales today\b/,
+    /\bhow much profit\b/, /\bmy profit\b/, /\bprofit (this|last) (year|month|week)\b/,
     /\bwho owes\b/, /\bwho is owing\b/, /\bowing me\b/, /\bdebtors?\b/, /\boutstanding balance\b/,
     /\bmy balance\b/, /\bbalance\b/, /\bsend (a )?reminder\b/, /\bremind\b.+\b(customer|debtor)\b/,
     /\bmy (sales|expenses|profit|stock|products|customers|debts|records)\b/,
@@ -362,3 +480,89 @@ export function ownerWelcome(fullName) {
 }
 
 export const SUPPORT_WELCOME = 'Welcome to Kopa Support. This side is for questions about KopaBook itself: pricing, features and problems. A person from the FVA70K team gives the human help here, by hand. Kopa Support cannot see or change your shop records. For sales, expenses and business questions, switch to Ask Kopa AI.';
+
+// ---------------------------------------------------------------------------
+// Support shortcuts (round 9). The chips the bot shows (1 Pricing, 2
+// Features, 3 How to start, 4 Talk to human) are only useful if a bare
+// number answers them, and loose phrasing ("I can't do some more",
+// "Done next") must be understood the way a person would understand
+// it. These run before knowledge matching in getKopaBookResponse, so a
+// bare number never repeats the intro and a stuck visitor never gets
+// the failure line when the knowledge base can answer.
+// ---------------------------------------------------------------------------
+
+// Word-boundary matcher, same rule as send.js: bare substrings caused
+// live false hits ('hi' in 'this', 'fee' in 'feel').
+function matchesKnowledgePattern(lower, pattern) {
+  const p = String(pattern || '').toLowerCase().trim();
+  if (!p) return false;
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + escaped + '\\b').test(lower);
+}
+
+function findKnowledgeAnswer(pattern) {
+  const entry = KOPABOOK_KNOWLEDGE.find((e) => (e.patterns || []).includes(pattern));
+  if (!entry) return null;
+  return {
+    answer: entry.answer,
+    quickReplies: entry.quickReplies ? [...entry.quickReplies] : [],
+    escalate: entry.escalate || false,
+    confidence: 'high',
+  };
+}
+
+function nextStepsReply() {
+  const r = findKnowledgeAnswer('done next');
+  return r || {
+    answer: 'Good, here is what to do next: 1. Add your products, if you have not yet. 2. Record your first sale. 3. Check your Dashboard to see the day clearly. If you get stuck at any step, tell me which one and I will walk you through it.',
+    quickReplies: ['How to start', 'Features', 'Talk to human'],
+    escalate: false,
+    confidence: 'high',
+  };
+}
+
+function stuckReply() {
+  const r = findKnowledgeAnswer("can't do");
+  return r || {
+    answer: 'No problem, let us take it one step at a time. Tell me what you were trying to do, in your own words, and I will walk you through it. Or tap Talk to human and a person from the FVA70K team will help you right away.',
+    quickReplies: ['Talk to human', 'How to start', 'Features'],
+    escalate: false,
+    confidence: 'high',
+  };
+}
+
+// A bare chip number (1 Pricing, 2 Features, 3 How to start, 4 Talk to
+// human) answers with that chip's content, never the intro again.
+export function supportChipReply(n) {
+  if (n === 1) return findKnowledgeAnswer('pricing');
+  if (n === 2) return findKnowledgeAnswer('features');
+  if (n === 3) return findKnowledgeAnswer('how to start');
+  if (n === 4) return getEscalationResponse('talk to human');
+  return null;
+}
+
+export function resolveSupportShortcut(message) {
+  const lower = String(message || '').toLowerCase().trim();
+  if (!lower) return null;
+  const num = lower.match(/^(\d)\s*[.!?]*$/);
+  if (num) return supportChipReply(Number(num[1]));
+  if (lower === 'done' || lower === 'done.' || /\b(done next|what next|what is next|whats next|what's next|next steps?|what now)\b/.test(lower)) return nextStepsReply();
+  if (/\b(can't do|cant do|cannot do|can not do|stuck|confused|don't understand|dont understand|do not understand)\b/.test(lower)) return stuckReply();
+  if (lower === 'start free' || lower === 'start for free') return findKnowledgeAnswer('how to start');
+  return null;
+}
+
+// True when the knowledge base answers this message deterministically
+// (a shortcut, or any hardcoded entry). bot-ai.js uses this to skip
+// the model for questions the rules already answer.
+export function isSupportDeterministic(message) {
+  if (resolveSupportShortcut(message)) return true;
+  const lower = String(message || '').toLowerCase().trim();
+  if (!lower) return false;
+  for (const entry of KOPABOOK_KNOWLEDGE) {
+    for (const pattern of (entry.patterns || [])) {
+      if (pattern && matchesKnowledgePattern(lower, pattern)) return true;
+    }
+  }
+  return false;
+}

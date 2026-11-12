@@ -23,6 +23,11 @@
   // anything, so a chat opened within milliseconds of an unlock
   // cannot paint stale rows.
   let loginClearPromise = null;
+  // Round 9: the keypad-open flag. On phones the layout viewport does
+  // not always shrink when the keypad opens (iOS), so the widget tracks
+  // the visual viewport separately (applyKeyboardOffset) and treats a
+  // covered viewport as short, even when innerHeight still says 800.
+  let keyboardOpen = false;
   let isOpen = false;
   let unread = 0;
   let soundOn = localStorage.getItem('fva_chat_sound') !== 'off';
@@ -83,7 +88,7 @@
       if (typeof window.addEventListener === "function") {
         window.addEventListener("popstate", markInApp);
         window.addEventListener("hashchange", markInApp);
-        window.addEventListener("resize", function () { try { if (isOpen) applyNarrowSheet(); } catch (e) {} });
+        window.addEventListener("resize", function () { try { if (isOpen) { applyNarrowSheet(); applyKeyboardOffset(); applyTabInset(); } } catch (e) {} });
       }
     }
   } catch (e) {}
@@ -99,6 +104,20 @@
       };
     } catch (e) {}
   }
+  // Round 9: keypad-open tracking (all sites, not only KopaBook). The
+  // visual viewport shrinks when the keypad opens even where the layout
+  // viewport does not (iOS), so listen for it and re-anchor the sheet
+  // (applyKeyboardOffset). Registered once at init; the handler only
+  // acts while the panel is open.
+  try {
+    if (typeof window !== "undefined" && window.visualViewport
+      && typeof window.visualViewport.addEventListener === "function"
+      && typeof window.addEventListener === "function") {
+      window.visualViewport.addEventListener("resize", function () {
+        try { if (isOpen) { applyKeyboardOffset(); applyTabInset(); } } catch (e) {}
+      });
+    }
+  } catch (e) {}
   let chatMode = '';
   try { chatMode = localStorage.getItem('fva_chat_mode_kopabook') || ''; } catch (e) {}
   if (chatMode !== 'ai' && chatMode !== 'support') chatMode = '';
@@ -490,6 +509,19 @@
         win.style.width = "auto"; win.style.maxWidth = "none";
         win.style.height = "auto"; win.style.maxHeight = "none";
         win.style.borderRadius = "0";
+        // The keypad is open: the lift applied by applyKeyboardOffset
+        // must survive a re-assert (open, resize), or the sheet drops
+        // back under the keypad.
+        if (keyboardOpen) {
+          try {
+            const vv = window.visualViewport;
+            const covered = window.innerHeight - vv.height - (vv.offsetTop || 0);
+            if (covered > 80) {
+              win.style.bottom = (88 + covered) + "px";
+              win.style.top = Math.max(0, vv.offsetTop || 0) + "px";
+            }
+          } catch (e) {}
+        }
       } else {
         clearNarrowSheet();
       }
@@ -500,6 +532,48 @@
       win.style.left = ""; win.style.right = ""; win.style.top = ""; win.style.bottom = "";
       win.style.width = ""; win.style.maxWidth = ""; win.style.height = ""; win.style.maxHeight = "";
       win.style.borderRadius = "";
+    } catch (e) {}
+  }
+
+  // Round 9: short viewports. The thread collapses when the viewport
+  // is short (keypad open, short window): the panel chrome eats the
+  // whole sheet, so the messages column keeps no room. Short means a
+  // layout height of 560px or less, or the keypad covering the viewport
+  // (tracked separately, because on iOS the layout height never moves).
+  function isShortViewport() {
+    try {
+      if (keyboardOpen) return true;
+      if (window.innerHeight && window.innerHeight <= 560) return true;
+    } catch (e) {}
+    return false;
+  }
+  // Round 9: keypad re-anchor. On iOS the layout viewport does not
+  // shrink when the keypad opens, so a sheet anchored to its bottom
+  // sits under the keypad and the composer is unreachable. The visual
+  // viewport does shrink: lift the sheet by exactly the covered height
+  // so the composer stays above the keypad, and mark the window so the
+  // short-height chrome rules apply. Only in sheet mode (480px and
+  // below) while the panel is open. When the keypad closes, the sheet
+  // is restored by applyNarrowSheet. If there is no visual viewport
+  // (desktop, older browsers, tests) this is a no-op.
+  function applyKeyboardOffset() {
+    try {
+      if (!window.visualViewport || window.innerWidth > 480 || !isOpen) {
+        if (keyboardOpen) { keyboardOpen = false; win.classList.remove("fva-keyboard"); applyNarrowSheet(); }
+        return;
+      }
+      const vv = window.visualViewport;
+      const covered = window.innerHeight - vv.height - (vv.offsetTop || 0);
+      if (covered > 80) {
+        keyboardOpen = true;
+        win.classList.add("fva-keyboard");
+        win.style.bottom = (88 + covered) + "px";
+        win.style.top = Math.max(0, vv.offsetTop || 0) + "px";
+      } else if (keyboardOpen) {
+        keyboardOpen = false;
+        win.classList.remove("fva-keyboard");
+        applyNarrowSheet();
+      }
     } catch (e) {}
   }
 
@@ -617,6 +691,12 @@
   // being shown, so public chats with no tab row get no dead band.
   // The same 48px lives in fvachat.css as the backstop rule.
   var TAB_ROW_INSET_PX = 48;
+  // Round 9: while the viewport is short (keypad open, short window)
+  // the full 48px inset costs a third of the thread. 16px still keeps
+  // the scroller's clip edge a clear gap below the pills, so a bubble
+  // can never read as half hidden behind them, and the thread keeps
+  // the room. The sheet carries the same 16px as a backstop.
+  var TAB_ROW_INSET_SHORT_PX = 16;
   function applyTabInset() {
     try {
       const tabs = body.querySelector('#fva-mode-tabs');
@@ -631,6 +711,15 @@
         const el = body.querySelector(sel);
         if (el) el.style.marginTop = on ? TAB_ROW_INSET_PX + 'px' : '';
       });
+      // Round 9: short viewport, short inset. Applied after the 48px
+      // enforcement above, so the 48px line stays the default and the
+      // short inset only ever replaces it while the viewport is short.
+      if (on && isShortViewport()) {
+        ['#fva-chat-messages', '#fva-case-history', '#fva-owner-inbox'].forEach(sel => {
+          const el = body.querySelector(sel);
+          if (el) el.style.marginTop = TAB_ROW_INSET_SHORT_PX + 'px';
+        });
+      }
     } catch (e) {}
   }
 
@@ -1823,6 +1912,37 @@
   function closeChat() {
     stopVoiceMode();
     hideBotTyping();
+    // Round 9: closing the panel ends the thread. Fortune (2026-11-11):
+    // close and reopen must show a fresh chat, never the old thread.
+    // Until now close only hid the panel: the session id stayed in
+    // memory and in storage, so the next open reloaded the whole old
+    // thread (and on a page reload, with the read cursor reset, the
+    // full old history painted). The session id is now dropped in
+    // memory and in storage, the read cursor and the proposal/thinking
+    // state are reset, and the visible thread is emptied, so the next
+    // open starts a brand-new session (startSession) and shows only
+    // the welcome greeting. The server rows of the old session are left
+    // to the 24-hour sweep: no server call is made here, so closing
+    // the panel can never wipe a support record, and the next login
+    // still clears through the login path (round 6, unchanged). A
+    // proposal only exists while the panel is open, so ending the
+    // thread here cannot interrupt a Confirm; the Confirm flow itself
+    // is untouched.
+    try { localStorage.removeItem('fva_chat_session_' + SITE_ID); } catch (e) {}
+    sessionId = null;
+    lastMsgId = 0;
+    activeProposal = null;
+    try { renderedProposalIds.clear(); } catch (e) {}
+    typingSeq = 0;
+    thinkingFailedSeq = 0;
+    replyDeliveredSeq = 0;
+    try { clearThinkingTimers(); } catch (e) {}
+    try {
+      const wrap = body.querySelector('#fva-chat-messages');
+      if (wrap) wrap.innerHTML = '';
+    } catch (e) {}
+    keyboardOpen = false;
+    try { win.classList.remove('fva-keyboard'); } catch (e) {}
     isOpen = false;
     win.classList.remove('open');
     clearNarrowSheet();
@@ -1881,6 +2001,13 @@
   }
 
   function showChatUI() {
+    // Round 9: the body is rebuilt from scratch here, so the read
+    // cursor must restart at 0 or the repainted thread comes back
+    // empty (the round-6 reopen bug: lastMsgId survived the rebuild
+    // and loadHistory skipped every row it had already seen). With
+    // the round-9 close rule the session is fresh by the time this
+    // runs, so 0 is always right here.
+    lastMsgId = 0;
     body.innerHTML =
       '<div id="fva-mode-tabs" style="display:none;">' +
         '<button data-mode="ai">Ask Kopa AI</button>' +

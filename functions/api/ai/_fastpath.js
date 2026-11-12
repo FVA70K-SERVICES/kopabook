@@ -828,7 +828,7 @@ const WEEKDAY_PATTERN = "monday|tuesday|wednesday|thursday|friday|saturday|sunda
 // A bare number is a date word too, but it never triggers a drop on
 // its own: product names like "Product 1" reduce to a bare number
 // after the filler strip, and that number is the product.
-const DATE_WORDS = new Set([...WEEKDAY_NAMES, ...Object.keys(MONTH_NUMBERS), "on", "of", "last", "this", "next", "month"]);
+const DATE_WORDS = new Set([...WEEKDAY_NAMES, ...Object.keys(MONTH_NUMBERS), "on", "of", "last", "this", "next", "month", "year", "years"]);
 
 export function isQuestionOrDateOnly(product) {
   const words = String(product || "")
@@ -875,6 +875,16 @@ const SALE_DATE_PATTERNS = [
   new RegExp("\\b(?:in\\s+)?(?:last|this|next)\\s+month\\b", "g"),
   new RegExp("\\b(?:in\\s+)?(?:" + MONTH_PATTERN + ")\\s+\\d{4}\\b", "g"),
   new RegExp("\\b(?:in\\s+)?(?:" + MONTH_PATTERN + ")\\b", "g"),
+  // Year phrases are never part of a product or customer name either:
+  // "what did i sold last year" keeps no product at all, and "i sold
+  // 2 laptops in 2025" keeps 2 Laptops. The year pattern needs the
+  // word "in": a bare "2025" in a statement ("i sold a laptop for
+  // 2025") is an amount, not a year, and stays for the amount parser.
+  // A bare year in a question ("what did i sold 2025?") is dropped by
+  // the question-or-date guard below, which treats a plain number as
+  // a date word.
+  new RegExp("\\b(?:in\\s+)?(?:last|this|next)\\s+years?\\b", "g"),
+  new RegExp("\\bin\\s+(?:the\\s+year\\s+)?(?:19|20)\\d{2}\\b", "g"),
 ];
 
 // Payment methods the owner states in words. Only set when stated;
@@ -1717,7 +1727,12 @@ export function classifyReadIntent(text) {
   if (/\breminder\b/.test(t) && /\b(done|mark|complete|finished)\b/.test(t)) return "reminder_done";
   // Day report: "Get me yesterday report" is a report for one day,
   // never the model. The day is resolved by the step, from the words.
-  if (includesAny(t, ["get me yesterday report", "get me today's report", "get me todays report", "show me yesterday's report", "show me yesterday report", "give me the report for yesterday", "give me yesterday's report", "yesterday's report", "report for yesterday", "report for today", "today's report", "todays report"])) return "dayreport";
+  if (includesAny(t, ["get me yesterday report", "get me today's report", "get me todays report", "show me yesterday's report", "show me yesterday report", "give me the report for yesterday", "give me yesterday's report", "yesterday's report", "report for yesterday", "report for today", "today's report", "todays report", "get report yesterday", "get report today", "report yesterday", "report today", "yesterday report", "today report", "get yesterday report", "get today report", "show me today report", "show me today's report", "show me todays report", "get me today report", "get me yesterday's report"])) return "dayreport";
+  // A month report in any word order: "Get report last month sales",
+  // "Get the report for last month", "Show me last month report",
+  // "Report for October", "Monthly report". The month is resolved by
+  // the step, from the words.
+  if (/\breport\b/.test(t) && (/\b(last|this|next)\s+month\b/.test(t) || /\bmonthly report\b/.test(t) || /\bsales report\b/.test(t)) && !/^\s*report\s+(a\s+|the\s+)?(sale|expense|payment)\b/.test(t)) return "monthreport";
   // Month report: "Get me last month report" is a report for one
   // month, same shape as the day report. The month is resolved by the
   // step, from the words.
@@ -1725,6 +1740,20 @@ export function classifyReadIntent(text) {
   // A named-month report: "Get me October report", "Report for
   // October 2026". The month is resolved by the step.
   if (/report\s+(for\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b/.test(t)) return "monthreport";
+  // A week report: "Get me this week report", "Last week report",
+  // "Report for last week", "Weekly report". The week is resolved by
+  // the step.
+  if (/\breport\b/.test(t) && (/\b(this|last)\s+week\b/.test(t) || /\bweekly report\b/.test(t)) && !/^\s*report\s+(a\s+|the\s+)?(sale|expense|payment)\b/.test(t)) return "weekreport";
+  if (includesAny(t, ["this week's report", "this weeks report", "last week's report", "last weeks report"])) return "weekreport";
+  // A year report: "Get me last year report", "This year report",
+  // "Report for 2025", "Yearly report". The year is resolved by the
+  // step.
+  if (/\breport\b/.test(t) && (/\b(last|this|next)\s+year\b/.test(t) || /\bin\s+(?:the\s+year\s+)?(?:19|20)\d{2}\b/.test(t) || /\bfor\s+(?:19|20)\d{2}\b/.test(t) || /\byearly report\b/.test(t) || /\bannual report\b/.test(t)) && !/^\s*report\s+(a\s+|the\s+)?(sale|expense|payment)\b/.test(t)) return "yearreport";
+  // Today's activity: a day report from the snapshot, never the model.
+  // "Check today's activity", "What happened today", "What did I do
+  // today". Yesterday's activity is the same report for yesterday.
+  if (includesAny(t, ["check today's activity", "check todays activity", "check today activity", "today's activity", "todays activity", "today activity", "what happened today", "what did i do today", "what did we do today", "what have i done today", "what have we done today", "show today's activity", "show todays activity", "show me today's activity"])) return "todayactivity";
+  if (includesAny(t, ["check yesterday's activity", "check yesterdays activity", "check yesterday activity", "yesterday's activity", "yesterdays activity", "yesterday activity", "what happened yesterday", "what did i do yesterday", "what did we do yesterday", "show yesterday's activity", "show me yesterday's activity"])) return "yesterdayactivity";
   // The plan this business is on: the snapshot tier answers it inside
   // Ask Kopa AI, never Kopa Support. Runs before the advice check on
   // purpose: "what plan am I on" contains the word "plan".
@@ -1770,16 +1799,17 @@ export function classifyReadIntent(text) {
   // read: "who is overdue" is about the debtors, not the whole list.
   if (includesAny(t, ["who is overdue", "who are overdue", "overdue debts", "overdue customers", "overdue payments", "who has overdue", "any overdue"])) return "overdue";
   if (includesAny(t, ["who owes", "who owe", "who dey owe", "who is owing", "who is owed", "debtors", "customers owing", "who owes me", "who owes us", "who still owes", "anyone owing", "who has not paid", "who hasn't paid", "unpaid customers"])) return "debtors";
-  if (includesAny(t, ["low stock", "running low", "running out", "out of stock", "low on stock", "almost finished", "almost out"])) return "lowstock";
+  if (includesAny(t, ["low stock", "running low", "running out", "out of stock", "low on stock", "almost finished", "almost out", "stock alert", "stock alerts", "what needs restocking", "what should i restock", "anything running low", "what is out of stock", "need to restock", "needs restocking"])) return "lowstock";
   // Staff names: the snapshot now carries the staff list with roles.
   // Runs before the stock read: "show me my staff" contains no stock
   // word, but the names question must never fall to the model.
-  if (includesAny(t, ["show me my staff", "show my staff", "show me our staff", "list my staff", "list our staff", "list the staff", "who works for me", "who works for us", "who works here", "what are my staff names", "what are the staff names", "names of my staff", "staff names", "my staff names", "who are my staff", "who are the staff"])) return "staffnames";
-  // A bare names question ("What is there names"): the step checks the
-  // thread for what "their" refers to (the staff question just asked),
-  // so this only classifies here and the step asks when there is no
-  // staff context at all.
-  if (/^\s*what (is|are) (their|there) names?\s*[.!?]*$/.test(t) || /^\s*(their|there) names?\s*[.!?]*$/.test(t) || /^\s*what are the names\s*[.!?]*$/.test(t) || /^\s*who are they\s*[.!?]*$/.test(t) || /^\s*name them\s*[.!?]*$/.test(t)) return "staffnames";
+  if (includesAny(t, ["show me my staff", "show my staff", "show me our staff", "list my staff", "list our staff", "list the staff", "who works for me", "who works for us", "who works here", "what are my staff names", "what are the staff names", "names of my staff", "staff names", "my staff names", "who are my staff", "who are the staff", "what is the name of the staff", "what is the name of my staff", "name of the staff", "names of the staff", "name of my staff", "names of my staff"])) return "staffnames";
+  // A bare names question ("What is there names", "What is the
+  // name?"): the step checks the thread for what "their" or "the
+  // name" refers to (the staff question just asked), so this only
+  // classifies here and the step asks when there is no staff context
+  // at all.
+  if (/^\s*what (is|are) (their|there) names?\s*[.!?]*$/.test(t) || /^\s*what is (the|his|her) names?\s*[.!?]*$/.test(t) || /^\s*(their|there|his|her) names?\s*[.!?]*$/.test(t) || /^\s*what are the names\s*[.!?]*$/.test(t) || /^\s*who are they\s*[.!?]*$/.test(t) || /^\s*name them\s*[.!?]*$/.test(t)) return "staffnames";
   // One product's price: "How much is a laptop?" Runs before the
   // stock read: the question names one product, not the whole stock.
   if (/^\s*how much (is|are)\s+/.test(t) && !/\b(stock|plan|subscription|delivery|month|week|year|today|yesterday|sales|expenses|profit)\b/.test(t)) return "productprice";
@@ -1831,6 +1861,18 @@ export function classifyReadIntent(text) {
   if (bareList) {
     return { products: "products", customers: "customers", projects: "projects", sales: "recentsales", expenses: "recentexpenses" }[bareList[1]];
   }
+  // What one customer bought: "What did Favour buy?", "Show me
+  // Favour's sales", "How much has Favour bought". The name is
+  // extracted by the step; the owner's own buying ("what did we buy")
+  // is an expense, never this.
+  if ((/^\s*what did\s+(?!i\b|we\b)/.test(t) || /^\s*what has\s+(?!i\b|we\b)/.test(t) || /^\s*how much has\s+/.test(t) || /^\s*(show me|list|tell me|what are)\s+/.test(t))
+    && (/\bbuy\b/.test(t) || /\bbought\b/.test(t) || /'?s\s+(sales|purchases|orders)\b/.test(t))) return "customersales";
+  // What one project has cost: "How much have we spent on the browser
+  // apk project?", "How much did the browser apk project cost". The
+  // project report step below owns status questions; this owns spend.
+  if (/\bproject\b/.test(t) && (/\b(spent|spend|spending)\b/.test(t) || /\bcost\b/.test(t))) return "projectspend";
+  // The business's own name and type, from the snapshot.
+  if (includesAny(t, ["what is my business called", "what is my business name", "what is the name of my business", "what type of business do i have", "what type of business is this", "what kind of business is this", "what is my business type", "what is our business called", "what is our business name"])) return "mybusiness";
   // Count questions: "how many" is a count read, never a sale or a
   // product lookup. Each count comes from its own snapshot list, and a
   // sales count uses the window asked for, never today's count.
@@ -1840,8 +1882,10 @@ export function classifyReadIntent(text) {
     if (/\bcustomers?\b/.test(t)) return "countcustomers";
     if (/\bsales?\b/.test(t)) {
       if (/\bthis month\b/.test(t)) return "countsalesmonth";
+      if (/\blast month\b/.test(t)) return "countsaleslastmonth";
       if (/\blast week\b/.test(t)) return "countsaleslastweek";
       if (/\bthis week\b/.test(t)) return "countsalesweek";
+      if (/\blast year\b/.test(t)) return "countsaleslastyear";
       if (/\bthis year\b/.test(t)) return "countsalesyear";
       return "countsalestoday";
     }
@@ -1851,7 +1895,7 @@ export function classifyReadIntent(text) {
   // month, or the last 31 days when no window is named. Runs before
   // the month read: "what sold best this month" contains "sold" and
   // "this month" and would otherwise answer as the month sales list.
-  if (includesAny(t, ["what sold best this month", "what sold best last month", "what sold best this week", "what sold best last week", "what is my best seller", "what is our best seller", "what is the best seller", "best selling product", "best-selling product", "what sells best", "what sold best", "what is my best selling product", "which product sells best", "which product sold best"])) return "bestseller";
+  if (includesAny(t, ["what sold best this month", "what sold best last month", "what sold best this week", "what sold best last week", "what sold best this year", "what sold best last year", "best seller this year", "best seller last year", "what is my best seller", "what is our best seller", "what is the best seller", "best selling product", "best-selling product", "what sells best", "what sold best", "what is my best selling product", "which product sells best", "which product sold best"])) return "bestseller";
   // Month sales: "What did I sold last month?", "What did we sell in
   // October?" The month is resolved by the step, from the words, and
   // the question never reaches the sale parser as a product name.
@@ -1872,6 +1916,16 @@ export function classifyReadIntent(text) {
   if (includesAny(t, ["what did we sell this week", "what did i sell this week", "what have we sold this week", "what have i sold this week", "what did i sold this week", "what did we sold this week", "how much did we sell this week", "how much did i sell this week", "sales this week", "this week sales", "what sold this week", "what did we sell last week", "what did i sell last week", "what have we sold last week", "what did i sold last week", "what did we sold last week", "how much did we sell last week", "how much did i sell last week", "sales last week", "last week sales", "what sold last week"])) return /\blast week\b/.test(t) ? "lastweek" : "thisweek";
   // This year: the snapshot carries the year window.
   if (includesAny(t, ["how much did we sell this year", "how much did i sell this year", "what did we sell this year", "what did i sell this year", "sales this year", "this year sales", "how much have we made this year", "how much did we make this year"])) return "year";
+  // Last year and named years: "What did I sold last year?", "What
+  // did we sell in 2025?", "Sales in 2025", "What did I sold this
+  // year" in the owner's "sold" wording. The year is resolved by the
+  // step, from the words, and the question never reaches the sale
+  // parser as a product name. A statement ("I sold 2 laptops in
+  // 2025") is a sale to record, never a read: both rules below need
+  // a question form.
+  if (/\b(sell|sold|sale|sales)\b/.test(t) && (/\blast year\b/.test(t) || /\bin\s+(?:the\s+year\s+)?(?:19|20)\d{2}\b/.test(t) || /\bfor\s+(?:19|20)\d{2}\b/.test(t) || /\b(?:19|20)\d{2}\b/.test(t))
+    && ((/^\s*(what|how|show|list|tell)\b/.test(t) || /\?\s*$/.test(t)) || /^\s*sales?\s+in\s+(?:19|20)\d{2}\s*[.!?]*$/.test(t) || /^\s*sales?\s+(?:19|20)\d{2}\s*[.!?]*$/.test(t))) return "lastyearsales";
+  if (includesAny(t, ["what did i sold this year", "what did we sold this year", "what have i sold this year", "what have we sold this year", "what did i sold last year", "what did we sold last year", "what have i sold last year", "what have we sold last year", "how much did i sold last year", "how much did we sold last year", "how much did i sell last year", "how much did we sell last year", "sales last year", "last year sales", "what sold last year"])) return "lastyearsales";
   // Sales each day this week, and the best day this week: from the
   // per-day map. Runs before the week read: "sales each day this week"
   // contains "sales this week".
@@ -1883,15 +1937,28 @@ export function classifyReadIntent(text) {
   // Anchored, so "what did we sell yesterday" never lands here.
   if (/^\s*what (did|have) (we|i) (sold|sell)\s*[.!?]*$/.test(t)) return "today";
   if (includesAny(t, ["sales this month", "sales for the month", "this month sales", "how much did we sell this month", "monthly sales", "sales month"])) return "month";
-  // Expenses by description word this month: "What did I spend on
-  // transport this month?" Runs before the month-expenses read: the
-  // word after "spend on" is the filter, not a category.
-  if (/^\s*(what did (i|we) spend on|how much did (i|we) spend on)\s+(.+?)\s+this month\s*[.!?]*$/.test(t)) return "monthexpenseword";
+  // Expenses by description word in any month: "What did I spend on
+  // transport this month?", "What did I spend on transport last
+  // month?", "How much did we spend on fuel in October?" The month
+  // is resolved by the step. With no month named, the spend question
+  // stays on the recent-expenses read below.
+  if (/^\s*(what did (i|we) spend on|how much did (i|we) spend on)\s+(.+?)\s*[.!?]*$/.test(t)
+    && (/\b(last|this|next)\s+month\b/.test(t) || new RegExp("\\b(" + MONTH_PATTERN + ")(\\s+\\d{4})?\\b").test(t))) return "monthexpenseword";
   if (includesAny(t, ["how much did i spend this month", "how much did we spend this month", "what did i spend this month", "my spending this month", "spending this month", "expenses this month", "expenses for the month"])) return "monthexpenses";
+  // Last month and named months: "How much did I spend last month?",
+  // "Expenses in October". The month is resolved by the step.
+  if (includesAny(t, ["how much did i spend last month", "how much did we spend last month", "what did i spend last month", "what did we spend last month", "expenses last month", "spending last month", "last month expenses"])) return "lastmonthexpenses";
+  if (/\b(expenses?|spending|spend|spent)\b/.test(t) && new RegExp("\\b(in\\s+)?(" + MONTH_PATTERN + ")(\\s+\\d{4})?\\b").test(t) && ((/^\s*(what|how|show|list|tell)\b/.test(t) || /\?\s*$/.test(t)) || /^\s*expenses?\s+in\b/.test(t))) return "lastmonthexpenses";
+  // Yesterday: "How much did I spend yesterday?"
+  if (includesAny(t, ["how much did i spend yesterday", "how much did we spend yesterday", "what did i spend yesterday", "what did we spend yesterday", "expenses yesterday", "spending yesterday"])) return "yesterdayexpenses";
   // Expenses by window: today, this week, this year.
   if (includesAny(t, ["how much did i spend today", "how much did we spend today", "what did i spend today", "what did we spend today", "expenses today", "spending today"])) return "todayexpenses";
   if (includesAny(t, ["how much did i spend this week", "how much did we spend this week", "what did i spend this week", "what did we spend this week", "expenses this week", "spending this week"])) return "weekexpenses";
   if (includesAny(t, ["how much did i spend this year", "how much did we spend this year", "what did i spend this year", "what did we spend this year", "expenses this year", "spending this year"])) return "yearexpenses";
+  // Last year and named years: "How much did I spend last year?",
+  // "Expenses in 2025". The year is resolved by the step.
+  if (includesAny(t, ["how much did i spend last year", "how much did we spend last year", "what did i spend last year", "what did we spend last year", "expenses last year", "spending last year", "last year expenses"])) return "lastyearexpenses";
+  if (/\b(spend|spent|expenses?|spending)\b/.test(t) && /\bin\s+(?:the\s+year\s+)?(?:19|20)\d{2}\b/.test(t) && ((/^\s*(what|how|show|list|tell)\b/.test(t) || /\?\s*$/.test(t)) || /^\s*expenses?\s+in\s+(?:19|20)\d{2}\s*[.!?]*$/.test(t) || /^\s*spending\s+in\s+(?:19|20)\d{2}\s*[.!?]*$/.test(t))) return "lastyearexpenses";
   // Gross profit: no cost figures exist, so this is an honest answer
   // plus the profit-after-expenses figure. Runs before the profit read:
   // "gross profit" contains the word "profit".
@@ -1928,15 +1995,31 @@ export function formatDebtors(snap, currency) {
   return `Customers owing (${snap.debtors.length}):\n${lines.join("\n")}\nTotal owed: ${formatMoney(total, currency)}.`;
 }
 
+// A product unit that reads as English in a reply. The stock unit
+// "other" is a form default, not a word a person would say ("10 other
+// left", "NGN 2,356,754 per other"), so it displays as nothing after
+// a count ("10 left"). Any other unit stands as it is.
+export function displayUnit(unit) {
+  const u = String(unit || "").trim();
+  if (u.toLowerCase() === "other" || u.toLowerCase() === "others") return "";
+  return u || "units";
+}
+
+// "10 piece left" or "10 left" when the unit is "other".
+export function qtyLeftText(qty, unit) {
+  const u = displayUnit(unit);
+  return u ? `${Number(qty) || 0} ${u} left` : `${Number(qty) || 0} left`;
+}
+
 export function formatStock(snap, currency) {
   if (!snap.products || !snap.products.length) return "No products added yet.";
-  const lines = snap.products.slice(0, 20).map((p) => `- ${p.name}: ${p.stock} ${p.unit || "units"} left at ${formatMoney(p.price, currency)} each`);
+  const lines = snap.products.slice(0, 20).map((p) => `- ${p.name}: ${qtyLeftText(p.stock, p.unit)} at ${formatMoney(p.price, currency)} each`);
   return `Stock:\n${lines.join("\n")}`;
 }
 
 export function formatLowStock(snap, currency) {
   if (!snap.lowStock || !snap.lowStock.length) return "Nothing is running low.";
-  const lines = snap.lowStock.map((p) => `- ${p.name}: ${p.qty} ${p.unit || "units"} left`);
+  const lines = snap.lowStock.map((p) => `- ${p.name}: ${qtyLeftText(p.qty, p.unit)}`);
   return `Running low:\n${lines.join("\n")}`;
 }
 
@@ -1957,6 +2040,19 @@ export function formatMonthExpenses(snap, currency) {
   const count = (snap.expensesMonth && snap.expensesMonth.count) || 0;
   if (!count) return "No expenses yet this month.";
   return `Expenses this month: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "expense" : "expenses"}.`;
+}
+
+// Expenses total for one named month, from the per-month map.
+// Returns null when the map has no entry for the month.
+export function formatMonthExpensesFor(snap, currency, month) {
+  const expByMonth = snap && snap.expensesByMonth;
+  if (!expByMonth || typeof expByMonth !== "object" || !expByMonth[month.key]) return null;
+  const e = expByMonth[month.key];
+  const total = Number(e.total) || 0;
+  const count = Number(e.count) || 0;
+  const label = month.kind === "last" ? "last month" : month.kind === "this" ? "this month" : month.label;
+  if (!count) return `No expenses ${label}.`;
+  return `Expenses ${label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "expense" : "expenses"}.`;
 }
 
 export function formatProjects(snap, currency) {
@@ -2139,20 +2235,28 @@ export function weekDayRange(businessDate, which) {
   return out;
 }
 
-// Sum the per-day map over a list of dates: { total, count, items }
-// with items aggregated by product name, amount-desc. Returns null
-// when the map is absent.
+// Sum the per-day map over a list of dates: { total, count, items,
+// changeGiven, unlistedTotal, unlistedCount } with items aggregated
+// by product name, amount-desc. Returns null when the map is absent.
+// The unlisted figures travel with the sum, so a week that contains
+// a sale with no product line still lists it, never silently drops it.
 export function sumSalesByDayRange(snap, dates) {
   const byDay = snap && snap.salesByDay;
   if (!byDay || typeof byDay !== "object") return null;
   let total = 0;
   let count = 0;
+  let changeGiven = 0;
+  let unlistedTotal = 0;
+  let unlistedCount = 0;
   const agg = {};
   for (const d of dates || []) {
     const entry = byDay[d];
     if (!entry) continue;
     total = Math.round((total + (Number(entry.total) || 0)) * 100) / 100;
     count += Number(entry.count) || 0;
+    changeGiven = Math.round((changeGiven + (Number(entry.changeGiven) || 0)) * 100) / 100;
+    unlistedTotal = Math.round((unlistedTotal + (Number(entry.unlistedTotal) || 0)) * 100) / 100;
+    unlistedCount += Number(entry.unlistedCount) || 0;
     for (const it of entry.items || []) {
       const a = agg[it.product] || (agg[it.product] = { product: it.product, qty: 0, amount: 0 });
       a.qty += Number(it.qty) || 0;
@@ -2160,7 +2264,7 @@ export function sumSalesByDayRange(snap, dates) {
     }
   }
   const items = Object.values(agg).sort((a, b) => b.amount - a.amount);
-  return { total, count, items };
+  return { total, count, items, changeGiven, unlistedTotal, unlistedCount };
 }
 
 // Sales in one named month, from the per-month map. Returns null when
@@ -2180,6 +2284,7 @@ export function formatMonthSalesDetail(snap, currency, month) {
   if (!count) return `No sales in ${month.label}.`;
   const items = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 20);
   const lines = items.map((it) => `- ${Number(it.qty) || 0} ${pluraliseProductName(it.product, it.qty)}: ${formatMoney(it.amount, currency)}`);
+  lines.push(...otherSalesLines(entry, currency, items));
   lines.push(`Total: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`);
   return `Sales in ${month.label}:\n${lines.join("\n")}`;
 }
@@ -2230,7 +2335,232 @@ export function formatMonthReport(snap, currency, month) {
   return lines.join("\n");
 }
 
-// Sales for one week (this week or last week), from the per-day map
+// ---------------------------------------------------------------------------
+// Years: "last year", "this year", "in 2025", "2025".
+// ---------------------------------------------------------------------------
+
+// The year a message asks about, resolved against the business date.
+// Returns { key, label, start, end, future, kind } or null when the
+// message names no year. key is "2025", label is "2025", kind is
+// "last", "this", "next" or "named". A bare four-digit year counts
+// here, but this only ever runs on a read the classifier already
+// recognised as a year question, never on a sale statement, so an
+// amount like "for 2025" is never mistaken for a year.
+export function parseYearMention(text, businessDate) {
+  const t = normalizeFastText(text);
+  const base = String(businessDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
+  const by = Number(base.split("-")[0]);
+  const make = (year, kind) => {
+    const key = String(year);
+    return { key, label: key, start: `${key}-01-01`, end: `${year + 1}-01-01`, future: year > by, kind };
+  };
+  if (/\blast year\b/.test(t)) return make(by - 1, "last");
+  if (/\bthis year\b/.test(t)) return make(by, "this");
+  if (/\bnext year\b/.test(t)) return make(by + 1, "next");
+  const m = t.match(/\b(?:in\s+)?(?:the\s+year\s+)?((?:19|20)\d{2})\b/);
+  if (m) return make(Number(m[1]), "named");
+  return null;
+}
+
+// Sales with no product line, and any other amount the item list does
+// not account for, stated plainly so the list and the total always
+// agree. A sale counts in the total the moment its row is seen, but
+// its item line only exists when the sale has a product line: a sale
+// recorded with no items, or whose product was deleted, used to vanish
+// from the list while staying in the total. The snapshot now carries
+// that gap as unlistedTotal/unlistedCount, and the residual line below
+// catches anything else (for example items cut by the 20-item cap),
+// so no window can ever list less than its total again.
+export function otherSalesLines(entry, currency, items) {
+  const lines = [];
+  const unlistedTotal = Number((entry && entry.unlistedTotal) || 0);
+  const unlistedCount = Number((entry && entry.unlistedCount) || 0);
+  if (unlistedCount > 0 && unlistedTotal > 0) {
+    lines.push(`- Other sales with no product listed: ${formatMoney(unlistedTotal, currency)} (${unlistedCount} ${unlistedCount === 1 ? "sale" : "sales"}).`);
+  } else if (unlistedCount > 0) {
+    lines.push(`- ${unlistedCount} ${unlistedCount === 1 ? "sale has" : "sales have"} no product listed.`);
+  }
+  const total = Number((entry && entry.total) || 0);
+  const listed = (items || []).reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const residual = Math.round((total - listed - unlistedTotal) * 100) / 100;
+  if (residual > 0) {
+    lines.push(`- Other sales: ${formatMoney(residual, currency)}.`);
+  }
+  return lines;
+}
+
+// Sales in one named year, from the per-year map, with the year
+// windows as fallback when the map is absent. Returns null when
+// neither is available, so the caller falls through instead of
+// guessing. A future year and a year older than the 2-year map each
+// get their own plain line; a year with no sales says so plainly.
+export function formatYearSalesDetail(snap, currency, year) {
+  if (year.future) return `${year.label} has not happened yet. Ask about this year or an earlier year.`;
+  const byYear = snap && snap.salesByYear;
+  if (!byYear || typeof byYear !== "object") {
+    const w = year.kind === "last" ? snap.salesLastYear : year.kind === "this" ? snap.salesYear : null;
+    if (!w || typeof w.total !== "number") return null;
+    const count = Number(w.count) || 0;
+    const total = Number(w.total) || 0;
+    if (!count) return `No sales in ${year.label}.`;
+    return `Sales in ${year.label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`;
+  }
+  const entry = byYear[year.key] || null;
+  if (!entry) {
+    return `I can only look back 2 years, so I do not have sales for ${year.label}. Ask about a more recent year.`;
+  }
+  const total = Number(entry.total) || 0;
+  const count = Number(entry.count) || 0;
+  if (!count) return `No sales in ${year.label}.`;
+  const items = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 20);
+  const lines = items.map((it) => `- ${Number(it.qty) || 0} ${pluraliseProductName(it.product, it.qty)}: ${formatMoney(it.amount, currency)}`);
+  lines.push(...otherSalesLines(entry, currency, items));
+  lines.push(`Total: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`);
+  return `Sales in ${year.label}:\n${lines.join("\n")}`;
+}
+
+// One year's report, same shape as the month report: sales, expenses,
+// profit after expenses, change given, best sellers, new debts.
+// Returns null when neither the per-year maps nor the year windows
+// are available. Out-of-range years get a plain look-back line, never
+// a guessed figure.
+export function formatYearReport(snap, currency, year) {
+  if (year.future) return `${year.label} has not happened yet. Ask about this year or an earlier year.`;
+  const byYear = snap && snap.salesByYear;
+  const expByYear = snap && snap.expensesByYear;
+  const title = year.kind === "last" ? `Last year's report, ${year.label}:`
+    : year.kind === "this" ? `This year's report, ${year.label}:`
+    : `Report for ${year.label}:`;
+  if (!byYear || typeof byYear !== "object" || !byYear[year.key]) {
+    const s = year.kind === "last" ? snap.salesLastYear : year.kind === "this" ? snap.salesYear : null;
+    const e = year.kind === "last" ? snap.expensesLastYear : year.kind === "this" ? snap.expensesYear : null;
+    if (!s || typeof s.total !== "number") {
+      return year.kind === "named"
+        ? `I can only look back 2 years, so I do not have a report for ${year.label}. Ask about a more recent year.`
+        : null;
+    }
+    const salesTotal = Number(s.total) || 0;
+    const salesCount = Number(s.count) || 0;
+    const lines = [title];
+    lines.push(salesCount
+      ? `Sales: ${formatMoney(salesTotal, currency)} across ${salesCount} ${salesCount === 1 ? "sale" : "sales"}.`
+      : "Sales: no sales this year.");
+    if (e && typeof e.total === "number") {
+      const eTotal = Number(e.total) || 0;
+      const eCount = Number(e.count) || 0;
+      lines.push(eCount
+        ? `Expenses: ${formatMoney(eTotal, currency)} across ${eCount} ${eCount === 1 ? "expense" : "expenses"}.`
+        : "Expenses: no expenses this year.");
+      lines.push(`Profit after expenses: ${formatMoney(Math.round((salesTotal - eTotal) * 100) / 100, currency)} (sales minus expenses).`);
+    } else {
+      lines.push("Expenses: I do not have that figure for this year.");
+      lines.push("Profit after expenses: I do not have the expenses figure, so I cannot work out the profit.");
+    }
+    lines.push(`Change given: ${formatMoney(Number(s.changeGiven) || 0, currency)}.`);
+    lines.push("Best sellers: I do not have the item breakdown for this year.");
+    lines.push("New debts: I do not have that figure for this year.");
+    return lines.join("\n");
+  }
+  const entry = byYear[year.key];
+  const expenses = expByYear && expByYear[year.key];
+  const salesTotal = Number(entry.total) || 0;
+  const salesCount = Number(entry.count) || 0;
+  const lines = [title];
+  lines.push(salesCount
+    ? `Sales: ${formatMoney(salesTotal, currency)} across ${salesCount} ${salesCount === 1 ? "sale" : "sales"}.`
+    : "Sales: no sales this year.");
+  if (expenses && typeof expenses.total === "number") {
+    const eTotal = Number(expenses.total) || 0;
+    const eCount = Number(expenses.count) || 0;
+    lines.push(eCount
+      ? `Expenses: ${formatMoney(eTotal, currency)} across ${eCount} ${eCount === 1 ? "expense" : "expenses"}.`
+      : "Expenses: no expenses this year.");
+    lines.push(`Profit after expenses: ${formatMoney(Math.round((salesTotal - eTotal) * 100) / 100, currency)} (sales minus expenses).`);
+  } else {
+    lines.push("Expenses: I do not have that figure for this year.");
+    lines.push("Profit after expenses: I do not have the expenses figure, so I cannot work out the profit.");
+  }
+  lines.push(`Change given: ${formatMoney(Number(entry.changeGiven) || 0, currency)}.`);
+  const best = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 3);
+  lines.push(best.length
+    ? `Best sellers: ${best.map((it) => `${pluraliseProductName(it.product, it.qty)} (${Number(it.qty) || 0} sold)`).join(", ")}.`
+    : "Best sellers: none yet.");
+  const debts = entry.debts || [];
+  lines.push(debts.length
+    ? `New debts: ${debts.map((d) => `${d.customer} owes ${formatMoney(d.amount, currency)}`).join("; ")}.`
+    : "New debts: none.");
+  return lines.join("\n");
+}
+
+// One week's report, same shape as the day report: sales from the
+// per-day map, expenses from the week windows, profit after expenses,
+// change given, best sellers, new debts. Last week's expenses come
+// from their own window; when the snapshot does not carry them the
+// report says so instead of guessing.
+export function formatWeekReport(snap, currency, which) {
+  const dates = weekDayRange(snap && snap.businessDate, which);
+  if (!dates) return null;
+  const label = which === "last" ? "last week" : "this week";
+  const rangeLabel = `${dayLabel(dates[0])} to ${dayLabel(dates[6])}`;
+  const summed = sumSalesByDayRange(snap, dates);
+  if (!summed) return null;
+  const expenses = which === "last" ? snap.expensesLastWeek : snap.expensesWeek;
+  const title = which === "last" ? `Last week's report (${rangeLabel}):` : `This week's report (${rangeLabel}):`;
+  const lines = [title];
+  lines.push(summed.count
+    ? `Sales: ${formatMoney(summed.total, currency)} across ${summed.count} ${summed.count === 1 ? "sale" : "sales"}.`
+    : `Sales: no sales ${label}.`);
+  if (expenses && typeof expenses.total === "number") {
+    const eTotal = Number(expenses.total) || 0;
+    const eCount = Number(expenses.count) || 0;
+    lines.push(eCount
+      ? `Expenses: ${formatMoney(eTotal, currency)} across ${eCount} ${eCount === 1 ? "expense" : "expenses"}.`
+      : `Expenses: no expenses ${label}.`);
+    lines.push(`Profit after expenses: ${formatMoney(Math.round((summed.total - eTotal) * 100) / 100, currency)} (sales minus expenses).`);
+  } else {
+    lines.push(`Expenses: I do not have that figure for ${label}.`);
+    lines.push("Profit after expenses: I do not have the expenses figure, so I cannot work out the profit.");
+  }
+  lines.push(`Change given: ${formatMoney(Number(summed.changeGiven) || 0, currency)}.`);
+  const best = summed.items.slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 3);
+  lines.push(best.length
+    ? `Best sellers: ${best.map((it) => `${pluraliseProductName(it.product, it.qty)} (${Number(it.qty) || 0} sold)`).join(", ")}.`
+    : "Best sellers: none yet.");
+  const debts = [];
+  const byDay = snap && snap.salesByDay;
+  if (byDay && typeof byDay === "object") {
+    for (const d of dates) {
+      for (const debt of ((byDay[d] || {}).debts || [])) debts.push(debt);
+    }
+  }
+  lines.push(debts.length
+    ? `New debts: ${debts.map((d) => `${d.customer} owes ${formatMoney(d.amount, currency)}`).join("; ")}.`
+    : "New debts: none.");
+  return lines.join("\n");
+}
+
+// Expenses in one named year, from the per-year map, with the year
+// windows as fallback when the map is absent.
+export function formatYearExpenses(snap, currency, year) {
+  const label = year.kind === "last" ? "last year" : year.kind === "this" ? "this year" : year.label;
+  const expByYear = snap && snap.expensesByYear;
+  if (expByYear && typeof expByYear === "object" && expByYear[year.key]) {
+    const e = expByYear[year.key];
+    const count = Number(e.count) || 0;
+    const total = Number(e.total) || 0;
+    if (!count) return `No expenses ${label}.`;
+    return `Expenses ${label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "expense" : "expenses"}.`;
+  }
+  const w = year.kind === "last" ? snap.expensesLastYear : year.kind === "this" ? snap.expensesYear : null;
+  if (!w || typeof w.total !== "number") return null;
+  const count = Number(w.count) || 0;
+  const total = Number(w.total) || 0;
+  if (!count) return `No expenses ${label}.`;
+  return `Expenses ${label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "expense" : "expenses"}.`;
+}
+
+// Sales in one named week, from the per-day map
 // with the window totals as the fallback when the map is absent.
 // A week with no sales names its dates.
 export function formatWeekSales(snap, currency, which) {
@@ -2243,6 +2573,7 @@ export function formatWeekSales(snap, currency, which) {
     if (!summed.count) return `No sales ${label} (${rangeLabel}).`;
     const items = summed.items.slice(0, 20);
     const lines = items.map((it) => `- ${Number(it.qty) || 0} ${pluraliseProductName(it.product, it.qty)}: ${formatMoney(it.amount, currency)}`);
+    lines.push(...otherSalesLines(summed, currency, items));
     lines.push(`Total: ${formatMoney(summed.total, currency)} across ${summed.count} ${summed.count === 1 ? "sale" : "sales"}.`);
     return `Sales ${label} (${rangeLabel}):\n${lines.join("\n")}`;
   }
@@ -2295,35 +2626,59 @@ export function formatBestDayWeek(snap, currency) {
 export function formatBestSeller(snap, currency, window) {
   let items = null;
   let label = "";
+  let salesCount = 0;
   if (window === "week") {
     const dates = weekDayRange(snap && snap.businessDate, "this");
     const summed = dates ? sumSalesByDayRange(snap, dates) : null;
     if (!summed) return null;
     items = summed.items;
+    salesCount = summed.count;
     label = "this week";
   } else if (window === "lastweek") {
     const dates = weekDayRange(snap && snap.businessDate, "last");
     const summed = dates ? sumSalesByDayRange(snap, dates) : null;
     if (!summed) return null;
     items = summed.items;
+    salesCount = summed.count;
     label = "last week";
   } else if (window === "month") {
     const m = parseMonthMention("this month", snap && snap.businessDate);
     const byMonth = snap && snap.salesByMonth;
     if (!m || !byMonth || typeof byMonth !== "object" || !byMonth[m.key]) return null;
     items = (byMonth[m.key].items || []).slice();
+    salesCount = Number(byMonth[m.key].count) || 0;
     label = "this month";
   } else if (window === "lastmonth") {
     const m = parseMonthMention("last month", snap && snap.businessDate);
     const byMonth = snap && snap.salesByMonth;
     if (!m || !byMonth || typeof byMonth !== "object" || !byMonth[m.key]) return null;
     items = (byMonth[m.key].items || []).slice();
+    salesCount = Number(byMonth[m.key].count) || 0;
     label = "last month";
+  } else if (window === "year" || window === "lastyear") {
+    const y = parseYearMention(window === "lastyear" ? "last year" : "this year", snap && snap.businessDate);
+    const byYear = snap && snap.salesByYear;
+    if (!y) return null;
+    if (byYear && typeof byYear === "object" && byYear[y.key]) {
+      items = (byYear[y.key].items || []).slice();
+      salesCount = Number(byYear[y.key].count) || 0;
+    } else {
+      // No per-year map entry: the year windows still carry the
+      // totals, so the count is known even though no product lines
+      // are. The empty-items guard below then says plainly that no
+      // best seller can be named, instead of claiming nothing sold.
+      const w = window === "lastyear" ? snap.salesLastYear : snap.salesYear;
+      if (!w || typeof w.total !== "number") return null;
+      items = [];
+      salesCount = Number(w.count) || 0;
+    }
+    label = window === "lastyear" ? "last year" : "this year";
   } else {
     const byDay = snap && snap.salesByDay;
     if (!byDay || typeof byDay !== "object") return null;
     const agg = {};
     for (const entry of Object.values(byDay)) {
+      salesCount += Number(entry.count) || 0;
       for (const it of entry.items || []) {
         const a = agg[it.product] || (agg[it.product] = { product: it.product, qty: 0, amount: 0 });
         a.qty += Number(it.qty) || 0;
@@ -2333,23 +2688,29 @@ export function formatBestSeller(snap, currency, window) {
     items = Object.values(agg).sort((a, b) => b.amount - a.amount);
     label = "in the last 31 days";
   }
-  if (!items || !items.length) return `Nothing sold ${label} yet, so there is no best seller.`;
+  if (!items || !items.length) {
+    if (salesCount > 0) return `Sales exist ${label}, but none list a product, so I cannot name a best seller.`;
+    return `Nothing sold ${label} yet, so there is no best seller.`;
+  }
   const best = items.slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))[0];
   return `Best seller ${label}: ${pluraliseProductName(best.product, best.qty)} (${Number(best.qty) || 0} sold) for ${formatMoney(best.amount, currency)}.`;
 }
 
-// Expenses this month whose description contains one word, summed
+// Expenses in one month whose description contains one word, summed
 // from the per-month expense items. The answer says plainly that the
-// match is by the description word, never by a category.
-export function formatMonthExpenseWord(snap, currency, word) {
-  const m = parseMonthMention("this month", snap && snap.businessDate);
+// match is by the description word, never by a category. The month
+// defaults to this month; last month and named months read from their
+// own map entries.
+export function formatMonthExpenseWord(snap, currency, word, month) {
+  const m = month || parseMonthMention("this month", snap && snap.businessDate);
   const expByMonth = snap && snap.expensesByMonth;
   if (!m || !expByMonth || typeof expByMonth !== "object" || !expByMonth[m.key]) return null;
   const w = String(word || "").toLowerCase();
   const items = (expByMonth[m.key].items || []).filter((it) => String(it.description || "").toLowerCase().includes(w));
   const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
-  if (!items.length) return `No expenses for ${w} this month.`;
-  return `You spent ${formatMoney(Math.round(total * 100) / 100, currency)} on ${w} this month, across ${items.length} ${items.length === 1 ? "expense" : "expenses"} (matched by the description word "${w}").`;
+  const label = m.kind === "this" ? "this month" : m.kind === "last" ? "last month" : "in " + m.label;
+  if (!items.length) return `No expenses for ${w} ${label}.`;
+  return `You spent ${formatMoney(Math.round(total * 100) / 100, currency)} on ${w} ${label}, across ${items.length} ${items.length === 1 ? "expense" : "expenses"} (matched by the description word "${w}").`;
 }
 
 // Pluralise a product name for a quantity over 1, conservatively:
@@ -2395,6 +2756,7 @@ export function formatSalesOnDate(snap, currency, date, label) {
   if (!count) return `No sales on ${niceLabel}.`;
   const items = (entry.items || []).slice().sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 20);
   const lines = items.map((it) => `- ${Number(it.qty) || 0} ${pluraliseProductName(it.product, it.qty)}: ${formatMoney(it.amount, currency)}`);
+  lines.push(...otherSalesLines(entry, currency, items));
   lines.push(`Total: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`);
   return `Sales on ${niceLabel}:\n${lines.join("\n")}`;
 }
@@ -2532,10 +2894,19 @@ export function formatCountSalesToday(snap, currency) {
 }
 
 // A sales count for one window (today, this week, this month, this
-// year, last week), from that window's own count, never today's count.
-// Last week is summed from the per-day map and returns null without it.
+// year, last week, last month, last year), from that window's own
+// count, never today's count. Last week is summed from the per-day
+// map, last month and last year from their maps, and each returns null
+// without its map, so the caller falls through instead of guessing.
 export function formatCountSalesWindow(snap, currency, window) {
   const pick = (w) => (snap && snap[w]) || null;
+  const countLine = (st, label, zero) => {
+    if (!st || typeof st.count !== "number") return null;
+    const count = Number(st.count) || 0;
+    const total = Number(st.total) || 0;
+    if (!count) return zero;
+    return `You made ${count} ${count === 1 ? "sale" : "sales"} ${label}, totalling ${formatMoney(total, currency)}.`;
+  };
   let st = null;
   let label = "";
   if (window === "today") { st = pick("salesToday"); label = "today"; }
@@ -2548,6 +2919,20 @@ export function formatCountSalesWindow(snap, currency, window) {
     if (!summed) return null;
     if (!summed.count) return "No sales last week.";
     return `You made ${summed.count} ${summed.count === 1 ? "sale" : "sales"} last week, totalling ${formatMoney(summed.total, currency)}.`;
+  }
+  else if (window === "lastmonth") {
+    const m = parseMonthMention("last month", snap && snap.businessDate);
+    const byMonth = snap && snap.salesByMonth;
+    if (!m || !byMonth || typeof byMonth !== "object" || !byMonth[m.key]) return null;
+    return countLine(byMonth[m.key], "last month", "No sales last month.");
+  }
+  else if (window === "lastyear") {
+    const y = parseYearMention("last year", snap && snap.businessDate);
+    const byYear = snap && snap.salesByYear;
+    if (y && byYear && typeof byYear === "object" && byYear[y.key]) {
+      return countLine(byYear[y.key], "last year", "No sales last year.");
+    }
+    return countLine(pick("salesLastYear"), "last year", "No sales last year.");
   }
   if (!st || typeof st.count !== "number") return null;
   const count = Number(st.count) || 0;
@@ -2568,15 +2953,17 @@ export function formatWindowSales(snap, currency, window) {
   return `Sales ${label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"}.`;
 }
 
-// Expenses total for one window (today, this week, this year), from
-// that window's own figures.
+// Expenses total for one window (today, yesterday, this week, this
+// year, last year), from that window's own figures.
 export function formatWindowExpenses(snap, currency, window) {
-  const w = window === "today" ? snap.expensesToday : window === "week" ? snap.expensesWeek : window === "year" ? snap.expensesYear : null;
+  const w = window === "today" ? snap.expensesToday : window === "yesterday" ? snap.expensesYesterday : window === "week" ? snap.expensesWeek : window === "year" ? snap.expensesYear : window === "lastyear" ? snap.expensesLastYear : null;
   if (!w || typeof w.total !== "number") return null;
-  const label = window === "today" ? "today" : window === "week" ? "this week" : "this year";
+  const label = window === "today" ? "today" : window === "yesterday" ? "yesterday" : window === "week" ? "this week" : window === "year" ? "this year" : "last year";
   const count = Number(w.count) || 0;
   const total = Number(w.total) || 0;
-  if (!count) return `No expenses yet ${label}.`;
+  // "Yet" fits an open window (today, this week, this year); a closed
+  // one (yesterday, last year) simply had none.
+  if (!count) return window === "yesterday" || window === "lastyear" ? `No expenses ${label}.` : `No expenses yet ${label}.`;
   return `Expenses ${label}: ${formatMoney(total, currency)} across ${count} ${count === 1 ? "expense" : "expenses"}.`;
 }
 
@@ -2639,6 +3026,127 @@ export function formatMyPlan(snap) {
   if (!tier) return null;
   const name = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
   return `You are on the ${name} plan.`;
+}
+
+// What one customer bought, from the per-day customer map (the last
+// 31 days) and the last sales list. The window is stated plainly:
+// the snapshot carries no all-time per-customer totals, so a wider
+// figure is never invented. Returns null when no customer name was
+// given.
+export function formatCustomerSales(snap, currency, name) {
+  const wanted = String(name || "").trim();
+  if (!wanted) return null;
+  const lower = wanted.toLowerCase();
+  const names = new Set();
+  const byDay = snap && snap.salesByDay;
+  if (byDay && typeof byDay === "object") {
+    for (const entry of Object.values(byDay)) {
+      for (const cName of Object.keys(entry.customers || {})) names.add(cName);
+    }
+  }
+  for (const s of (snap && snap.recentSales) || []) names.add(String(s.customer || ""));
+  for (const d of (snap && snap.debtors) || []) names.add(String(d.name || ""));
+  names.delete("");
+  const canonical = [...names].find((n) => n.toLowerCase() === lower)
+    || [...names].filter((n) => n.toLowerCase().includes(lower) || lower.includes(n.toLowerCase()))[0]
+    || null;
+  if (!canonical) {
+    return `I do not have any sales for ${titleCaseName(wanted)} in the last 31 days.`;
+  }
+  let total = 0;
+  let count = 0;
+  let hasMap = false;
+  if (byDay && typeof byDay === "object") {
+    for (const entry of Object.values(byDay)) {
+      if (entry.customers && typeof entry.customers === "object") {
+        hasMap = true;
+        const agg = entry.customers[canonical];
+        if (agg) {
+          total = Math.round((total + (Number(agg.total) || 0)) * 100) / 100;
+          count += Number(agg.count) || 0;
+        }
+      }
+    }
+  }
+  const recent = ((snap && snap.recentSales) || []).filter((s) => String(s.customer || "").toLowerCase() === canonical.toLowerCase());
+  if (!hasMap) {
+    if (!recent.length) return `I do not have any sales for ${canonical} in the last sales I can see.`;
+    const rTotal = recent.reduce((s, r) => s + (Number(r.total) || 0), 0);
+    const lines = recent.map((r) => `- ${r.ref || ""} ${formatMoney(r.total, currency)}`.trim());
+    return `${canonical} bought ${formatMoney(Math.round(rTotal * 100) / 100, currency)} across ${recent.length} ${recent.length === 1 ? "sale" : "sales"} in the last sales I can see:\n${lines.join("\n")}`;
+  }
+  if (!count) {
+    return `${canonical} has not bought anything in the last 31 days.`;
+  }
+  const out = [`${canonical} bought ${formatMoney(total, currency)} across ${count} ${count === 1 ? "sale" : "sales"} in the last 31 days.`];
+  if (recent.length) {
+    out.push(`Last sales: ${recent.map((r) => `${r.ref || ""} ${formatMoney(r.total, currency)}`.trim()).join("; ")}.`);
+  }
+  return out.join("\n");
+}
+
+// The name in a per-customer sales question: "What did Favour buy?",
+// "Show me Favour's sales", "How much has Favour bought". Returns
+// null when the remainder is a generic word, not a name.
+export function extractCustomerSalesName(text) {
+  let t = normalizeFastText(text);
+  t = t.replace(/^\s*(what did|what has|how much has|how much did|show me|list|tell me|what are)\s+/, "");
+  t = t.replace(/'?s\s+(sales|purchases|orders)\b.*$/, "");
+  t = t.replace(/\s+(buy|bought|purchase|purchases|purchased|sales|orders?)\b.*$/, "");
+  t = t.replace(/[.!?]+$/, "").trim();
+  if (!t || /^(customer|customers|they|he|she|it|we|i|someone|somebody|anyone|everyone|the customer|my customer)$/.test(t)) return null;
+  if (t.split(/\s+/).length > 4) return null;
+  return titleCaseName(t);
+}
+
+// What one project has spent, earned and kept, from the snapshot
+// project totals. Returns null when no project name was given.
+export function formatProjectSpend(snap, currency, name) {
+  const projects = (snap && snap.projects) || [];
+  const wanted = String(name || "").trim().toLowerCase();
+  if (!wanted) return null;
+  if (!projects.length) return "You have no projects yet.";
+  const matches = projects.filter((p) => String(p.name || "").toLowerCase().includes(wanted) || wanted.includes(String(p.name || "").toLowerCase()));
+  if (matches.length > 1) return `More than one project could be meant: ${matches.map((p) => p.name).join(", ")}. Which one?`;
+  if (!matches.length) {
+    const names = projects.map((p) => p.name).join(", ");
+    return `I do not have a project called "${titleCaseName(name)}". Your projects are: ${names}.`;
+  }
+  const p = matches[0];
+  const t = p.totals || {};
+  const spent = Number(t.totalExpense || 0);
+  const income = Number(t.totalIncome || 0);
+  const balance = t.balance !== undefined && t.balance !== null ? Number(t.balance) : income - spent;
+  return `The ${p.name} project: spent ${formatMoney(Math.round(spent * 100) / 100, currency)}, income ${formatMoney(Math.round(income * 100) / 100, currency)}, balance ${formatMoney(Math.round(balance * 100) / 100, currency)}, budget ${formatMoney(Number(p.budget || 0), currency)}.`;
+}
+
+// The project name in a spend question: "How much have we spent on
+// the browser apk project?", "How much did the browser apk project
+// cost". Returns null when no project name remains.
+export function extractProjectSpendName(text) {
+  let t = normalizeFastText(text);
+  t = t.replace(/^\s*how much\b[^.]*?\b(spent|spend)\b\s+(on|for)\s+/, "");
+  t = t.replace(/\b(cost|costs|spent|spend)\b.*$/, "");
+  let prev = "";
+  while (prev !== t) {
+    prev = t;
+    t = t.replace(/^\s*(how|much|did|do|have|has|we|i|the|a|an|is|so|far)\s+/, "");
+  }
+  t = t.replace(/\s+project\s*$/, "").replace(/\s+so far\s*$/, "").trim();
+  t = t.replace(/[.!?]+$/, "").trim();
+  t = t.replace(/\s+project\s*$/, "").trim();
+  if (!t || /^(project|projects|it|that|this)$/.test(t)) return null;
+  return t;
+}
+
+// The business's own name and type, from the snapshot. The type is
+// left out when it is the "general" default, which says nothing.
+export function formatMyBusiness(snap) {
+  const name = snap && snap.businessName ? String(snap.businessName).trim() : "";
+  if (!name) return null;
+  const type = snap && snap.businessType ? String(snap.businessType).trim() : "";
+  const typePart = type && type.toLowerCase() !== "general" ? ` It is a ${type} business.` : "";
+  return `Your business is called ${name}.${typePart}`;
 }
 
 // What the owner owes suppliers: KopaBook does not track supplier
@@ -2731,12 +3239,31 @@ export function formatSingleProfit(snap, currency, window) {
     if (!expenses || typeof expenses.total !== "number") return { sales: Number(sales.total) || 0, expenses: null };
     return { sales: Number(sales.total) || 0, expenses: Number(expenses.total) || 0 };
   };
+  // A year's figures come from the per-year maps when they are there,
+  // and from the year windows when they are not.
+  const yearAgg = (key, salesWindow, expensesWindow) => {
+    const byYear = snap && snap.salesByYear;
+    const expByYear = snap && snap.expensesByYear;
+    if (byYear && typeof byYear === "object" && byYear[key]) {
+      const s = byYear[key];
+      const e = expByYear && expByYear[key];
+      if (!e || typeof e.total !== "number") return { sales: Number(s.total) || 0, expenses: null };
+      return { sales: Number(s.total) || 0, expenses: Number(e.total) || 0 };
+    }
+    return fromWindows(salesWindow, expensesWindow);
+  };
   let label = "";
   let agg = null;
   if (window === "today") { label = "today"; agg = fromWindows(snap.salesToday, snap.expensesToday); }
   else if (window === "week") { label = "this week"; agg = fromWindows(snap.salesWeek, snap.expensesWeek); }
   else if (window === "month") { label = "this month"; agg = fromWindows(snap.salesMonth, snap.expensesMonth); }
   else if (window === "year") { label = "this year"; agg = fromWindows(snap.salesYear, snap.expensesYear); }
+  else if (window === "lastyear") {
+    const y = parseYearMention("last year", snap && snap.businessDate);
+    if (!y) return null;
+    label = y.label;
+    agg = yearAgg(y.key, snap.salesLastYear, snap.expensesLastYear);
+  }
   else if (window === "lastmonth") {
     const m = parseMonthMention("last month", snap && snap.businessDate);
     if (!m) return null;
@@ -2802,7 +3329,7 @@ export function formatBusinessAdvice(snap, currency) {
   }
   const low = (snap && snap.lowStock) || [];
   if (low.length) {
-    lines.push(`Running low: ${low.map((p) => `${p.name} (${p.qty} ${p.unit || "units"} left)`).join(", ")}. Restock these first.`);
+    lines.push(`Running low: ${low.map((p) => `${p.name} (${qtyLeftText(p.qty, p.unit)})`).join(", ")}. Restock these first.`);
   } else {
     lines.push("Running low: nothing is running low.");
   }
@@ -3156,6 +3683,66 @@ export function findLastSaleContext(history, snap, currency) {
     : (sale.params.amount_paid !== undefined && sale.params.amount_paid !== null ? sale.params.amount_paid : null);
   const customerName = sale.params.customer_name || bareName || (restatement && restatement.debtorName) || null;
   return { items, total, amountPaid, paidQty, customerName };
+}
+
+// The last sale in the thread, even one already recorded: a bare
+// follow-up ("And 2 sold today") names no product, so the product
+// comes from the most recent sale the owner reported. Unlike
+// findLastSaleContext, this looks past "Done. Recorded ..." lines:
+// the sale being followed up on is already recorded.
+export function findLastThreadSale(history, snap, currency) {
+  const turns = (history || []).filter((h) => h && h.role === "user" && typeof h.content === "string").slice(-10);
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const sale = parseSaleSnapshot(turns[i].content, history, snap, currency);
+    if (sale && sale.params && sale.params.items && sale.params.items.length) return sale;
+  }
+  return null;
+}
+
+// A bare follow-up sale: "And 2 sold today", "And 1 more", "And sold
+// 2 today", "And 2 sold today to Favour". The message names a
+// quantity and nothing else, so the product comes from the last sale
+// in the thread, never from the words "and 2" as a product name.
+// Returns a record_sale action, a one-question reply when the last
+// sale named several products or there is no sale to follow up on,
+// or null when the message is not a bare follow-up at all (a named
+// product, "and 2 laptops", parses as an ordinary sale instead).
+export function parseFollowUpSale(text, history, snap, currency) {
+  const t = normalizeFastText(text);
+  // A trailing customer ("to Favour") belongs to the follow-up, not
+  // to the product: strip it first, then read the bare quantity.
+  let customerName = "";
+  let core = t;
+  const tail = t.match(/\s+(?:to|for)\s+([a-z][a-z' ]+?)\s*[.!?]*$/);
+  if (tail) {
+    customerName = tail[1].trim();
+    core = t.slice(0, tail.index).trim();
+  }
+  let qty = null;
+  let m = core.match(/^\s*and\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:more\s+)?(?:sold|sell|sale)?\s*(today|now|yesterday|just)?\s*[.!?]*$/);
+  if (m) qty = /^\d+$/.test(m[1]) ? Number(m[1]) : qtyWordToNumber(m[1]);
+  if (qty === null) {
+    m = core.match(/^\s*and\s+(?:sold|sell)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:more)?\s*(today|now|yesterday|just)?\s*[.!?]*$/);
+    if (m) qty = /^\d+$/.test(m[1]) ? Number(m[1]) : qtyWordToNumber(m[1]);
+  }
+  if (qty === null) {
+    m = core.match(/^\s*and\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+more\s*[.!?]*$/);
+    if (m) qty = /^\d+$/.test(m[1]) ? Number(m[1]) : qtyWordToNumber(m[1]);
+  }
+  if (qty === null || !(qty > 0)) return null;
+  const last = findLastThreadSale(history, snap, currency);
+  if (!last) {
+    return { kind: "question", text: "Which product sold? Tell me the product and how many, and I will draft it for your Confirm tap." };
+  }
+  const items = last.params.items || [];
+  if (items.length !== 1) {
+    return { kind: "question", text: `Which product: ${items.map((it) => it.product).join(" or ")}?` };
+  }
+  const params = { items: [{ product: items[0].product, qty }] };
+  if (customerName) params.customer_name = titleCaseName(customerName);
+  else if (last.params.customer_name) params.customer_name = last.params.customer_name;
+  if (last.params.payment_method) params.payment_method = last.params.payment_method;
+  return { kind: "action", tool: "record_sale", params };
 }
 
 // A quantity correction in the thread: "actually make it 2 laptops",
@@ -3972,11 +4559,18 @@ export function resolveFastPath(message, history, snap, currency) {
   if (read === "bestseller") {
     const window = /\blast week\b/.test(t) ? "lastweek"
       : /\blast month\b/.test(t) ? "lastmonth"
+      : /\blast year\b/.test(t) ? "lastyear"
+      : /\bthis year\b/.test(t) ? "year"
       : /\bthis week\b/.test(t) ? "week"
       : /\bthis month\b/.test(t) ? "month"
       : "all";
     const s = formatBestSeller(snap, currency, window);
     if (s !== null) return { kind: "reply", text: s };
+    // A recognised best-seller question never falls through to the
+    // sale step: without this, the sale parser would read the question
+    // words ("what best ?") as a product name. Say plainly that the
+    // breakdown is missing instead.
+    return { kind: "reply", text: "I cannot name a best seller from the figures I have. Your sales totals are there, but no product breakdown for that window." };
   }
   if (read === "monthsales") {
     const m = parseMonthMention(text, snap && snap.businessDate);
@@ -3986,11 +4580,75 @@ export function resolveFastPath(message, history, snap, currency) {
     }
   }
   if (read === "monthreport") {
-    const m = parseMonthMention(text, snap && snap.businessDate);
+    const m = parseMonthMention(text, snap && snap.businessDate) || parseMonthMention("this month", snap && snap.businessDate);
     if (m) {
       const report = formatMonthReport(snap, currency, m);
       if (report !== null) return { kind: "reply", text: report };
     }
+  }
+  if (read === "weekreport") {
+    const w = formatWeekReport(snap, currency, /\blast week\b/.test(t) ? "last" : "this");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "yearreport") {
+    const y = parseYearMention(text, snap && snap.businessDate) || parseYearMention("this year", snap && snap.businessDate);
+    if (y) {
+      const report = formatYearReport(snap, currency, y);
+      if (report !== null) return { kind: "reply", text: report };
+    }
+  }
+  if (read === "lastyearsales") {
+    const y = parseYearMention(text, snap && snap.businessDate);
+    if (y) {
+      const s = formatYearSalesDetail(snap, currency, y);
+      if (s !== null) return { kind: "reply", text: s };
+    }
+  }
+  if (read === "todayactivity") {
+    const report = formatDayReport(snap, currency, "today");
+    if (report !== null) return { kind: "reply", text: report };
+  }
+  if (read === "yesterdayactivity") {
+    const report = formatDayReport(snap, currency, "yesterday");
+    if (report !== null) return { kind: "reply", text: report };
+  }
+  if (read === "lastyearexpenses") {
+    const y = parseYearMention(text, snap && snap.businessDate);
+    if (y) {
+      const w = formatYearExpenses(snap, currency, y);
+      if (w !== null) return { kind: "reply", text: w };
+    }
+  }
+  if (read === "lastmonthexpenses") {
+    const m = parseMonthMention(text, snap && snap.businessDate);
+    if (m) {
+      const w = formatMonthExpensesFor(snap, currency, m);
+      if (w !== null) return { kind: "reply", text: w };
+    }
+  }
+  if (read === "yesterdayexpenses") {
+    const w = formatWindowExpenses(snap, currency, "yesterday");
+    if (w !== null) return { kind: "reply", text: w };
+  }
+  if (read === "customersales") {
+    const name = extractCustomerSalesName(text);
+    if (name) {
+      const s = formatCustomerSales(snap, currency, name);
+      if (s !== null) return { kind: "reply", text: s };
+    }
+  }
+  if (read === "projectspend") {
+    const name = extractProjectSpendName(text);
+    if (!name) {
+      const projects = (snap && snap.projects) || [];
+      return { kind: "reply", text: projects.length ? `Which project? ${projects.map((p) => p.name).join(", ")}.` : "You have no projects yet." };
+    }
+    const s = formatProjectSpend(snap, currency, name);
+    if (s !== null) return { kind: "reply", text: s };
+  }
+  if (read === "mybusiness") {
+    const b = formatMyBusiness(snap);
+    if (b !== null) return { kind: "reply", text: b };
   }
   if (read === "dayreport") {
     const day = /\byesterday\b/.test(t) ? "yesterday" : "today";
@@ -4038,9 +4696,10 @@ export function resolveFastPath(message, history, snap, currency) {
   if (read === "month") return { kind: "reply", text: formatMonthSales(snap, currency) };
   if (read === "monthexpenses") return { kind: "reply", text: formatMonthExpenses(snap, currency) };
   if (read === "monthexpenseword") {
-    const m = text.match(/^\s*(what did (?:i|we) spend on|how much did (?:i|we) spend on)\s+(.+?)\s+this month\s*[.!?]*$/i);
-    if (m) {
-      const s = formatMonthExpenseWord(snap, currency, m[2]);
+    const m = text.match(/^\s*(?:what did (?:i|we) spend on|how much did (?:i|we) spend on)\s+(.+?)\s+(?:(?:last|this|next)\s+month|in\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)(?:\s+\d{4})?)\s*[.!?]*$/i);
+    const month = parseMonthMention(text, snap && snap.businessDate);
+    if (m && month) {
+      const s = formatMonthExpenseWord(snap, currency, m[1], month);
       if (s !== null) return { kind: "reply", text: s };
     }
   }
@@ -4064,7 +4723,8 @@ export function resolveFastPath(message, history, snap, currency) {
     // ("today, week, months and year") keep the all-window answer.
     const has = (re) => re.test(t);
     let windowAsked = null;
-    if (has(/\blast month\b/)) windowAsked = "lastmonth";
+    if (has(/\blast year\b/)) windowAsked = "lastyear";
+    else if (has(/\blast month\b/)) windowAsked = "lastmonth";
     else if (has(/\blast week\b/)) windowAsked = "lastweek";
     else {
       const found = [];
@@ -4104,6 +4764,14 @@ export function resolveFastPath(message, history, snap, currency) {
   }
   if (read === "countsaleslastweek") {
     const c = formatCountSalesWindow(snap, currency, "lastweek");
+    if (c !== null) return { kind: "reply", text: c };
+  }
+  if (read === "countsaleslastmonth") {
+    const c = formatCountSalesWindow(snap, currency, "lastmonth");
+    if (c !== null) return { kind: "reply", text: c };
+  }
+  if (read === "countsaleslastyear") {
+    const c = formatCountSalesWindow(snap, currency, "lastyear");
     if (c !== null) return { kind: "reply", text: c };
   }
   if (read === "countproducts") return { kind: "reply", text: formatCountProducts(snap, currency) };
@@ -4233,6 +4901,16 @@ export function resolveFastPath(message, history, snap, currency) {
     }
     // Sale/expense with nothing to re-parse: fall through to the chip
     // flow below, which asks its one targeted question.
+  }
+
+  // 10c. Bare follow-up sale ("And 2 sold today", "And 1 more"): the
+  // message names a quantity and nothing else, so the product comes
+  // from the last sale in the thread. Runs before the sale step: the
+  // sale parser would otherwise read "and 2" as a product name.
+  const followUpSale = parseFollowUpSale(text, history, snap, currency);
+  if (followUpSale) {
+    if (followUpSale.kind === "question") return { kind: "reply", text: followUpSale.text };
+    return followUpSale;
   }
 
   // 11. Sale mention (including the bare "Record a sale" chip and

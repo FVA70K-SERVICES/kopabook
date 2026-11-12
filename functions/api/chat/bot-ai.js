@@ -1,6 +1,8 @@
 // Kopa Bot AI Brain - connects to Cloudflare Workers AI (Llama)
 // This makes the bot actually understand and think, not just match patterns
 
+import { resolveSupportShortcut, isSupportDeterministic } from './kopabook-knowledge.js';
+
 const AI_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
 // Workers AI has no timeout of its own: a hung run used to hang the whole
@@ -149,6 +151,11 @@ export function shouldUseAI(message, ruleResult) {
   if (ruleResult && ruleResult.confidence === 'high') return false;
   // If it's a follow-up ("yes"/"no"), rules handle it
   if (ruleResult && ruleResult.isFollowUp) return false;
+  // If the knowledge base answers this deterministically (a chip
+  // number, a stuck or next-steps phrasing, or any knowledge entry),
+  // the model must not get first crack: it could paraphrase, guess,
+  // or repeat the intro instead of the exact answer.
+  if (resolveSupportShortcut(message) || isSupportDeterministic(message)) return false;
   // Otherwise, let AI think
   return true;
 }

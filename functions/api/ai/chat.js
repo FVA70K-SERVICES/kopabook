@@ -32,7 +32,7 @@ import {
   onRequestPatch as updateProjectEndpoint,
   onRequestDelete as deleteProjectEndpoint,
 } from "../projects/[id].js";
-import { resolveFastPath, isClearChatRequest, CLEAR_CHAT_QUESTION, CLEAR_CHAT_DECLINED, CLEAR_CHAT_DONE } from "./_fastpath.js";
+import { resolveFastPath, displayUnit, qtyLeftText, isClearChatRequest, CLEAR_CHAT_QUESTION, CLEAR_CHAT_DECLINED, CLEAR_CHAT_DONE } from "./_fastpath.js";
 
 const GEMINI_MODEL = "gemini-3.7-flash";
 // Cut 2026-11-05 from 45000: the 45s ceiling let one failing model call
@@ -273,6 +273,14 @@ function fmt(n, currency) {
   return (currency || "NGN") + " " + v.toLocaleString("en-NG", { maximumFractionDigits: 2 });
 }
 
+// How a unit price reads: a product whose unit is "other" (the form
+// default) or blank is priced "each", never "per other". A real unit
+// keeps "per <unit>".
+function pricePhrase(unit) {
+  const u = displayUnit(unit);
+  return u ? `per ${u}` : "each";
+}
+
 function isPrivileged(auth) {
   return PRIVILEGED_ROLES.includes(auth.business && auth.business.role);
 }
@@ -338,12 +346,15 @@ export async function buildSnapshot(db, auth) {
   const nextMonthDate = tm === 12 ? (ty + 1) + "-01-01" : ty + "-" + String(tm + 1).padStart(2, "0") + "-01";
   const yearStartDate = ty + "-01-01";
   const nextYearDate = (ty + 1) + "-01-01";
+  const lastYearStartDate = (ty - 1) + "-01-01";
+  const lastMondayDate = new Date(mondayMs - 7 * dayMs).toISOString().slice(0, 10);
   const weekStartUtc = businessDayWindow(tz, mondayDate).startUtc;
   const weekEndUtc = businessDayWindow(tz, nextMondayDate).startUtc;
   const monthStartUtc = businessDayWindow(tz, monthStartDate).startUtc;
   const monthEndUtc = businessDayWindow(tz, nextMonthDate).startUtc;
   const yearStartUtc = businessDayWindow(tz, yearStartDate).startUtc;
   const yearEndUtc = businessDayWindow(tz, nextYearDate).startUtc;
+  const lastYearStartUtc = businessDayWindow(tz, lastYearStartDate).startUtc;
   const VOIDED = "(status IS NULL OR status <> 'voided')";
   const salesWindow = async (startUtc, endUtc) => {
     const r = await q(async () => await db.prepare(
@@ -399,12 +410,15 @@ export async function buildSnapshot(db, auth) {
   snap.salesWeek = await salesWindow(weekStartUtc, weekEndUtc);
   snap.salesMonth = await salesWindow(monthStartUtc, monthEndUtc);
   snap.salesYear = await salesWindow(yearStartUtc, yearEndUtc);
+  snap.salesLastYear = await salesWindow(lastYearStartUtc, yearStartUtc);
 
   snap.expensesToday = await expensesWindow(todayW.date, tomorrowDate);
   snap.expensesYesterday = await expensesWindow(yestW.date, todayW.date);
   snap.expensesWeek = await expensesWindow(mondayDate, nextMondayDate);
+  snap.expensesLastWeek = await expensesWindow(lastMondayDate, mondayDate);
   snap.expensesMonth = await expensesWindow(monthStartDate, nextMonthDate);
   snap.expensesYear = await expensesWindow(yearStartDate, nextYearDate);
+  snap.expensesLastYear = await expensesWindow(lastYearStartDate, yearStartDate);
 
   // Sales by day for the last 31 business days, in one query: the
   // date-sales and day-report reads need line items per day, not just
@@ -435,11 +449,19 @@ export async function buildSnapshot(db, auth) {
     const windows = [];
     for (let i = 0; i < 31; i++) {
       const d = new Date(startMs + i * dayMs).toISOString().slice(0, 10);
-      days[d] = { date: d, total: 0, count: 0, changeGiven: 0, items: [], debts: [] };
+      days[d] = { date: d, total: 0, count: 0, changeGiven: 0, items: [], debts: [], unlistedTotal: 0, unlistedCount: 0, customers: {} };
       windows.push({ date: d, ...businessDayWindow(tz, d) });
     }
     const seen = new Set();
     const agg = {};
+    // Per sale: its total and day, and whether any item line named a
+    // product. A sale with no sale_items rows, or whose product was
+    // deleted (LEFT JOIN gives NULL product_name), counts in the
+    // total but contributes no item line: without this tracking the
+    // item list and the total disagree, as happened live in October
+    // 2026 (one NGN 10,000 sale counted but unlisted).
+    const saleTotals = new Map();
+    const saleHasItems = new Set();
     for (const row of rs.results || []) {
       const w = windows.find((x) => row.created_at >= x.startUtc && row.created_at < x.endUtc);
       if (!w) continue;
@@ -449,15 +471,28 @@ export async function buildSnapshot(db, auth) {
         day.total = Math.round((day.total + (Number(row.total_amount) || 0)) * 100) / 100;
         day.count += 1;
         day.changeGiven = Math.round((day.changeGiven + (Number(row.change_given) || 0)) * 100) / 100;
+        saleTotals.set(row.id, { total: Number(row.total_amount) || 0, date: w.date });
+        const cust = row.customer || "Walk-in";
+        const cAgg = day.customers[cust] || (day.customers[cust] = { total: 0, count: 0 });
+        cAgg.total = Math.round((cAgg.total + (Number(row.total_amount) || 0)) * 100) / 100;
+        cAgg.count += 1;
         if ((Number(row.balance_due) || 0) > 0 && day.debts.length < 10) {
           day.debts.push({ customer: row.customer || "Walk-in", amount: Number(row.balance_due) || 0, ref: row.sale_number || "" });
         }
       }
       if (row.product_name) {
+        saleHasItems.add(row.id);
         const key = w.date + "\n" + row.product_name;
         const a = agg[key] || (agg[key] = { product: row.product_name, qty: 0, amount: 0 });
         a.qty += Number(row.quantity) || 0;
         a.amount = Math.round((a.amount + (Number(row.line_total) || 0)) * 100) / 100;
+      }
+    }
+    for (const [id, s] of saleTotals) {
+      if (!saleHasItems.has(id)) {
+        const day = days[s.date];
+        day.unlistedTotal = Math.round((day.unlistedTotal + s.total) * 100) / 100;
+        day.unlistedCount += 1;
       }
     }
     for (const [key, a] of Object.entries(agg)) {
@@ -503,7 +538,7 @@ export async function buildSnapshot(db, auth) {
       let cm = my;
       for (let i = 0; i < 3; i++) {
         const key = cy + "-" + String(cm).padStart(2, "0");
-        months[key] = { key, total: 0, count: 0, changeGiven: 0, items: [], debts: [] };
+        months[key] = { key, total: 0, count: 0, changeGiven: 0, items: [], debts: [], unlistedTotal: 0, unlistedCount: 0, customers: {} };
         keys.push(key);
         cm += 1;
         if (cm > 12) { cm = 1; cy += 1; }
@@ -519,6 +554,12 @@ export async function buildSnapshot(db, auth) {
     }
     const seen = new Set();
     const agg = {};
+    // Per sale: its total and month, and whether any item line named
+    // a product. A sale with no sale_items rows, or whose product was
+    // deleted, counts in the total but contributes no item line: the
+    // unlisted fields keep the list and the total in agreement.
+    const saleTotals = new Map();
+    const saleHasItems = new Set();
     for (const row of rs.results || []) {
       const w = windows.find((x) => row.created_at >= x.startUtc && row.created_at < x.endUtc);
       if (!w) continue;
@@ -529,15 +570,28 @@ export async function buildSnapshot(db, auth) {
         month.total = Math.round((month.total + (Number(row.total_amount) || 0)) * 100) / 100;
         month.count += 1;
         month.changeGiven = Math.round((month.changeGiven + (Number(row.change_given) || 0)) * 100) / 100;
+        saleTotals.set(row.id, { total: Number(row.total_amount) || 0, key: w.date.slice(0, 7) });
+        const cust = row.customer || "Walk-in";
+        const cAgg = month.customers[cust] || (month.customers[cust] = { total: 0, count: 0 });
+        cAgg.total = Math.round((cAgg.total + (Number(row.total_amount) || 0)) * 100) / 100;
+        cAgg.count += 1;
         if ((Number(row.balance_due) || 0) > 0 && month.debts.length < 10) {
           month.debts.push({ customer: row.customer || "Walk-in", amount: Number(row.balance_due) || 0, ref: row.sale_number || "" });
         }
       }
       if (row.product_name) {
+        saleHasItems.add(row.id);
         const key = w.date.slice(0, 7) + "\n" + row.product_name;
         const a = agg[key] || (agg[key] = { product: row.product_name, qty: 0, amount: 0 });
         a.qty += Number(row.quantity) || 0;
         a.amount = Math.round((a.amount + (Number(row.line_total) || 0)) * 100) / 100;
+      }
+    }
+    for (const [id, s] of saleTotals) {
+      if (!saleHasItems.has(id)) {
+        const month = months[s.key];
+        month.unlistedTotal = Math.round((month.unlistedTotal + s.total) * 100) / 100;
+        month.unlistedCount += 1;
       }
     }
     for (const [key, a] of Object.entries(agg)) {
@@ -588,6 +642,118 @@ export async function buildSnapshot(db, auth) {
       }
     }
     return months;
+  }, null);
+
+  // Sales by year for last year and this year, in one query: the
+  // year-sales, year-report and best-seller reads need line items per
+  // year, the same shape as the per-month map. Per year: total, count,
+  // change given, items aggregated by product name (cap 20), debts
+  // (cap 10), unlisted sales with no product line, and per-customer
+  // totals. Voided sales never count. On a query failure the field is
+  // null, so the year readers fall back to the window totals.
+  snap.salesByYear = await q(async () => {
+    const yearsStartDate = lastYearStartDate;
+    const yearsStartUtc = businessDayWindow(tz, yearsStartDate).startUtc;
+    const rs = await db.prepare(
+      `SELECT s.id, s.sale_number, COALESCE(c.name, 'Walk-in') AS customer,
+              s.total_amount, s.amount_paid, s.balance_due, COALESCE(s.change_given, 0) AS change_given,
+              s.created_at, si.quantity, si.line_total, p.name AS product_name
+       FROM sales s
+       LEFT JOIN sale_items si ON si.sale_id = s.id
+       LEFT JOIN products p ON p.id = si.product_id
+       LEFT JOIN customers c ON c.id = s.customer_id
+       WHERE s.business_id = ? AND s.created_at >= ? AND s.created_at < ? AND ${VOIDED}
+       ORDER BY s.created_at ASC`
+    ).bind(businessId, yearsStartUtc, yearEndUtc).all();
+    const years = {};
+    const keys = [];
+    for (let y = ty - 1; y <= ty; y++) {
+      const key = String(y);
+      years[key] = { key, total: 0, count: 0, changeGiven: 0, items: [], debts: [], unlistedTotal: 0, unlistedCount: 0, customers: {} };
+      keys.push(key);
+    }
+    const startMs = Date.parse(yearsStartDate + "T00:00:00Z");
+    const endMs = Date.parse(nextYearDate + "T00:00:00Z");
+    const dayCount = Math.round((endMs - startMs) / dayMs);
+    const windows = [];
+    for (let i = 0; i < dayCount; i++) {
+      const d = new Date(startMs + i * dayMs).toISOString().slice(0, 10);
+      windows.push({ date: d, ...businessDayWindow(tz, d) });
+    }
+    const seen = new Set();
+    const agg = {};
+    const saleTotals = new Map();
+    const saleHasItems = new Set();
+    for (const row of rs.results || []) {
+      const w = windows.find((x) => row.created_at >= x.startUtc && row.created_at < x.endUtc);
+      if (!w) continue;
+      const year = years[w.date.slice(0, 4)];
+      if (!year) continue;
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        year.total = Math.round((year.total + (Number(row.total_amount) || 0)) * 100) / 100;
+        year.count += 1;
+        year.changeGiven = Math.round((year.changeGiven + (Number(row.change_given) || 0)) * 100) / 100;
+        saleTotals.set(row.id, { total: Number(row.total_amount) || 0, key: w.date.slice(0, 4) });
+        const cust = row.customer || "Walk-in";
+        const cAgg = year.customers[cust] || (year.customers[cust] = { total: 0, count: 0 });
+        cAgg.total = Math.round((cAgg.total + (Number(row.total_amount) || 0)) * 100) / 100;
+        cAgg.count += 1;
+        if ((Number(row.balance_due) || 0) > 0 && year.debts.length < 10) {
+          year.debts.push({ customer: row.customer || "Walk-in", amount: Number(row.balance_due) || 0, ref: row.sale_number || "" });
+        }
+      }
+      if (row.product_name) {
+        saleHasItems.add(row.id);
+        const key = w.date.slice(0, 4) + "\n" + row.product_name;
+        const a = agg[key] || (agg[key] = { product: row.product_name, qty: 0, amount: 0 });
+        a.qty += Number(row.quantity) || 0;
+        a.amount = Math.round((a.amount + (Number(row.line_total) || 0)) * 100) / 100;
+      }
+    }
+    for (const [id, s] of saleTotals) {
+      if (!saleHasItems.has(id)) {
+        const year = years[s.key];
+        year.unlistedTotal = Math.round((year.unlistedTotal + s.total) * 100) / 100;
+        year.unlistedCount += 1;
+      }
+    }
+    for (const [key, a] of Object.entries(agg)) {
+      years[key.slice(0, 4)].items.push(a);
+    }
+    for (const key of keys) {
+      years[key].items.sort((a, b) => b.amount - a.amount);
+      years[key].items = years[key].items.slice(0, 20);
+    }
+    return years;
+  }, null);
+
+  // Expenses by year for last year and this year, with each expense's
+  // description, the same shape as the per-month map. On a query
+  // failure the field is null, so the year-expenses read falls back
+  // to the window totals.
+  snap.expensesByYear = await q(async () => {
+    const rs = await db.prepare(
+      `SELECT COALESCE(e.note, ec.name, 'Expense') AS description, e.amount, e.incurred_on
+       FROM expenses e LEFT JOIN expense_categories ec ON ec.id = e.category_id
+       WHERE e.business_id = ? AND e.incurred_on >= ? AND e.incurred_on < ?
+       ORDER BY e.incurred_on ASC`
+    ).bind(businessId, lastYearStartDate, nextYearDate).all();
+    const years = {};
+    for (let y = ty - 1; y <= ty; y++) {
+      years[String(y)] = { key: String(y), total: 0, count: 0, items: [] };
+    }
+    for (const row of rs.results || []) {
+      const key = String(row.incurred_on || "").slice(0, 4);
+      const year = years[key];
+      if (!year) continue;
+      year.total = Math.round((year.total + (Number(row.amount) || 0)) * 100) / 100;
+      year.count += 1;
+      if (year.items.length < 50) {
+        year.items.push({ description: row.description, amount: Number(row.amount) || 0, date: row.incurred_on });
+      }
+    }
+    return years;
   }, null);
 
   snap.debtors = await q(async () => {
@@ -696,7 +862,7 @@ function snapshotText(snap, currency) {
     L.push(`Today is ${snap.businessDate} (${snap.timezone || "Africa/Lagos"}).`);
   }
   if (snap.products.length) {
-    L.push("Products (name, price, unit, stock): " + snap.products.map((p) => `${p.name} ${fmt(p.price, currency)} per ${p.unit} (stock ${p.stock})`).join("; ") + ".");
+    L.push("Products (name, price, unit, stock): " + snap.products.map((p) => `${p.name} ${fmt(p.price, currency)} ${pricePhrase(p.unit)} (stock ${p.stock})`).join("; ") + ".");
   } else {
     L.push("Products: none added yet.");
   }
@@ -707,6 +873,9 @@ function snapshotText(snap, currency) {
   L.push(`Sales this month: ${fmt(snap.salesMonth.total, currency)} across ${snap.salesMonth.count} sales.`);
   L.push(`Sales this week: ${fmt(snap.salesWeek.total, currency)} across ${snap.salesWeek.count} sales.`);
   L.push(`Sales this year: ${fmt(snap.salesYear.total, currency)} across ${snap.salesYear.count} sales.`);
+  if (snap.salesLastYear) {
+    L.push(`Sales last year: ${fmt(snap.salesLastYear.total, currency)} across ${snap.salesLastYear.count} sales.`);
+  }
   if (snap.expensesToday) {
     L.push(`Expenses today: ${fmt(snap.expensesToday.total, currency)} across ${snap.expensesToday.count} expenses.`);
     // Profit is sales minus expenses for the same window. No cost_price
@@ -716,13 +885,16 @@ function snapshotText(snap, currency) {
   L.push(`Expenses this month: ${fmt(snap.expensesMonth.total, currency)} across ${snap.expensesMonth.count} expenses.`);
   L.push(`Expenses this week: ${fmt(snap.expensesWeek.total, currency)} across ${snap.expensesWeek.count} expenses.`);
   L.push(`Expenses this year: ${fmt(snap.expensesYear.total, currency)} across ${snap.expensesYear.count} expenses.`);
+  if (snap.expensesLastYear) {
+    L.push(`Expenses last year: ${fmt(snap.expensesLastYear.total, currency)} across ${snap.expensesLastYear.count} expenses.`);
+  }
   if (snap.debtors.length) {
     L.push("Customers owing (name: balance): " + snap.debtors.map((d) => `${d.name}: ${fmt(d.balance, currency)}`).join("; ") + ".");
   } else {
     L.push("Customers owing: nobody owes money right now.");
   }
   if (snap.lowStock.length) {
-    L.push("Low stock: " + snap.lowStock.map((p) => `${p.name} (${p.qty} ${p.unit} left)`).join("; ") + ".");
+    L.push("Low stock: " + snap.lowStock.map((p) => `${p.name} (${qtyLeftText(p.qty, p.unit)})`).join("; ") + ".");
   } else {
     L.push("Low stock: nothing is running low.");
   }
@@ -1069,7 +1241,7 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
     if (!matches.length) return { ok: false, clarification: await productNotFoundLine(db, auth.business.id, it.product || "") };
     if (matches.length > 1) return { ok: false, clarification: `"${it.product}" matches more than one product: ${matches.map((p) => p.name).join(", ")}. Which one do you mean?` };
     const p = matches[0];
-    if (p.stock < qty) return { ok: false, clarification: `Not enough stock for ${p.name}. You have ${p.stock} ${p.unit} left.` };
+    if (p.stock < qty) return { ok: false, clarification: `Not enough stock for ${p.name}. You have ${qtyLeftText(p.stock, p.unit)}.` };
     const lineTotal = Math.round(p.price * qty * 100) / 100;
     lines.push({ product: p, qty, unitPrice: p.price, lineTotal });
   }
@@ -1128,13 +1300,13 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
         }
       }
     }
-    const proposalLines = lines.map((l) => `${l.qty} × ${l.product.name} at ${fmt(l.unitPrice, currency)} per ${l.product.unit} = ${fmt(l.lineTotal, currency)}`);
+    const proposalLines = lines.map((l) => `${l.qty} × ${l.product.name} at ${fmt(l.unitPrice, currency)} ${pricePhrase(l.product.unit)} = ${fmt(l.lineTotal, currency)}`);
     proposalLines.push(`Total: ${fmt(subtotal, currency)}`);
     proposalLines.push(`Customer: ${customerName || "Walk-in"}`);
     proposalLines.push(`Amount paid: ${fmt(paid, currency)} (${paymentMethod})`);
     if (change > 0) proposalLines.push(`Change to give back: ${fmt(change, currency)}`);
     if (balanceDue > 0) proposalLines.push(`Balance going to debt: ${fmt(balanceDue, currency)}`);
-    const itemDesc = lines.map((l) => `${l.qty} ${l.product.name} at ${fmt(l.unitPrice, currency)} per ${l.product.unit}`).join(", ");
+    const itemDesc = lines.map((l) => `${l.qty} ${l.product.name} at ${fmt(l.unitPrice, currency)} ${pricePhrase(l.product.unit)}`).join(", ");
     const custDesc = customerName ? ` for ${customerName}` : "";
     const payDesc = balanceDue > 0
       ? `paid ${fmt(paid, currency)} ${paymentMethod}, balance ${fmt(balanceDue, currency)} to be recorded as debt`
@@ -1195,7 +1367,7 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
   const saleId = batchResults[headerIdx].meta.last_row_id;
   await audit(context, auth, "ai.sale.create", "sale", saleId, { saleNumber, total: subtotal, via: "kopa_ai" });
 
-  const itemDesc = lines.map((l) => `${l.qty} ${l.product.name} at ${fmt(l.unitPrice, currency)} per ${l.product.unit}`).join(", ");
+  const itemDesc = lines.map((l) => `${l.qty} ${l.product.name} at ${fmt(l.unitPrice, currency)} ${pricePhrase(l.product.unit)}`).join(", ");
   const custDesc = customerName ? ` for ${customerName}` : "";
   const payDesc = balanceDue > 0
     ? `paid ${fmt(paid, currency)} ${paymentMethod}, balance ${fmt(balanceDue, currency)} recorded as debt`
@@ -1280,7 +1452,7 @@ async function execAddProduct(context, db, auth, params, currency, opts) {
     return {
       ok: true,
       proposal: {
-        summary: `Add product "${name}" at ${fmt(price, currency)} per ${unit}${opening > 0 ? ` with opening stock of ${opening}` : ""}.`,
+        summary: `Add product "${name}" at ${fmt(price, currency)} ${pricePhrase(unit)}${opening > 0 ? ` with opening stock of ${opening}` : ""}.`,
         lines: [
           `Name: ${name}`,
           `Price: ${fmt(price, currency)}`,
@@ -1312,7 +1484,7 @@ async function execAddProduct(context, db, auth, params, currency, opts) {
       .bind(productId, opening, `Opening stock for ${name}`, auth.user.id).run();
   }
   await audit(context, auth, "ai.product.create", "product", productId, { name, price, via: "kopa_ai" });
-  return { ok: true, summary: `Added product "${name}" at ${fmt(price, currency)} per ${unit}${opening > 0 ? ` with opening stock of ${opening}` : ""}.` };
+  return { ok: true, summary: `Added product "${name}" at ${fmt(price, currency)} ${pricePhrase(unit)}${opening > 0 ? ` with opening stock of ${opening}` : ""}.` };
 }
 
 async function execRecordCustomerPayment(context, db, auth, params, currency, opts) {
@@ -2426,7 +2598,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
         if (!matches.length) return stop(await productNotFoundLine(db, businessId, it.product || ""));
         if (matches.length > 1) return stop("\"" + (it.product || "") + "\" matches more than one product: " + matches.map((p) => p.name).join(", ") + ". Which one do you mean?");
         const p = matches[0];
-        if (p.stock < qty) return stop("Not enough stock for " + p.name + ". You have " + p.stock + " " + p.unit + " left.");
+        if (p.stock < qty) return stop("Not enough stock for " + p.name + ". You have " + qtyLeftText(p.stock, p.unit) + ".");
         resolved.push({ requested: String(it.product || ""), product: p, qty, lineTotal: Math.round(p.price * qty * 100) / 100 });
       }
       const total = Math.round(resolved.reduce((s, r) => s + r.lineTotal, 0) * 100) / 100;
@@ -2536,7 +2708,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
         const first = resolved[0];
         return { warning: {
           kind: "price_mismatch", asked: askedText,
-          why: "That price is different from the price on this product: you said " + fmtCur(stated) + ", but the product record says " + fmtCur(first.product.price) + " per " + first.product.unit + ", so " + first.qty + " comes to " + fmtCur(total) + ".",
+          why: "That price is different from the price on this product: you said " + fmtCur(stated) + ", but the product record says " + fmtCur(first.product.price) + " " + pricePhrase(first.product.unit) + ", so " + first.qty + " comes to " + fmtCur(total) + ".",
           change: "At the product record price, the total would be " + fmtCur(total) + " and stock of " + first.product.name + " would go from " + first.product.stock + " to " + (first.product.stock - first.qty) + ".",
           safer: "Record it at the product record price, total " + fmtCur(total) + ".",
           question: "Do you want the safer way, or do you still want the original? Tell me, and I will draft it for your Confirm tap.",
@@ -2583,7 +2755,7 @@ export async function runGuardrailChecks(db, auth, tool, params, proposal, userM
                 kind: "memory_price", asked: askedText,
                 why: "Your saved price says " + fmtCur(disagree) + ", but the product record says " + fmtCur(prod.product.price) + " for " + prod.product.name + ".",
                 change: "At the product record price, the total would be " + fmtCur(total) + " and stock of " + prod.product.name + " would go from " + prod.product.stock + " to " + (prod.product.stock - prod.qty) + ".",
-                safer: "Use the product record price, " + fmtCur(prod.product.price) + " per " + prod.product.unit + ".",
+                safer: "Use the product record price, " + fmtCur(prod.product.price) + " " + pricePhrase(prod.product.unit) + ".",
                 question: "Do you want the safer way, or do you still want the original? Tell me, and I will draft it for your Confirm tap.",
                 candidates: [],
                 saferAction: { action: "proposal", params, summary: proposal ? proposal.summary : askedText, lines: proposal ? proposal.lines : [] },
@@ -3087,7 +3259,7 @@ async function buildBriefing(db, auth, snap, currency) {
     L.push("Who is owing: nobody owes money right now.");
   }
   if (snap.lowStock && snap.lowStock.length) {
-    L.push("Low stock: " + snap.lowStock.map((p) => `${p.name} (${p.qty} ${p.unit} left)`).join("; ") + ".");
+    L.push("Low stock: " + snap.lowStock.map((p) => `${p.name} (${qtyLeftText(p.qty, p.unit)})`).join("; ") + ".");
   } else {
     L.push("Low stock: nothing is running low.");
   }

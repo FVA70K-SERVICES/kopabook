@@ -101,6 +101,20 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
    only) can still cut the top of a proposal card — see known gaps.
    The 568px lives here, on .open, so the base rule above stays
    byte-identical (the round-2 suite pins its 360px/bottom-96px text). */
+/* Round 9: short viewports on wider screens (keypad open on a desktop
+   window, short window). The app shell caps the floating card at
+   calc(100vh - 180px) with bottom 156px, which leaves a 240px card at
+   420px tall and a 32px thread: padding only, zero content height.
+   While the viewport is short, sit the card lower and let it grow, so
+   the thread keeps room. At normal heights this rule does not match
+   and the shell geometry is untouched; at 480px and below the
+   narrow-sheet rule below wins (same specificity, later in the file).
+   The dvh declaration is the same value in dynamic viewport units, so
+   the card tracks the visible height where the keypad opens. */
+@media (max-height: 560px) {
+  #fva-chat-window.open { max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); }
+  body.kb-in-app #fva-chat-window.open { bottom: 96px; max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); }
+}
 #fva-chat-header {
   background: var(--navy, #1a2b49); color: white; padding: 16px 20px;
   display: flex; align-items: center; justify-content: space-between;
@@ -217,6 +231,53 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
 #fva-chat-window #fva-chat-messages .fva-proposal-card,
 #fva-chat-window #fva-chat-messages .fva-pa-card,
 #fva-chat-window #fva-chat-messages .fva-mode-note { margin-left: 0; }
+
+/* Round 9: short viewports (keypad open, short window). The panel
+   chrome (header, tab row, 48px tab inset, quick replies, composer)
+   eats the whole window at 420px tall and the messages column
+   collapses to its padding, so the thread is invisible while typing.
+   Compact the chrome while the viewport is short, so the thread keeps
+   room. The same rules apply under .fva-keyboard, set by the widget
+   when the visual viewport shrinks (iOS, where the layout viewport
+   does not shrink with the keypad). The tab inset drops to the short
+   16px the widget sets in the same state; the sheet carries the same
+   16px as a backstop. Nothing here changes the closed-keypad layout. */
+@media (max-height: 560px) {
+  #fva-chat-header { padding: 10px 16px; }
+  #fva-chat-header .status { display: none; }
+  /* The base tab rules live in the merged-chat section below this
+     block, so these carry the window id to outrank them at any order. */
+  #fva-chat-window #fva-mode-tabs { padding: 6px 12px 0; }
+  #fva-chat-window #fva-mode-tabs button { padding: 6px 6px; }
+  #fva-chat-window.fva-tabs-on #fva-chat-messages,
+  #fva-chat-window.fva-tabs-on #fva-case-history,
+  #fva-chat-window.fva-tabs-on #fva-owner-inbox { margin-top: 16px; }
+  #fva-chat-quick { padding: 6px 12px; gap: 6px; }
+  .fva-quick-btn { padding: 4px 10px; }
+  #fva-chat-input-area { padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); gap: 6px; }
+}
+#fva-chat-window.fva-keyboard #fva-chat-header { padding: 10px 16px; }
+#fva-chat-window.fva-keyboard #fva-chat-header .status { display: none; }
+#fva-chat-window.fva-keyboard #fva-mode-tabs { padding: 6px 12px 0; }
+#fva-chat-window.fva-keyboard #fva-mode-tabs button { padding: 6px 6px; }
+#fva-chat-window.fva-keyboard.fva-tabs-on #fva-chat-messages,
+#fva-chat-window.fva-keyboard.fva-tabs-on #fva-case-history,
+#fva-chat-window.fva-keyboard.fva-tabs-on #fva-owner-inbox { margin-top: 16px; }
+#fva-chat-window.fva-keyboard #fva-chat-quick { padding: 6px 12px; gap: 6px; }
+#fva-chat-window.fva-keyboard .fva-quick-btn { padding: 4px 10px; }
+#fva-chat-window.fva-keyboard #fva-chat-input-area { padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); gap: 6px; }
+/* Round 9: dynamic viewport units for the floating card. On phones the
+   layout viewport does not shrink when the keypad opens, so 100vh
+   overstates the visible height and the card can run under the keypad.
+   Where dvh is supported it tracks the visible height instead. Same
+   values as the vh rules, so nothing changes where vh and dvh agree.
+   Scoped to normal heights: short viewports use the rule above. */
+@supports (height: 1dvh) {
+  @media (min-height: 561px) {
+    #fva-chat-window { max-height: calc(100dvh - 140px); }
+    body.kb-in-app #fva-chat-window.open { max-height: calc(100dvh - 180px); }
+  }
+}
 
 /* v2 features */
 #fva-chat-menu-dropdown {

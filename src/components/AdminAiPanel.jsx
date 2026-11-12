@@ -194,7 +194,11 @@ const panelStyle = {
   margin: "0 auto",
   display: "flex",
   flexDirection: "column",
-  height: "min(72vh, 720px)",
+  // Round 9: 84vh, not 72vh. The quick prompts moved out of the
+  // scrolling thread into their own row (below), so the panel pays for
+  // that row with height instead of stealing it from the thread: at
+  // 390px the thread was a 62px slit under the old 72vh panel.
+  height: "min(84vh, 780px)",
   minWidth: 0,
   background: "var(--surface)",
   color: "var(--ink)",
@@ -338,6 +342,13 @@ export default function AdminAiPanel() {
   const [speakingId, setSpeakingId] = useState(null);
   const [listening, setListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
+  // Round 9: keypad-open state. On phones the layout viewport does not
+  // always shrink when the keypad opens (iOS), so a layout-height media
+  // query cannot see the keypad. The visual viewport does shrink: when
+  // it does, the panel takes the .kb-open class and the short-screen
+  // rules apply (the panel grows with the page and the thread keeps a
+  // usable height instead of collapsing under the keypad).
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [micHint, setMicHint] = useState("");
   const scrollRef = useRef(null);
   const hasInteractedRef = useRef(false);
@@ -598,6 +609,27 @@ export default function AdminAiPanel() {
     refreshCachedVoices();
     // Run once on mount only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Round 9: watch the visual viewport for the keypad (see the state
+  // above). A covered height over 80px means the keypad is open; small
+  // chrome changes do not trip it. Listened once on mount, cleaned up
+  // on unmount. No visual viewport (desktop, older browsers) is a
+  // no-op: the layout-height media query covers those.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return undefined;
+    const vv = window.visualViewport;
+    const onResize = () => {
+      try {
+        const covered = window.innerHeight - vv.height - (vv.offsetTop || 0);
+        setKeyboardOpen(covered > 80);
+      } catch (e) {}
+    };
+    vv.addEventListener("resize", onResize);
+    onResize();
+    return () => {
+      try { vv.removeEventListener("resize", onResize); } catch (e) {}
+    };
   }, []);
 
   useEffect(() => {
@@ -869,7 +901,7 @@ export default function AdminAiPanel() {
   const firstBriefingIndex = messages.findIndex((m) => m.isBriefing);
 
   return (
-    <div style={panelStyle} className="admin-ai-panel">
+    <div style={panelStyle} className={"admin-ai-panel" + (keyboardOpen ? " kb-open" : "")}>
       <style>{`
         @keyframes admin-ai-msg-in {
           from { opacity: 0; transform: translateY(6px); }
@@ -930,9 +962,60 @@ export default function AdminAiPanel() {
             opacity: 1 !important;
           }
         }
+        /* Round 9: dynamic viewport units. On phones the layout
+           viewport does not shrink when the keypad opens, so 72vh
+           overstates the visible height. Where dvh is supported the
+           panel tracks the visible height instead. Same value, so
+           nothing changes where vh and dvh agree. Short viewports use
+           the rules below, which come later at equal specificity. */
+        @supports (height: 1dvh) {
+          .admin-ai-panel { height: min(84dvh, 780px) !important; }
+        }
+        /* Round 9: short viewports (keypad open, short window). The
+           fixed chrome (header, composer, footer note) eats a 72vh
+           panel at 420px tall and the thread collapses to a slit, so
+           the composer ends up under the bottom nav and the chips are
+           sliced at the top of the thread. While the viewport is
+           short the panel grows with the page instead (the page
+           scrolls, and its 90px bottom padding keeps the composer
+           above the nav), the thread keeps at least 140px and scrolls
+           past its cap, the header compacts, and the guidance note
+           hides. The same rules apply under .kb-open, set by the
+           panel when the visual viewport shrinks (iOS, where the
+           layout viewport does not shrink with the keypad). */
+        @media (max-height: 560px) {
+          .admin-ai-panel { height: auto !important; }
+          .admin-ai-messages { max-height: min(56vh, 460px); min-height: 140px !important; }
+          .admin-ai-header { padding: 12px 14px !important; gap: 8px !important; }
+          .admin-ai-voice-note { display: none; }
+          /* Round 9: at 320px with the keypad open the chips row is
+             five or six rows tall, so the first row sits above the
+             viewport when the page is scrolled to the composer. Tighten
+             the row and hide the footer note while the viewport is
+             short, so the whole row and the composer fit together. */
+          .admin-ai-chips { padding: 8px 12px !important; gap: 6px !important; }
+          .admin-ai-footnote { display: none; }
+        }
+        /* Round 9: narrow screens (mobile). The header wraps tall on a
+           narrow phone (title, voice and language controls, guidance
+           note), leaving the thread a slit even with the keypad
+           closed. Compact it at mobile widths: tighter padding and
+           gaps, and the guidance note hides (the voice controls stay).
+           The note is guidance text, not a control, so nothing the
+           owner does is lost. */
+        @media (max-width: 860px) {
+          .admin-ai-header { padding: 12px 14px !important; gap: 8px !important; }
+          .admin-ai-voice-note { display: none; }
+        }
+        .admin-ai-panel.kb-open { height: auto !important; }
+        .admin-ai-panel.kb-open .admin-ai-messages { max-height: min(56vh, 460px); max-height: min(56dvh, 460px); min-height: 140px !important; }
+        .admin-ai-panel.kb-open .admin-ai-header { padding: 12px 14px !important; gap: 8px !important; }
+        .admin-ai-panel.kb-open .admin-ai-voice-note { display: none; }
+        .admin-ai-panel.kb-open .admin-ai-chips { padding: 8px 12px !important; gap: 6px !important; }
+        .admin-ai-panel.kb-open .admin-ai-footnote { display: none; }
       `}</style>
 
-      <div style={headerStyle}>
+      <div style={headerStyle} className="admin-ai-header">
         <div
           style={{
             boxSizing: "border-box",
@@ -1016,12 +1099,12 @@ export default function AdminAiPanel() {
             {"Auto-speak: " + (autoSpeak ? "On" : "Off")}
           </button>
         </div>
-        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.45, color: "var(--muted)", overflowWrap: "anywhere" }}>
+        <p className="admin-ai-voice-note" style={{ margin: 0, fontSize: 12, lineHeight: 1.45, color: "var(--muted)", overflowWrap: "anywhere" }}>
           Voices come from your phone or browser. For a full Nigerian voice, add English (Nigeria) in your device text-to-speech settings; it is free.
         </p>
       </div>
 
-      <div ref={scrollRef} style={messagesStyle}>
+      <div ref={scrollRef} style={messagesStyle} className="admin-ai-messages">
         {loadingBriefing && messages.length === 0 ? (
           <div style={{ ...assistantBubbleStyle }} className="admin-ai-msg">
             <div style={labelStyle}>Admin AI</div>
@@ -1171,47 +1254,6 @@ export default function AdminAiPanel() {
             </div>
           );
 
-          if (idx === firstBriefingIndex && briefingLoaded) {
-            return (
-              <div
-                key={m.id + "-with-chips"}
-                style={{
-                  boxSizing: "border-box",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                  alignSelf: "stretch",
-                  minWidth: 0,
-                }}
-              >
-                {bubble}
-                <div
-                  style={{
-                    boxSizing: "border-box",
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    alignSelf: "flex-start",
-                    maxWidth: "100%",
-                    minWidth: 0,
-                  }}
-                >
-                  {QUICK_PROMPTS.map((label) => (
-                    <button
-                      key={label}
-                      type="button"
-                      style={{ ...chipStyle, opacity: busy ? 0.6 : 1 }}
-                      disabled={busy}
-                      onClick={() => sendMessage(label)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          }
-
           return bubble;
         })}
 
@@ -1242,6 +1284,44 @@ export default function AdminAiPanel() {
           </div>
         ) : null}
       </div>
+
+      {/* Round 9: the quick prompts live here now, in a fixed row
+        between the thread and the composer, like the widget's quick
+        replies. They used to render inside the scrolling thread right
+        after the briefing bubble, so on a narrow phone (six chips over
+        four or five rows) or with the keypad open (a collapsed thread)
+        the row was sliced at the top of the scroller and "Brief me"
+        read as half hidden behind the header. In this row they are
+        always fully visible at every width, with the keypad open and
+        closed. Same buttons, same send, same disabled-while-busy. */}
+      {briefingLoaded && firstBriefingIndex !== -1 ? (
+        <div
+          className="admin-ai-chips"
+          style={{
+            boxSizing: "border-box",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            flexShrink: 0,
+            width: "100%",
+            minWidth: 0,
+            padding: "10px 16px",
+            background: "var(--bg)",
+          }}
+        >
+          {QUICK_PROMPTS.map((label) => (
+            <button
+              key={label}
+              type="button"
+              style={{ ...chipStyle, opacity: busy ? 0.6 : 1 }}
+              disabled={busy}
+              onClick={() => sendMessage(label)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <form
         onSubmit={onComposerSubmit}
@@ -1294,7 +1374,7 @@ export default function AdminAiPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder="Ask about the platform, or tell me what to do..."
+          placeholder="Message Admin AI"
           rows={1}
           disabled={busy}
           aria-label="Message Admin AI"
@@ -1356,7 +1436,7 @@ export default function AdminAiPanel() {
           minWidth: 0,
         }}
       >
-        <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted)", overflowWrap: "anywhere" }}>
+        <div className="admin-ai-footnote" style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted)", overflowWrap: "anywhere" }}>
           Voice can ask and listen, but actions only run when you tap Confirm.
         </div>
         {micHint ? (
