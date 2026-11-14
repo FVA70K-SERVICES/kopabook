@@ -4,6 +4,7 @@ import { ListSkeleton } from "../components/ListState";
 import { api, nav } from "../lib/api";
 import { LANGUAGES } from "../lib/i18n";
 import { NIGERIAN_STATES } from "../lib/nigeria";
+import { getDeferredPrompt, onDeferredPromptChange, promptInstall } from "../lib/installPrompt";
 import { WORLD_CURRENCIES, WORLD_TIMEZONES, COUNTRIES, ORG_TYPES } from "../lib/businessTypes";
 import PaymentModesEditor from "../components/PaymentModesEditor";
 import DeveloperApi from "../components/DeveloperApi";
@@ -569,19 +570,16 @@ function ReceiptSettingsSection({ isOwner }) {
 /* WORLD-BEST: Receipt settings — end */
 
 function InstallCard() {
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  // The event lives in the shared installPrompt module (captured in
+  // main.jsx), so this card and the install pop-up can never hold
+  // separate copies of it, and a spent event is never prompted twice.
+  const [deferredPrompt, setDeferredPrompt] = useState(() => getDeferredPrompt());
 
-  useEffect(() => {
-    function onBip(e) { e.preventDefault(); setDeferredPrompt(e); }
-    window.addEventListener("beforeinstallprompt", onBip);
-    return () => window.removeEventListener("beforeinstallprompt", onBip);
-  }, []);
+  useEffect(() => onDeferredPromptChange(setDeferredPrompt), []);
 
   async function install() {
     if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    try { await deferredPrompt.userChoice; } catch (e) {}
-    setDeferredPrompt(null);
+    await promptInstall();
   }
 
   const steps = { margin: "8px 0", paddingLeft: 20, color: "var(--muted)", fontSize: 14 };

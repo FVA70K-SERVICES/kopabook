@@ -534,3 +534,24 @@ body.kb-in-app #fva-chat-window {
   body.kb-in-app #fva-chat-btn { bottom: 84px; right: 16px; }
   body.kb-in-app #fva-chat-window { bottom: 152px; right: 16px; }
 }
+
+/* ---------- Android install pop-up ---------- */
+/* A bottom sheet on phones (centred from 640px, like .modal). It sits
+   above the mobile bottom bar (z 90), the sidebar (z 100) and the chat
+   button (z 1000), and below the app-lock gate (z 3000), so its buttons
+   are never hidden behind the bottom nav. Plain colours, no animation:
+   KopaBook tooling stays clean. The sheet clears the safe area at the
+   bottom, and every button is at least 44px tall. */
+.kb-install-back { position: fixed; inset: 0; background: rgba(15, 31, 20, 0.5); z-index: 1100; display: flex; align-items: flex-end; justify-content: center; }
+@media (min-width: 640px) { .kb-install-back { align-items: center; } }
+.kb-install-sheet { padding-bottom: calc(26px + env(safe-area-inset-bottom)); }
+.kb-install-head { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.kb-install-icon { width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0; }
+.kb-install-sheet h2 { margin: 0; font-size: 20px; }
+.kb-install-sub { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.kb-install-text { margin: 0 0 14px; font-size: 15px; }
+.kb-install-steps { margin: 0 0 14px; padding-left: 22px; color: var(--ink); font-size: 15px; display: grid; gap: 8px; }
+.kb-install-note { margin: 0 0 14px; font-size: 14px; color: var(--muted); }
+.kb-install-actions { display: flex; flex-direction: column; gap: 10px; }
+.kb-install-btn { min-height: 44px; width: 100%; }
+@media (min-width: 640px) { .kb-install-actions { flex-direction: row; } .kb-install-btn { width: auto; flex: 1; } }

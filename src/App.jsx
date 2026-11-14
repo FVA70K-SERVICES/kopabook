@@ -1,5 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import Layout from "./components/Layout";
+import InstallPrompt from "./components/InstallPrompt";
 import { api, nav, setCurrency } from "./lib/api";
 // Speed (2026-11-06): the main bundle used to carry every page, so a
 // cold open downloaded the landing page, the auth pages, the receipt
@@ -223,10 +224,13 @@ export default function App() {
   const { loading, session } = useSession();
   if (loading) return <div className="loading">Loading KopaBook...</div>;
   // One Suspense boundary for the lazily loaded pages (public routes
-  // and receipts); the /app branch has its own below.
+  // and receipts); the /app branch has its own below. The install
+  // prompt mounts here, outside the route, so it can appear on the
+  // landing page as well as inside the app.
   return (
     <Suspense fallback={<div className="loading">Loading KopaBook...</div>}>
       <AppRoute session={session} />
+      <InstallPrompt />
     </Suspense>
   );
 }

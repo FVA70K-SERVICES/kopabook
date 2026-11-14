@@ -6,8 +6,9 @@
 // pick up the current bundle (v7: PIN app lock gate restored in the
 // shell, with the owner's own re-lock timer; navigation is now
 // stale-while-revalidate so a repeat cold open paints from the cached
-// shell at once instead of waiting on the network first).
-const SHELL_CACHE = "kopabook-shell-v7";
+// shell at once instead of waiting on the network first. v8: Android
+// install pop-up ships in the main bundle.)
+const SHELL_CACHE = "kopabook-shell-v8";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 
