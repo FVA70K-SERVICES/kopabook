@@ -1,4 +1,33 @@
+# KopaBook security headers — Phase 3.2 (2026-11-16).
+# Completes the Phase 1.8/1.9 _headers (which had frame-ancestors + HSTS
+# + nosniff only) to the one-standard-per-host set: full CSP,
+# X-Frame-Options, Referrer-Policy, HSTS, nosniff.
+#
+# CSP notes (verified against the live served HTML and the built bundles,
+# 2026-11-16 22:47 WAT — do not loosen without re-verifying):
+# - script-src 'self' + 2 SHA-256 hashes, NO 'unsafe-inline': the only
+#   inline scripts are the theme pre-paint block (index.html) and the
+#   FVAChat owner-context block (index.html). Both hashes were computed
+#   from the repo file AND from the live served HTML; they match exactly.
+#   If either block is edited, its hash must be recomputed or the app
+#   breaks (theme flash / chat owner context lost).
+# - The JSON-LD block (type="application/ld+json") is not executable and
+#   needs no hash.
+# - style-src 'self' only: no <style> block and no inline event handler
+#   in the served HTML; the built app + fvachat bundles contain no
+#   setAttribute('style') and no cssText, so React/CSSOM styling is
+#   unaffected. The app stylesheet is the linked /assets/*.css bundle.
+# - connect-src 'self': every API call is same-origin /api; the built
+#   bundle fetches no external host. Paystack checkout navigates
+#   top-level to checkout.paystack.com (authorization_url); top-level
+#   navigation is not governed by form-action or connect-src, so the
+#   live paid flow is unaffected.
+# - img-src data:/blob: product-photo previews use object URLs; receipts
+#   and QR-style images use data: URLs. media-src blob: for the same
+#   previews. frame-src 'none': nothing is framed.
 /*
-  Content-Security-Policy: frame-ancestors 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-eI84emjlUgH2hb4I/aLNmpQ+0TYBS8t5icQQEnybbys=' 'sha256-TnFuzIpDV49dqvGuLXYcYWfXwdW6r3QjegVQxq46wH4='; style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; worker-src 'self'; manifest-src 'self'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
