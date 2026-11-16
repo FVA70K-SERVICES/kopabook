@@ -2,7 +2,7 @@
 // Auth: Authorization: Bearer kbk_live_...
 // Resources: business, dashboard, sales, products, debts, expenses
 import { json } from "../_utils.js";
-import { getApiKeyAuth, requireApiKey } from "../_apikey.js";
+import { getApiKeyAuth, requireApiKey, requireScope, parseKeyOrigin } from "../_apikey.js";
 
 async function handleBusiness(db, auth) {
   const b = auth.business;
@@ -103,36 +103,93 @@ const HANDLERS = {
   expenses: handleExpenses,
 };
 
-// Any website can connect: allow cross-origin browser calls to this
-// read-only API. Keys stay secret because they live in the site owner's
-// own backend or are restricted to public (non-sensitive) reads.
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
+// Phase 3.5 (2026-11-16): no more Access-Control-Allow-Origin: *.
+// A browser may read a v1 response only from the exact website the key
+// owner registered (api_keys.website_url, set in Settings > Developer
+// API). That is the site the connect.js snippet runs on. Server-to-server
+// calls send no Origin and are unaffected; same-origin calls from
+// kopabook.com need no CORS at all. A key with no website registered
+// gets no CORS headers: it still works server-side, and its owner must
+// add the website before a browser app can use it.
+// Scopes: every v1 route requires the 'read' scope (see requireScope in
+// _apikey.js). All keys minted today carry 'read'.
+// This file stays read-only. cost_price is still returned by /products:
+// the can_view_profit gate is Phase 4.1, not this change.
+const CORS_PREFLIGHT = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
-  "Access-Control-Max-Age": "86400",
+  "Access-Control-Max-Age": "3600",
 };
 
-function corsJson(data, status = 200) {
-  const res = json(data, status);
+// Headers for an actual (non-preflight) response: reflect the request
+// Origin only when it is exactly the origin registered on this key.
+// Anything else gets no Access-Control-Allow-Origin, so the browser
+// refuses to hand the response to the calling page. Vary: Origin is
+// always sent so shared caches never serve one origin's CORS headers
+// to another.
+function corsHeaders(origin, allowedOrigin) {
+  const headers = { Vary: "Origin" };
+  if (origin && allowedOrigin && origin === allowedOrigin) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+  return headers;
+}
+
+function withCors(res, origin, allowedOrigin) {
   const headers = new Headers(res.headers);
-  for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
+  for (const [k, v] of Object.entries(corsHeaders(origin, allowedOrigin))) headers.set(k, v);
   return new Response(res.body, { status: res.status, headers });
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS });
+function corsJson(data, status = 200, origin = null, allowedOrigin = null) {
+  return withCors(json(data, status), origin, allowedOrigin);
+}
+
+// Preflight carries no Authorization header (browsers strip credentials
+// from preflights), so the key cannot be resolved here. Answer only
+// when SOME active key registered this exact origin as its website;
+// otherwise 204 with no CORS headers and the browser blocks the call.
+// The website URLs are the owners' own public sites, not secrets.
+// A DB failure answers the same header-less 204: fail closed.
+async function preflightAllowedOrigin(db, origin) {
+  if (!origin) return null;
+  try {
+    const rows = await db.prepare(
+      `SELECT website_url FROM api_keys WHERE status = 'active' LIMIT 500`
+    ).all();
+    for (const r of rows.results || []) {
+      if (parseKeyOrigin(r.website_url) === origin) return origin;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export async function onRequestOptions(context) {
+  const origin = context.request.headers.get("Origin") || null;
+  const headers = new Headers({ Vary: "Origin" });
+  const allowed = await preflightAllowedOrigin(context.env.KOPABOOK_DB, origin);
+  if (allowed) {
+    headers.set("Access-Control-Allow-Origin", allowed);
+    for (const [k, v] of Object.entries(CORS_PREFLIGHT)) headers.set(k, v);
+  }
+  return new Response(null, { status: 204, headers });
 }
 
 export async function onRequestGet(context) {
+  const origin = context.request.headers.get("Origin") || null;
   try {
     const auth = await getApiKeyAuth(context);
     const denied = requireApiKey(auth);
     if (denied) {
-      const res = denied;
-      const headers = new Headers(res.headers);
-      for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
-      return new Response(res.body, { status: res.status, headers });
+      // No valid key, so no origin to bind CORS to: the 401/429 goes
+      // out without CORS headers and a cross-origin page cannot read it.
+      return denied;
+    }
+    const scopeDenied = requireScope(auth, "read");
+    if (scopeDenied) {
+      return withCors(scopeDenied, origin, auth.allowedOrigin);
     }
 
     const url = new URL(context.request.url);
@@ -142,13 +199,11 @@ export async function onRequestGet(context) {
     const handler = HANDLERS[resource];
     if (!handler) {
       return corsJson({ ok: false, error: "unknown-resource",
-        message: "Available resources: business, dashboard, sales, products, debts, expenses." }, 404);
+        message: "Available resources: business, dashboard, sales, products, debts, expenses." }, 404, origin, auth.allowedOrigin);
     }
     const res = await handler(context.env.KOPABOOK_DB, auth, url);
-    const headers = new Headers(res.headers);
-    for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
-    return new Response(res.body, { status: res.status, headers });
+    return withCors(res, origin, auth.allowedOrigin);
   } catch (e) {
-    return corsJson({ ok: false, error: "server-error" }, 500);
+    return corsJson({ ok: false, error: "server-error" }, 500, origin, null);
   }
 }

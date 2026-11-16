@@ -101,7 +101,7 @@ export default function DeveloperApi() {
             <li><code>/api/v1/debts</code> — customers owing money</li>
             <li><code>/api/v1/expenses?limit=20</code> — recent expenses</li>
           </ul>
-          <strong>Limits.</strong> 60 requests per minute per key. Revoke a key any time and
+          <strong>Limits.</strong> 60 requests per minute per key. Only the website URL on a key can call it from a browser. Revoke a key any time and
           every website using it stops working immediately. Keys never see other businesses.
         </div>
       )}
@@ -136,6 +136,7 @@ export default function DeveloperApi() {
           {creating ? "Connecting..." : "+ Connect website"}
         </button>
       </form>
+      <p className="hint" style={{ marginTop: -4 }}>Only the website URL above can read this key from a browser. Leave it blank and the key works from your own server only.</p>
 
       {loading && <div className="loading">Loading connections...</div>}
       {!loading && keys.length === 0 && (
