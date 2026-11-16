@@ -16,13 +16,28 @@ export const TIER_NAMES = { free: "Free", starter: "Starter", solo: "Solo", pro:
 export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", solo: "NGN 5,000/month", pro: "NGN 10,000/month" };
 
 export async function getAccountTier(db, userId) {
-  const row = await db.prepare(
-    `SELECT tier, status, billing_cycle, current_period_end FROM account_subscriptions WHERE user_id = ? LIMIT 1`
-  ).bind(userId).first();
+  // pending_tier (Fix 1.9, migration 0062) holds a requested tier without
+  // touching tier/status. If the column is not there yet the endpoint must
+  // keep working, so fall back to the pre-0062 column list.
+  let row;
+  try {
+    row = await db.prepare(
+      `SELECT tier, status, billing_cycle, current_period_end, pending_tier FROM account_subscriptions WHERE user_id = ? LIMIT 1`
+    ).bind(userId).first();
+  } catch (e) {
+    if (!/no such column/i.test(String(e && e.message))) throw e;
+    row = await db.prepare(
+      `SELECT tier, status, billing_cycle, current_period_end FROM account_subscriptions WHERE user_id = ? LIMIT 1`
+    ).bind(userId).first();
+  }
   const tier = row && LIMITS[row.tier] ? row.tier : "free";
+  const pendingTier = row && row.pending_tier && LIMITS[row.pending_tier] ? row.pending_tier : null;
   // A pending upgrade keeps the old tier until payment is confirmed.
   if (row && row.status === "pending") {
-    return { tier: "free", pendingTier: row.tier, status: "pending", billingCycle: null, periodEnd: null };
+    // Legacy rows (pre-0062) stored the requested tier in tier itself;
+    // new rows keep tier as the current tier and the request in
+    // pending_tier. Either way the account reads as free + pending.
+    return { tier: "free", pendingTier: pendingTier || (LIMITS[row.tier] ? row.tier : null), status: "pending", billingCycle: null, periodEnd: null };
   }
   const periodEnd = row ? row.current_period_end : null;
   // Expiry enforcement: a paid tier whose billing period has ended, or whose
@@ -58,6 +73,9 @@ export async function getAccountTier(db, userId) {
       periodEnd,
     };
   }
+  // Fix 1.9: an outstanding request is visible as pendingTier while the
+  // current tier (and its limits) stay in force until activation.
+  if (pendingTier) result = { ...result, pendingTier };
   // Promo overlay: an active Pro free month claim lifts the tier to pro
   // at read time only. account_subscriptions is never written, so the
   // underlying tier resumes automatically when the claim expires.
@@ -179,19 +197,41 @@ export async function onRequestPost(context) {
     }
 
     // Real payment is arranged outside the app (KopaBook never processes money).
-    // The request is noted as pending; the account keeps its current tier until
-    // payment is confirmed and the tier is activated manually.
+    // Fix 1.9: the request is recorded in pending_tier and the account keeps
+    // its current tier AND status until payment is confirmed and the tier is
+    // activated. The old upsert overwrote tier + status with 'pending',
+    // which made getAccountTier read a paid account as Free and stripped
+    // its limits on the spot. Free accounts have no paid tier to lose, so
+    // they keep today's behaviour (status 'pending', tier stays 'free').
     const now = toSqliteDate();
-    await context.env.KOPABOOK_DB.prepare(
-      `INSERT INTO account_subscriptions (user_id, tier, status, updated_at)
-       VALUES (?, ?, 'pending', ?)
-       ON CONFLICT(user_id) DO UPDATE SET tier = excluded.tier, status = 'pending', updated_at = excluded.updated_at`
-    ).bind(auth.user.id, tier, now).run();
+    const existing = await context.env.KOPABOOK_DB.prepare(
+      `SELECT tier, status FROM account_subscriptions WHERE user_id = ? LIMIT 1`
+    ).bind(auth.user.id).first();
+    let status;
+    if (!existing) {
+      await context.env.KOPABOOK_DB.prepare(
+        `INSERT INTO account_subscriptions (user_id, tier, status, pending_tier, updated_at)
+         VALUES (?, 'free', 'pending', ?, ?)`
+      ).bind(auth.user.id, tier, now).run();
+      status = "pending";
+    } else if (existing.tier && LIMITS[existing.tier] && existing.tier !== "free") {
+      await context.env.KOPABOOK_DB.prepare(
+        `UPDATE account_subscriptions SET pending_tier = ?, updated_at = ? WHERE user_id = ?`
+      ).bind(tier, now, auth.user.id).run();
+      status = existing.status || "active";
+    } else {
+      await context.env.KOPABOOK_DB.prepare(
+        `UPDATE account_subscriptions SET status = 'pending', pending_tier = ?, updated_at = ? WHERE user_id = ?`
+      ).bind(tier, now, auth.user.id).run();
+      status = "pending";
+    }
 
     return json({
       ok: true,
       tier,
-      status: "pending",
+      pending_tier: tier,
+      current_tier: !existing ? "free" : (LIMITS[existing.tier] ? existing.tier : "free"),
+      status,
       message:
         "Upgrade request noted. We will contact you on WhatsApp to complete payment, then your new limits turn on.",
     });

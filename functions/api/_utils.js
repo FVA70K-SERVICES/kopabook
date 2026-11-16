@@ -9,6 +9,56 @@ export function normalizeUnit(u) {
   return PRODUCT_UNITS.includes(v) ? v : "piece";
 }
 
+// Upload validation (Fix 1.8): never trust the client-supplied MIME type.
+// Only raster images and PDFs may be stored. SVG/HTML are refused because
+// an SVG served same-origin can run script (stored XSS). sniffUploadType
+// verifies the real type from magic bytes and returns { mime, ext }, or
+// null when the bytes match no allowed type. A null byte in a pattern is
+// a wildcard (WebP bytes 4-7 are the file size, so they vary).
+const UPLOAD_MAGIC = [
+  ["image/jpeg", ".jpg", [[0xff, 0xd8, 0xff]]],
+  ["image/png", ".png", [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]]],
+  ["image/gif", ".gif", [[0x47, 0x49, 0x46, 0x38, 0x37, 0x61], [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]]],
+  ["image/webp", ".webp", [[0x52, 0x49, 0x46, 0x46, null, null, null, null, 0x57, 0x45, 0x42, 0x50]]],
+  ["application/pdf", ".pdf", [[0x25, 0x50, 0x44, 0x46, 0x2d]]],
+];
+
+export function sniffUploadType(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  for (const [mime, ext, patterns] of UPLOAD_MAGIC) {
+    for (const pattern of patterns) {
+      if (pattern.length > b.length) continue;
+      let ok = true;
+      for (let i = 0; i < pattern.length; i++) {
+        if (pattern[i] !== null && b[i] !== pattern[i]) { ok = false; break; }
+      }
+      if (ok) return { mime, ext };
+    }
+  }
+  return null;
+}
+
+// MIME types the upload endpoints may store, keyed by sniffed type.
+export const UPLOAD_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+export const UPLOAD_FILE_TYPES = new Set([...UPLOAD_IMAGE_TYPES, "application/pdf"]);
+
+// Safe serving headers for user-uploaded files (Fix 1.8). Applies on top
+// of whatever R2 stored: only sniffed raster images and PDFs are ever
+// shown inline; anything else (e.g. a legacy object stored before upload
+// validation) is forced to download as an opaque blob, and every response
+// is sandboxed so it can never run script in our origin, with sniffing
+// disabled so the browser cannot reinterpret the bytes.
+export function applyUploadServeHeaders(headers) {
+  const stored = String(headers.get("Content-Type") || "").toLowerCase().split(";")[0].trim();
+  const inline = UPLOAD_FILE_TYPES.has(stored);
+  headers.set("Content-Type", inline ? stored : "application/octet-stream");
+  headers.set("Content-Security-Policy", "sandbox");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Disposition", inline ? "inline" : "attachment");
+  headers.set("Cache-Control", "public, max-age=86400");
+  return headers;
+}
+
 export function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
