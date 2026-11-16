@@ -84,21 +84,56 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <!-- FVAChat: merged chat by FVA70K Services. Signed in: Ask Kopa AI + Kopa Support. Signed out: Kopa Support bot.
-         Speed (2026-11-06): deferred, so the 109 kB chat script no
-         longer blocks parsing and first paint on cold open. It reads
-         document.currentScript at run time, which defer preserves, and
-         it only builds its own button, so running after the app module
-         changes nothing. The inline owner-context script above it is
-         untouched and still runs first. -->
+         Speed (Phase 6.2, 2026-11-17): lazy-loaded, so the 124 kB chat
+         script plus its stylesheet no longer download on every cold open
+         or compete with first paint. The loader below injects the same
+         script with the same data-* config on first user interaction or
+         when the browser is idle (2.5 s fallback), whichever comes first.
+         fvachat.js reads its config off document.currentScript, which is
+         set for dynamically inserted scripts while they execute, and it
+         reads window.FVAChatOwner live when it needs the owner context,
+         so loading after App.jsx already called setFVAChatOwner is safe.
+         The inline owner-context script below is untouched and still
+         runs first. -->
     <script>
       // Owner context for the merged chat. The server verifies this against the signed-in session before trusting it.
       window.FVAChatOwner = null;
       window.setFVAChatOwner = function(ctx) { window.FVAChatOwner = ctx; };
     </script>
-    <script defer src="/fvachat.js"
-      data-site-id="kopabook"
-      data-business="Kopa Support"
-      data-bot-name="Kopa Bot"
-      data-color="#15803d"></script>
+    <script>
+      // FVAChat lazy loader (Phase 6.2): inject /fvachat.js only when it
+      // is needed, so first paint never waits on the chat widget.
+      (function () {
+        var loaded = false;
+        function loadChat() {
+          if (loaded) return;
+          loaded = true;
+          var s = document.createElement("script");
+          s.src = "/fvachat.js";
+          s.setAttribute("data-site-id", "kopabook");
+          s.setAttribute("data-business", "Kopa Support");
+          s.setAttribute("data-bot-name", "Kopa Bot");
+          s.setAttribute("data-color", "#15803d");
+          document.body.appendChild(s);
+        }
+        function arm() {
+          if (loaded) return;
+          if ("requestIdleCallback" in window) {
+            window.requestIdleCallback(loadChat, { timeout: 2500 });
+          } else {
+            window.setTimeout(loadChat, 2000);
+          }
+          var once = function () { loadChat(); };
+          ["pointerdown", "keydown", "touchstart"].forEach(function (ev) {
+            window.addEventListener(ev, once, { once: true, passive: true });
+          });
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", arm);
+        } else {
+          arm();
+        }
+      })();
+    </script>
   </body>
 </html>
