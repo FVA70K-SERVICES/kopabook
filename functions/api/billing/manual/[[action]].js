@@ -11,7 +11,7 @@
 // tier/billing_cycle with CHECKs, amount_kobo, reference_number UNIQUE,
 // proof_url, status CHECK(pending/approved/rejected), created_at, reviewed_at,
 // reviewed_by TEXT. The row id IS the reference number (unique by construction).
-import { json, getAuthContext, requireAuth, toSqliteDate } from "../../_utils";
+import { json, getAuthContext, requireAuth, toSqliteDate, sniffUploadType } from "../../_utils";
 import { checkRateLimit } from "../../_webhook_security";
 
 const VALID_TIERS = ["starter", "pro", "solo"];
@@ -108,11 +108,10 @@ async function handleInitiate(context) {
   });
 }
 
-const PROOF_TYPES = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
+// Phase 4.1: the proof allowlist is enforced on sniffed bytes, never on
+// the client-supplied MIME (same 1.8 pattern as files.js). A renamed
+// HTML/SVG file is refused even when its form MIME says image/png.
+const PROOF_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_PROOF_BYTES = 5 * 1024 * 1024;
 
 async function handleSubmit(context) {
@@ -158,17 +157,21 @@ async function handleSubmit(context) {
   if (!proof || typeof proof === "string" || proof.size === 0) {
     return json({ ok: false, message: "Attach a photo of your transfer receipt." }, 400);
   }
-  const ext = PROOF_TYPES[proof.type];
-  if (!ext) {
-    return json({ ok: false, message: "Proof must be a JPG, PNG or WebP image." }, 400);
-  }
   if (proof.size > MAX_PROOF_BYTES) {
     return json({ ok: false, message: "Proof image must be 5MB or smaller." }, 400);
   }
+  // Sniff the real bytes: the client MIME decides nothing, and the stored
+  // suffix and content type both come from the sniffed type.
+  const bytes = new Uint8Array(await proof.arrayBuffer());
+  const sniffed = sniffUploadType(bytes);
+  if (!sniffed || !PROOF_MIMES.has(sniffed.mime)) {
+    return json({ ok: false, message: "Proof must be a JPG, PNG or WebP image." }, 400);
+  }
+  const ext = sniffed.ext.slice(1);
 
   const key = `proofs/${reference_number}.${ext}`;
-  await bucket.put(key, await proof.arrayBuffer(), {
-    httpMetadata: { contentType: proof.type },
+  await bucket.put(key, bytes, {
+    httpMetadata: { contentType: sniffed.mime },
   });
 
   // Status stays 'pending' so the payment remains in the admin review queue;

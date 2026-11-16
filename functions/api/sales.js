@@ -13,6 +13,19 @@ import {
 } from "./_creditRules.js";
 import { recordHistory } from "./_history.js";
 
+// Phase 4.1: give back stock reserved by a sale whose batch then failed.
+// Best-effort only: a failed give-back leaves stock low, never negative,
+// and never blocks the error the caller already gets.
+async function restoreReservedStock(db, reserved) {
+  for (const r of reserved) {
+    try {
+      await db.prepare(
+        `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand + ? WHERE product_id = ?`
+      ).bind(r.qty, r.productId).run();
+    } catch { /* best-effort */ }
+  }
+}
+
 export async function onRequestGet(context) {
   try {
     const auth = await getAuthContext(context);
@@ -83,6 +96,12 @@ export async function onRequestPost(context) {
           return json({ ok: false, message: `Service not found (id ${item.serviceId}).` }, 400);
         }
         const unitPrice = item.unitPrice !== undefined ? Number(item.unitPrice) : Number(service.price);
+        // Phase 4.1: a sale price must be a real amount above zero. NaN
+        // slips past every comparison, and a negative price makes
+        // negative subtotals, balances and ledger entries.
+        if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+          return json({ ok: false, message: "Unit price must be a valid amount above zero." }, 400);
+        }
         const lineTotal = Math.round(unitPrice * qty * 100) / 100;
         subtotal += lineTotal;
         lines.push({ kind: "service", service, qty, unitPrice, lineTotal, defaultPrice: Number(service.price) });
@@ -109,6 +128,11 @@ export async function onRequestPost(context) {
         return json({ ok: false, message: `Not enough stock for ${product.name} (have ${product.stock}).` }, 400);
       }
       const unitPrice = item.unitPrice !== undefined ? Number(item.unitPrice) : Number(product.unit_price);
+      // Phase 4.1: same rule as service lines — a sale price must be a
+      // real amount above zero.
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        return json({ ok: false, message: "Unit price must be a valid amount above zero." }, 400);
+      }
       const lineTotal = Math.round(unitPrice * qty * 100) / 100;
       subtotal += lineTotal;
       lines.push({ kind: "product", product, qty, unitPrice, lineTotal, defaultPrice: Number(product.unit_price) });
@@ -225,6 +249,26 @@ export async function onRequestPost(context) {
       }
     }
 
+    // Phase 4.1: reserve stock BEFORE the batch, with one atomic guarded
+    // UPDATE per product line (sufficient stock, and the product must
+    // belong to this business). Two sales of the last item cannot both
+    // pass: the second sees changes 0 and is refused, so stock can never
+    // go negative. The batch below no longer decrements stock.
+    const reserved = [];
+    for (const line of lines) {
+      if (line.kind !== "product") continue;
+      const reserve = await db.prepare(
+        `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?, updated_at = ?
+         WHERE product_id = ? AND quantity_on_hand >= ?
+           AND EXISTS (SELECT 1 FROM products p WHERE p.id = inventory_items.product_id AND p.business_id = ?)`
+      ).bind(line.qty, now, line.product.id, line.qty, auth.business.id).run();
+      if ((reserve.meta?.changes ?? 0) !== 1) {
+        await restoreReservedStock(db, reserved);
+        return json({ ok: false, message: `Not enough stock for ${line.product.name}.` }, 400);
+      }
+      reserved.push({ productId: line.product.id, qty: line.qty });
+    }
+
     // Every write for this sale goes in ONE batch: all or nothing. The sale
     // header, a new customer, items, stock movements, payment record and debt
     // entry either all commit together or all roll back.
@@ -276,13 +320,8 @@ export async function onRequestPost(context) {
         ).bind(saleNumber, auth.business.id, line.product.id, line.qty, line.unitPrice, Number(line.product.cost_price || 0), line.lineTotal)
       );
 
-      stmts.push(
-        db.prepare(
-          `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?, updated_at = ?
-           WHERE product_id = ?`
-        ).bind(line.qty, now, line.product.id)
-      );
-
+      // Stock was already reserved above (guarded UPDATE); the batch only
+      // records the movement, it never touches quantity_on_hand again.
       stmts.push(
         db.prepare(
           `INSERT INTO inventory_movements (product_id, movement_type, quantity_delta, source_type, source_id, note, created_by)
@@ -315,7 +354,15 @@ export async function onRequestPost(context) {
       );
     }
 
-    const batchResults = await db.batch(stmts);
+    // A failed batch rolls back, so give the reservation back: the stock
+    // was already decremented above and no sale was recorded.
+    let batchResults;
+    try {
+      batchResults = await db.batch(stmts);
+    } catch (e) {
+      await restoreReservedStock(db, reserved);
+      throw e;
+    }
     const saleId = batchResults[headerIdx].meta.last_row_id;
 
     await audit(context, auth, "sale.create", "sale", saleId, { saleNumber, total: subtotal });

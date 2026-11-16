@@ -66,12 +66,13 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "Only the owner can invite a partner." }, 403);
     }
 
-    // Tier limit: free accounts get 2 staff per business, then upgrade.
+    // Tier limit: free accounts get 1 staff member per business (the
+    // owner does not count toward the limit), then upgrade.
     const { tier } = await getBusinessOwnerTier(context.env.KOPABOOK_DB, auth.business.id);
     const maxStaff = LIMITS[tier].staff;
     if (maxStaff !== null) {
       const staffCount = await context.env.KOPABOOK_DB.prepare(
-        `SELECT COUNT(*) AS n FROM business_members WHERE business_id = ?`
+        `SELECT COUNT(*) AS n FROM business_members WHERE business_id = ? AND role != 'owner'`
       ).bind(auth.business.id).first();
       if (Number(staffCount && staffCount.n) >= maxStaff) {
         return json({

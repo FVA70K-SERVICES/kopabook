@@ -103,20 +103,24 @@ export async function onRequestPost(context) {
     }
 
     const now = toSqliteDate();
-    // Keep the stock row even if one was never created for this product.
-    const inv = await db.prepare(
-      `SELECT product_id FROM inventory_items WHERE product_id = ? LIMIT 1`
-    ).bind(id).first();
-    if (inv) {
-      await db.prepare(
-        `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand + ?, updated_at = ?
-         WHERE product_id = ?`
-      ).bind(delta, now, id).run();
-    } else {
-      await db.prepare(
-        `INSERT INTO inventory_items (product_id, quantity_on_hand, reorder_level)
-         VALUES (?, ?, ?)`
-      ).bind(id, newStock, Number(product.low_stock_threshold ?? 5)).run();
+    // Phase 4.1: one atomic upsert, guarded so stock can never go below
+    // zero — even when two adjustments race. The WHERE clause is the
+    // authority, not the read above: a concurrent adjustment that already
+    // spent the stock makes this one match 0 rows and it is refused.
+    // (Same flaw class as /api/stock/adjust: check-then-write with an
+    // unguarded UPDATE. The upsert also creates the inventory row for a
+    // product that never had one.)
+    const up = await db.prepare(
+      `INSERT INTO inventory_items (product_id, quantity_on_hand, reorder_level, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(product_id) DO UPDATE SET
+         quantity_on_hand = inventory_items.quantity_on_hand + excluded.quantity_on_hand,
+         updated_at = excluded.updated_at
+       WHERE inventory_items.quantity_on_hand + excluded.quantity_on_hand >= 0
+         AND EXISTS (SELECT 1 FROM products p WHERE p.id = inventory_items.product_id AND p.business_id = ?)`
+    ).bind(id, delta, Number(product.low_stock_threshold ?? 5), now, auth.business.id).run();
+    if ((up.meta?.changes ?? 0) !== 1) {
+      return json({ ok: false, message: `That would take stock below zero. ${product.name} has ${currentStock} in stock.` }, 400);
     }
 
     // The adjustment itself: a new row, with the reason. The original
@@ -146,7 +150,12 @@ export async function onRequestPost(context) {
       summary: `Adjusted ${product.name} stock by ${delta > 0 ? "+" : ""}${delta} (${reason})`,
       amount: null,
     });
-    return json({ ok: true, productId: id, delta, reason, previousStock: currentStock, newStock });
+    // Re-read: the pre-check stock may be stale after a race; the upsert
+    // above is the authority.
+    const after = await db.prepare(
+      `SELECT COALESCE(quantity_on_hand, 0) AS stock FROM inventory_items WHERE product_id = ?`
+    ).bind(id).first();
+    return json({ ok: true, productId: id, delta, reason, previousStock: currentStock, newStock: Number(after?.stock ?? 0) });
   } catch (error) {
     return json({ ok: false, message: "Could not adjust stock.", error: String(error) }, 500);
   }

@@ -31,12 +31,25 @@ export async function onRequestPost(context) {
     }
 
     const now = toSqliteDate();
-    await db.prepare(
-      `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand + ?, updated_at = ?
-       WHERE product_id = ?`
-    )
-      .bind(delta, now, product.id)
-      .run();
+    // Phase 4.1: one atomic upsert, guarded so stock can never go below
+    // zero — even when two adjustments race. The WHERE clause is the
+    // authority, not the read above: a concurrent adjustment that already
+    // spent the stock makes this one match 0 rows and it is refused.
+    // The upsert also creates the inventory row for a product that never
+    // had one (a positive delta only: the pre-check above refused a
+    // negative-going adjustment from zero stock).
+    const up = await db.prepare(
+      `INSERT INTO inventory_items (product_id, quantity_on_hand, reorder_level, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(product_id) DO UPDATE SET
+         quantity_on_hand = inventory_items.quantity_on_hand + excluded.quantity_on_hand,
+         updated_at = excluded.updated_at
+       WHERE inventory_items.quantity_on_hand + excluded.quantity_on_hand >= 0
+         AND EXISTS (SELECT 1 FROM products p WHERE p.id = inventory_items.product_id AND p.business_id = ?)`
+    ).bind(product.id, delta, Number(product.low_stock_threshold ?? 5), now, auth.business.id).run();
+    if ((up.meta?.changes ?? 0) !== 1) {
+      return json({ ok: false, message: `Adjustment would take ${product.name} below zero.` }, 400);
+    }
 
     await db.prepare(
       `INSERT INTO inventory_movements (product_id, movement_type, quantity_delta, source_type, note, created_by)
@@ -46,7 +59,12 @@ export async function onRequestPost(context) {
       .run();
 
     await audit(context, auth, "stock.adjust", "product", product.id, { delta });
-    return json({ ok: true, newStock: product.stock + delta });
+    // Re-read: the pre-check stock may be stale after a race; the upsert
+    // above is the authority.
+    const after = await db.prepare(
+      `SELECT COALESCE(quantity_on_hand, 0) AS stock FROM inventory_items WHERE product_id = ?`
+    ).bind(product.id).first();
+    return json({ ok: true, newStock: Number(after?.stock ?? 0) });
   } catch (error) {
     return json({ ok: false, message: "Could not adjust stock.", error: String(error) }, 500);
   }

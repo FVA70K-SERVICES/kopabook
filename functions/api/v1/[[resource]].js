@@ -62,8 +62,11 @@ async function handleSales(db, auth, url) {
 async function handleProducts(db, auth, url) {
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+  // Phase 4.1: cost_price is never returned by the Developer API. Keys
+  // carry no role or permission, and they are embedded in third-party
+  // websites, so the fail-closed answer is to omit cost always.
   const rows = await db.prepare(
-    `SELECT p.id, p.name, p.unit_price AS price, p.unit, p.cost_price, p.is_active,
+    `SELECT p.id, p.name, p.unit_price AS price, p.unit, p.is_active,
             COALESCE(i.quantity_on_hand, 0) AS stock
      FROM products p LEFT JOIN inventory_items i ON i.product_id = p.id
      WHERE p.business_id = ? ORDER BY p.name ASC LIMIT ? OFFSET ?`
@@ -113,8 +116,9 @@ const HANDLERS = {
 // add the website before a browser app can use it.
 // Scopes: every v1 route requires the 'read' scope (see requireScope in
 // _apikey.js). All keys minted today carry 'read'.
-// This file stays read-only. cost_price is still returned by /products:
-// the can_view_profit gate is Phase 4.1, not this change.
+// This file stays read-only. Phase 4.1: cost_price is no longer returned
+// by /products — Developer API keys carry no role or permission, so the
+// fail-closed answer is to omit cost for every key.
 const CORS_PREFLIGHT = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",

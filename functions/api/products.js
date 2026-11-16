@@ -29,7 +29,13 @@ export async function onRequestGet(context) {
     sql += ` ORDER BY p.name ASC`;
 
     const result = await context.env.KOPABOOK_DB.prepare(sql).bind(...params).all();
-    return json({ ok: true, products: result.results || [] });
+    const rows = result.results || [];
+    // Phase 4.1: cost_price is owner-only. Staff without can_view_profit
+    // get the list without it (price and stock stay visible).
+    if (!auth.perms.can_view_profit) {
+      for (const r of rows) delete r.cost_price;
+    }
+    return json({ ok: true, products: rows });
   } catch (error) {
     return json({ ok: false, message: "Could not load products.", error: String(error) }, 500);
   }

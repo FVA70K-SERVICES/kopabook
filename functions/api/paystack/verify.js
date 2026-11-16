@@ -46,16 +46,35 @@ export async function activateSubscription(db, userId, tier, cycle, psData, refe
   const periodStart = extra.current_period_start || toSqlite(now);
   const periodEnd = extra.current_period_end || toSqlite(end);
 
-  await db.prepare(
-    `INSERT INTO account_subscriptions (user_id, tier, status, billing_cycle, paystack_customer_code, updated_at, current_period_start, current_period_end)
-     VALUES (?, ?, 'active', ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET tier = excluded.tier, status = 'active',
-       billing_cycle = excluded.billing_cycle,
-       paystack_customer_code = COALESCE(excluded.paystack_customer_code, paystack_customer_code),
-       updated_at = excluded.updated_at,
-       current_period_start = excluded.current_period_start,
-       current_period_end = excluded.current_period_end`
-  ).bind(userId, tier, cycle, customerCode, toSqlite(now), periodStart, periodEnd).run();
+  // Phase 4.1: the subscription upsert and the payment mark-paid run in
+  // ONE batch (one D1 transaction) so activation is atomic: the tier
+  // never activates without the payment being marked paid, and a failed
+  // activation never leaves half the writes behind. The subscription
+  // code update below stays best-effort, as before — it is metadata
+  // only, and activation must never break on it.
+  const stmts = [
+    db.prepare(
+      `INSERT INTO account_subscriptions (user_id, tier, status, billing_cycle, paystack_customer_code, updated_at, current_period_start, current_period_end)
+       VALUES (?, ?, 'active', ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET tier = excluded.tier, status = 'active',
+         billing_cycle = excluded.billing_cycle,
+         paystack_customer_code = COALESCE(excluded.paystack_customer_code, paystack_customer_code),
+         updated_at = excluded.updated_at,
+         current_period_start = excluded.current_period_start,
+         current_period_end = excluded.current_period_end`
+    ).bind(userId, tier, cycle, customerCode, toSqlite(now), periodStart, periodEnd),
+  ];
+  // Mark only the specific payment as paid, by its Paystack reference.
+  if (reference) {
+    stmts.push(
+      db.prepare(
+        `UPDATE subscription_payments SET status = 'paid', paid_at = ?,
+           paystack_customer_code = COALESCE(?, paystack_customer_code)
+         WHERE paystack_reference = ? AND status != 'paid'`
+      ).bind(toSqlite(now), customerCode, reference)
+    );
+  }
+  await db.batch(stmts);
 
   // paystack_subscription_code lands with the billing migration; persist it
   // best-effort so activation never breaks before the column exists.
@@ -67,15 +86,6 @@ export async function activateSubscription(db, userId, tier, cycle, psData, refe
     } catch {
       // column pending migration; the subscription still activates
     }
-  }
-
-  // Mark only the specific payment as paid, by its Paystack reference.
-  if (reference) {
-    await db.prepare(
-      `UPDATE subscription_payments SET status = 'paid', paid_at = ?,
-         paystack_customer_code = COALESCE(?, paystack_customer_code)
-       WHERE paystack_reference = ? AND status != 'paid'`
-    ).bind(toSqlite(now), customerCode, reference).run();
   }
 }
 
@@ -112,6 +122,12 @@ export async function onRequestGet(context) {
     // Safety: the paid amount must match what we asked for.
     if (Number(psData.data.amount) !== Number(payment.amount_kobo)) {
       return json({ ok: false, message: "Payment amount mismatch. Contact support." }, 402);
+    }
+    // Phase 4.1: the currency must match too — the webhook already
+    // triple-checks amount, currency and user; verify checked only the
+    // amount, so a payment in the wrong currency could activate a tier.
+    if (String(psData.data.currency || "NGN").toUpperCase() !== String(payment.currency || "NGN").toUpperCase()) {
+      return json({ ok: false, message: "Payment currency mismatch. Contact support." }, 402);
     }
 
     const txData = psData.data || {};

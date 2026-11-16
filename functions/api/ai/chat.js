@@ -19,6 +19,7 @@
 import { json, getAuthContext, requireAuth, requirePerm, audit, toSqliteDate, businessDay, businessDayWindow } from "../_utils";
 import { getBusinessOwnerTier, LIMITS } from "../billing";
 import { checkRateLimit } from "../_webhook_security";
+import { checkCreditPermission, checkCreditLimit, loadCustomerCredit } from "../_creditRules.js";
 import { PROJECT_TYPES, projectTotals } from "../projects/_lib.js";
 import { onRequestPost as createProjectEndpoint } from "../projects/index.js";
 import {
@@ -1277,6 +1278,22 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
     prevLedgerBalance = last ? Number(last.balance_after) : 0;
   }
 
+  // Phase 4.1: the AI sale path honours the same credit guards as POST
+  // /api/sales. A balance due needs credit permission and must fit the
+  // customer's credit limit. This runs before the dry-run branch, so a
+  // sale that cannot be recorded is refused at draft time, and the same
+  // check runs again at execution: the dry-run branch returns below,
+  // the execute path continues past it.
+  if (balanceDue > 0) {
+    const perm = await checkCreditPermission(db, auth.business.id, auth.user.id, auth.business.role);
+    if (!perm.allowed) return { ok: false, clarification: perm.message };
+    if (custId) {
+      const cust = await loadCustomerCredit(db, custId);
+      const limitError = checkCreditLimit(cust, prevLedgerBalance, balanceDue, currency);
+      if (limitError) return { ok: false, clarification: limitError };
+    }
+  }
+
   if (opts && opts.dryRun) {
     // Be sure before proposing: if the user's own words did not name the
     // resolved product in full, and another product shares its first word
@@ -1320,6 +1337,25 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
     };
   }
 
+  // Phase 4.1: reserve stock BEFORE the batch, with one atomic guarded
+  // UPDATE per line (sufficient stock, and the product must belong to
+  // this business). Two simultaneous AI sales cannot both pass, so stock
+  // can never go negative. The batch below no longer decrements; a
+  // failed batch gives the reservation back.
+  const reserved = [];
+  for (const l of lines) {
+    const reserve = await db.prepare(
+      `UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?, updated_at = ? WHERE product_id = ? AND quantity_on_hand >= ? AND EXISTS (SELECT 1 FROM products p WHERE p.id = inventory_items.product_id AND p.business_id = ?)`
+    ).bind(l.qty, now, l.product.id, l.qty, auth.business.id).run();
+    if ((reserve.meta?.changes ?? 0) !== 1) {
+      for (const r of reserved) {
+        try { await db.prepare(`UPDATE inventory_items SET quantity_on_hand = quantity_on_hand + ? WHERE product_id = ?`).bind(r.qty, r.productId).run(); } catch { /* best-effort */ }
+      }
+      return { ok: false, clarification: `Not enough stock for ${l.product.name}.` };
+    }
+    reserved.push({ productId: l.product.id, qty: l.qty });
+  }
+
   const stmts = [];
   if (createCustomer) {
     stmts.push(db.prepare(`INSERT INTO customers (business_id, name) VALUES (?, ?)`).bind(auth.business.id, customerName));
@@ -1337,10 +1373,8 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
                   VALUES (${S_SALE}, 'product', ?, ?, ?, 0, ?)`)
         .bind(saleNumber, auth.business.id, l.product.id, l.qty, l.unitPrice, l.lineTotal)
     );
-    stmts.push(
-      db.prepare(`UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?, updated_at = ? WHERE product_id = ?`)
-        .bind(l.qty, now, l.product.id)
-    );
+    // Stock was already reserved above (guarded UPDATE); the batch only
+    // records the movement, it never touches quantity_on_hand again.
     stmts.push(
       db.prepare(`INSERT INTO inventory_movements (product_id, movement_type, quantity_delta, source_type, source_id, note, created_by)
                   VALUES (?, 'sale', ?, 'sale', ${S_SALE}, ?, ?)`)
@@ -1363,7 +1397,17 @@ async function execRecordSale(context, db, auth, params, currency, opts) {
         .bind(saleNumber, auth.business.id, balanceDue, newBalance, saleNumber, auth.business.id, `Sale ${saleNumber}`)
     );
   }
-  const batchResults = await db.batch(stmts);
+  // A failed batch rolls back, so give the reservation back: the stock
+  // was already decremented above and no sale was recorded.
+  let batchResults;
+  try {
+    batchResults = await db.batch(stmts);
+  } catch (e) {
+    for (const r of reserved) {
+      try { await db.prepare(`UPDATE inventory_items SET quantity_on_hand = quantity_on_hand + ? WHERE product_id = ?`).bind(r.qty, r.productId).run(); } catch { /* best-effort */ }
+    }
+    throw e;
+  }
   const saleId = batchResults[headerIdx].meta.last_row_id;
   await audit(context, auth, "ai.sale.create", "sale", saleId, { saleNumber, total: subtotal, via: "kopa_ai" });
 
@@ -3516,6 +3560,17 @@ export async function runKopaAiChat(context, auth, body) {
       if (!tapProposal) {
         return { status: 200, body: { ok: true, reply: "That proposal is no longer waiting. It may have expired after 10 minutes, been cancelled, or already run. Nothing was recorded by this tap.", answer: "That proposal is no longer waiting.", actions_taken: [], fallback: false } };
       }
+      // Phase 4.1: re-check the tool against the CONFIRMING user, not
+      // the user who drafted the proposal. A proposal drafted while
+      // privileged must not execute after demotion, and a staff member
+      // who may only record sales must not execute another tool's
+      // proposal. (The direct action path already checks toolAllowed
+      // before drafting; this is the Confirm path's missing half.)
+      if (!toolAllowed(auth, tapProposal.tool)) {
+        const noPerm = "You no longer have permission to do that. Ask the owner.";
+        await updateProposalStatus(db, businessId, tapProposal.id, "failed", noPerm);
+        return { status: 200, body: { ok: true, reply: noPerm, answer: noPerm, actions_taken: [], fallback: false } };
+      }
       const tapDay = new Date().toISOString().slice(0, 10);
       if (tier === "free" && !isPlatformOwner && PROJECT_WRITE_TOOLS.includes(tapProposal.tool)) {
         const usedProjectActions = await countProjectActionsToday(db, businessId, tapDay);
@@ -4206,3 +4261,8 @@ export async function onRequestPost(context) {
     return json({ ok: false, message: "Something went wrong. Try again." }, 500);
   }
 }
+
+// Exported for local tests (same convention as buildSnapshot): the Phase
+// 4.1 server-flow tests exercise execRecordSale directly for the credit
+// guard and the stock reserve, in dry-run and execute modes.
+export { execRecordSale };

@@ -110,6 +110,16 @@ function csvCell(value) {
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
+// Phase 4.1: strip the cost fields from an export when the caller may
+// not view profit. Products carry cost_price, sale items carry the
+// cost_snapshot; every other table is cost-free.
+function stripProfitFields(tables, canSeeProfit) {
+  if (canSeeProfit) return tables;
+  for (const r of tables.products || []) delete r.cost_price;
+  for (const r of tables.sale_items || []) delete r.cost_snapshot;
+  return tables;
+}
+
 // One CSV per record type, same escaping as Reports buildCsv.
 // Columns come from the rows. An empty record type still downloads, with
 // its name and a "No records" line, so the link never fails.
@@ -129,8 +139,12 @@ export async function onRequestPost(context) {
     const bucket = r2(context);
     if (!bucket) return json({ ok: false, message: "File storage is not connected yet. Create the R2 bucket and bind it as KOPABOOK_R2." }, 503);
 
+    // Phase 4.1: cost/profit is owner-only. Rows leaving this endpoint
+    // must not carry cost fields to a caller without can_view_profit.
+    const canSeeProfit = !!auth.perms.can_view_profit;
     const db = context.env.KOPABOOK_DB;
     const tables = await exportTables(db, auth.business.id);
+    stripProfitFields(tables, canSeeProfit);
     const counts = {};
     for (const [k, v] of Object.entries(tables)) counts[k] = v.length;
     const data = { exported_at: new Date().toISOString(), business_id: auth.business.id, tables, counts };
@@ -172,6 +186,9 @@ export async function onRequestGet(context) {
       } else {
         rows = await rowsForTable(db, csvTable, auth.business.id);
       }
+      // Phase 4.1: a CSV export is the same data leaving the business —
+      // strip cost fields for callers without can_view_profit.
+      stripProfitFields({ [csvTable]: rows }, !!auth.perms.can_view_profit);
       const headers = new Headers();
       headers.set("Content-Type", "text/csv; charset=utf-8");
       headers.set("Content-Disposition", `attachment; filename="kopabook-${csvTable}.csv"`);
@@ -189,6 +206,14 @@ export async function onRequestGet(context) {
       const headers = new Headers();
       headers.set("Content-Type", "application/json");
       headers.set("Content-Disposition", `attachment; filename="${download.split("/").pop()}"`);
+      // Phase 4.1: a backup stored by the owner still carries cost prices.
+      // A caller without can_view_profit downloads the same file with
+      // those fields stripped, never the stored bytes as-is.
+      if (!auth.perms.can_view_profit) {
+        const stored = JSON.parse(await obj.text());
+        if (stored && stored.tables) stripProfitFields(stored.tables, false);
+        return new Response(JSON.stringify(stored), { headers });
+      }
       return new Response(obj.body, { headers });
     }
 

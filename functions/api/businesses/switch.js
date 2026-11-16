@@ -13,13 +13,22 @@ export async function onRequestPost(context) {
     if (!businessId) return json({ ok: false, message: "businessId is required." }, 400);
 
     const member = await context.env.KOPABOOK_DB.prepare(
-      `SELECT m.role, b.name, b.status FROM business_members m
+      `SELECT m.role, m.suspended AS member_suspended, b.name, b.status FROM business_members m
        JOIN businesses b ON b.id = m.business_id
        WHERE m.user_id = ? AND m.business_id = ? LIMIT 1`
     ).bind(auth.user.id, businessId).first();
     if (!member) return json({ ok: false, message: "You are not a member of that business." }, 403);
     if (member.status === "closed") {
       return json({ ok: false, message: "That business is closed. Reopen it first." }, 403);
+    }
+    // Phase 4.1: a suspended business cannot be switched into (the next
+    // request would immediately bounce the caller back out), and neither
+    // can a member whose own membership is suspended.
+    if (member.status === "suspended") {
+      return json({ ok: false, message: "That business is suspended." }, 403);
+    }
+    if (Number(member.member_suspended || 0) === 1) {
+      return json({ ok: false, message: "Your access to that business is suspended." }, 403);
     }
 
     const token = (context.request.headers.get("cookie") || "").match(/kopabook_session=([^;]+)/)?.[1];

@@ -161,25 +161,46 @@ export async function getDebtors(db, businessId, limit = 10) {
 }
 
 // --- CONFIRMED SALE RECORDING: writes a real sale + line item, decrements stock ---
+// Phase 4.1: stock is reserved FIRST with one atomic guarded UPDATE
+// (sufficient stock, and the product must belong to this business), so
+// two simultaneous sales cannot drive stock negative. The sale and its
+// line are written after the reservation; if they fail, the reservation
+// is given back. Quantity and price are validated: a bad value is an
+// error, never a recorded sale.
 export async function recordSale(db, businessId, productId, qty, unitPrice, userId) {
+  const q = Number(qty);
+  const price = Number(unitPrice);
+  if (!Number.isFinite(q) || q <= 0) return { error: "Invalid quantity." };
+  if (!Number.isFinite(price) || price < 0) return { error: "Invalid price." };
   try {
-    const lineTotal = qty * unitPrice;
+    const reserve = await db.prepare(`
+      UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?
+      WHERE product_id = ? AND quantity_on_hand >= ?
+        AND EXISTS (SELECT 1 FROM products p WHERE p.id = inventory_items.product_id AND p.business_id = ?)
+    `).bind(q, productId, q, businessId).run();
+    if ((reserve.meta?.changes ?? 0) !== 1) return { error: "Not enough stock." };
+    const lineTotal = q * price;
     const saleNumber = 'S' + Date.now().toString(36).toUpperCase();
-    const saleRes = await db.prepare(`
-      INSERT INTO sales (business_id, staff_user_id, sale_number, subtotal, total_amount, amount_paid, balance_due, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, 'completed', datetime('now'))
-    `).bind(businessId, userId, saleNumber, lineTotal, lineTotal, lineTotal).run();
-    const saleId = saleRes.meta.last_row_id;
-    await db.prepare(`
-      INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, line_total)
-      VALUES (?, ?, ?, ?, ?)
-    `).bind(saleId, productId, qty, unitPrice, lineTotal).run();
+    let saleRes;
     try {
+      saleRes = await db.prepare(`
+        INSERT INTO sales (business_id, staff_user_id, sale_number, subtotal, total_amount, amount_paid, balance_due, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'completed', datetime('now'))
+      `).bind(businessId, userId, saleNumber, lineTotal, lineTotal, lineTotal).run();
+      const saleId = saleRes.meta.last_row_id;
       await db.prepare(`
-        UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - ?
-        WHERE product_id = ?
-      `).bind(qty, productId).run();
-    } catch {}
+        INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, line_total)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(saleId, productId, q, price, lineTotal).run();
+    } catch (e) {
+      // The sale did not record: give the reservation back.
+      try {
+        await db.prepare(`
+          UPDATE inventory_items SET quantity_on_hand = quantity_on_hand + ? WHERE product_id = ?
+        `).bind(q, productId).run();
+      } catch {}
+      return { error: e.message };
+    }
     return { ok: true, saleNumber, total: lineTotal };
   } catch (e) { return { error: e.message }; }
 }
