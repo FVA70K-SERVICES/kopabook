@@ -128,7 +128,7 @@ const MODULES = [
   { icon: "\uD83D\uDCD3", name: "Notebook", access: "free", desc: "Your paper book, inside the app. Shared notes the whole team sees, plus private notes only you see, written like real book pages.", bestFor: "Teams that run on shared notes." },
   { icon: "\uD83D\uDCE3", name: "Messages", access: "free", desc: "Broadcast promos and new products to your customers on WhatsApp, and send quick notes to staff. On the free plan every send opens WhatsApp with your message ready, and you press send.", bestFor: "Promos, announcements and staff updates." },
   { icon: "\uD83E\uDDD1\u200D\uD83D\uDCBC", name: "Staff and roles", access: "free", desc: "Partner, manager, accountant, cashier, storekeeper, attendant and hotel roles. Each role sees only its own workspace, with discount limits and full control for you.", bestFor: "Shops with attendants and teams." },
-  { icon: "\uD83C\uDFE2", name: "Many businesses, one account", access: "free", desc: "Own several businesses and switch between them instantly with one login. Each keeps its own staff, sales, stock and records, completely separate.", bestFor: "Owners running more than one shop." },
+  { icon: "\uD83C\uDFE2", name: "Many businesses, one account", access: "paid", tiers: "Starter and Pro", desc: "Own several businesses and switch between them instantly with one login. Each keeps its own staff, sales, stock and records, completely separate.", bestFor: "Owners running more than one shop." },
   { icon: "\uD83C\uDFED", name: "Suppliers", access: "free", desc: "Keep supplier records linked to your stock, so you know exactly who to call when it is time to restock.", bestFor: "Shops that buy from wholesalers." },
   { icon: "\uD83E\uDDEE", name: "Calculator", access: "free", desc: "Quick business math with history and memory, right inside the app. No need to leave for another tool.", bestFor: "Fast totals at the counter." },
   { icon: "\uD83D\uDCDC", name: "Activity log", access: "free", desc: "An audit trail of important actions across your business, so you always know who did what.", bestFor: "Owners who want full visibility." },
@@ -139,7 +139,7 @@ const MODULES = [
   { icon: "\uD83D\uDD14", name: "WhatsApp debt reminders", access: "paid", tiers: "Starter, Solo and Pro", desc: "Send polite debt reminders straight to WhatsApp, drafted from each customer's real balance.", bestFor: "Anyone tired of chasing payments." },
   { icon: "\uD83D\uDCC8", name: "Full reports", access: "paid", tiers: "Starter, Solo and Pro", desc: "Profit trend over time, best sellers, slow movers, payment breakdown and date-range summaries, with one-tap CSV export.", bestFor: "Owners making restock and pricing decisions." },
   { icon: "\uD83D\uDCE5", name: "CSV import", access: "paid", tiers: "Starter, Solo and Pro", desc: "Import marketplace sales reports from CSV files, so your Jumia and Konga sales land in your books automatically.", bestFor: "Sellers on online marketplaces." },
-  { icon: "\uD83D\uDCCB", name: "Projects", access: "free", desc: "Full accountability for any project, on every plan including Free. Record every income and expense, track milestones, then generate a complete report showing exactly where every naira went.", bestFor: "Anyone handling project money." },
+  { icon: "\uD83D\uDCCB", name: "Projects", access: "free", desc: "Full accountability for any project, on every plan including Free. Record every income and expense, track milestones, then generate a complete report showing exactly where every naira went. Through Ask Kopa AI, Free includes 5 project actions a day.", bestFor: "Anyone handling project money." },
 ];
 
 function TierBadge(props) {
@@ -899,7 +899,7 @@ export function LandingPage() {
             <div className="card"><h3>Free</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;0</div><p>1 business, 1 staff. Sales, stock and debts, free forever.</p></div>
             <div className="card"><h3>Starter</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;1,000<span style={{ fontSize: 14, fontWeight: 400 }}>/mo</span></div><p>For growing shops. More products, more staff, a taste of Kopa AI.</p></div>
             <div className="card" style={{ border: "2px solid #15803d" }}><h3>Solo</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;5,000<span style={{ fontSize: 14, fontWeight: 400 }}>/mo</span></div><p>Kopa AI does the work. Ask anything, record sales by chatting.</p></div>
-            <div className="card"><h3>Pro</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;10,000<span style={{ fontSize: 14, fontWeight: 400 }}>/mo</span></div><p>Everything unlimited. For serious businesses with teams.</p></div>
+            <div className="card"><h3>Pro</h3><div style={{ fontSize: 26, fontWeight: 800, margin: "8px 0" }}>&#8358;10,000<span style={{ fontSize: 14, fontWeight: 400 }}>/mo</span></div><p>Everything unlimited, except Kopa AI at 100 questions a day. For serious businesses with teams.</p></div>
           </div>
           <div style={{ textAlign: "center", marginTop: 24 }}>
             <a href="/pricing" className="btn btn-secondary">See full pricing</a>
@@ -913,7 +913,7 @@ export function LandingPage() {
             <details><summary>Will it work on my phone?</summary><p>Yes. KopaBook is mobile-first and designed to be light on data.</p></details>
             <details><summary>What happens when a customer does not pay in full?</summary><p>The unpaid balance automatically becomes a debt on that customer's ledger, so you never lose track.</p></details>
             <details><summary>Can my shop attendant use it?</summary><p>Yes. Staff roles let attendants record sales while you keep control of products, settings and reports.</p></details>
-            <details><summary>Does KopaBook take my money?</summary><p>Never. KopaBook is a record keeper, not a payment processor. Every payment is a record of money exchanged outside the app.</p></details>
+            <details><summary>Does KopaBook take my money?</summary><p>Never from your sales. KopaBook is a record keeper, not a payment processor: it only records money that changes hands outside the app. The only money KopaBook itself ever takes is your subscription payment for a paid plan, paid securely through Paystack, crypto or bank transfer.</p></details>
           </div>
           <div style={{ textAlign: "center", marginTop: 24 }}>
             <a href="/faq" className="btn btn-secondary">See all questions</a>
@@ -974,7 +974,6 @@ export function PricingPage() {
     ["Price per month", "NGN 0", "NGN 1,000", "NGN 5,000", "NGN 10,000"],
     ["Price per year", "NGN 0", "NGN 10,000", "NGN 50,000", "NGN 100,000"],
     ["Businesses", "1", "5", "1", "Unlimited"],
-    ["Sales per week, per business", "100", "1,000", "Unlimited", "Unlimited"],
     ["Products and services, per business", "100", "1,000", "500", "Unlimited"],
     ["Staff accounts, per business", "1", "5", "3", "Unlimited"],
     ["Sales, stock, customers, debts, expenses", 1, 1, 1, 1],
@@ -1002,7 +1001,6 @@ export function PricingPage() {
               <p style={{ color: "var(--muted)" }}>Free forever. For solo merchants getting organised.</p>
               <ul>
                 <li>1 business</li>
-                <li>100 sales per week, per business</li>
                 <li>100 products and services, per business</li>
                 <li>1 staff account</li>
                 <li>Full records: sales, stock, customers, debts, expenses</li>
@@ -1018,7 +1016,6 @@ export function PricingPage() {
               <p style={{ color: "var(--muted)" }}>Per month, or NGN 10,000 per year (2 months free). For growing shops with attendants.</p>
               <ul>
                 <li>5 businesses</li>
-                <li>1,000 sales per week, per business</li>
                 <li>1,000 products and services, per business</li>
                 <li>5 staff accounts</li>
                 <li>WhatsApp debt reminders</li>
@@ -1129,9 +1126,10 @@ export function AboutPage() {
           <h2>What it is, and what it is not</h2>
           <p>
             KopaBook is a <strong>record keeper, not a payment processor</strong>. It never
-            touches your money. Every payment in the app is a record of money that changed
-            hands outside it, through cash, bank transfer, or POS. There is no gateway,
-            no wallet, no card charging. Your money stays yours.
+            touches your sales money. Every payment in the app is a record of money that changed
+            hands outside it, through cash, bank transfer, or POS. The only money KopaBook itself
+            ever takes is your subscription payment for a paid plan, through Paystack, crypto or
+            bank transfer. Your sales money stays yours.
           </p>
           <h2>Built for the real world</h2>
           <ul>
@@ -1177,7 +1175,7 @@ const FAQS = [
   },
   {
     q: "Does KopaBook take or process payments?",
-    a: "No. KopaBook never touches your money. Every payment in the app is a record of money exchanged outside it, through cash, bank transfer, or POS terminal. There is no payment gateway and no card charging.",
+    a: "Not from your sales. KopaBook never touches the money your business takes in: every sale payment in the app is only a record of money exchanged outside it, through cash, bank transfer, or POS terminal. The only payment KopaBook itself ever takes is your subscription for a paid plan, through Paystack, crypto or bank transfer.",
   },
   {
     q: "Is it really free?",
@@ -1201,7 +1199,7 @@ const FAQS = [
   },
   {
     q: "Can I run more than one business?",
-    a: "Yes. One account can own and manage many businesses. Switch between them from the business switcher. Each business keeps its own staff, sales, stock, and records, completely separate.",
+    a: "Yes, on Starter and Pro. One account can own and manage many businesses: Starter allows 5, Pro is unlimited. Switch between them from the business switcher. Each business keeps its own staff, sales, stock, and records, completely separate.",
   },
   {
     q: "How do customer debts work?",

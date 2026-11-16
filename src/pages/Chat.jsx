@@ -62,8 +62,8 @@ export default function ChatPage({ side, session }) {
           <div className="icon">🤖</div>
           <h3>Ask Kopa AI</h3>
           <p>
-            Your shop assistant, fully automated. It records sales and expenses,
-            and answers from your own records.
+            Your shop assistant, fully automated. It answers from your own records,
+            and on paid plans it records sales and expenses for you too.
           </p>
           <div className="chat-examples">
             <span>Record a sale</span>
