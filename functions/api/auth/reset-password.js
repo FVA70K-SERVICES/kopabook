@@ -29,6 +29,11 @@ export async function onRequestPost(context) {
       db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).bind(passwordHash, row.user_id),
       db.prepare(`UPDATE password_resets SET used_at = datetime('now') WHERE id = ?`).bind(row.id),
       db.prepare(`UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL AND id != ?`).bind(row.user_id, row.id),
+      // Fix 2.6: a reset proves email access, not ownership of every
+      // device the account is signed in on. Revoke ALL sessions, so a
+      // stolen session cannot keep working after the password changes.
+      // The resetter signs in again with the new password.
+      db.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(row.user_id),
     ]);
 
     return json({ ok: true, message: "Password reset. You can now sign in with the new password." });

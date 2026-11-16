@@ -11,6 +11,8 @@ import {
   audit,
 } from "../_utils";
 import { verifyHumanToken } from "../_fvaverify";
+import { checkRateLimit } from "../_webhook_security";
+import { sha256Hex, randomToken } from "../_mail";
 import { recordAppLockSignIn } from "./_app-lock";
 
 const DEFAULT_MODES = [
@@ -39,13 +41,37 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "Enter a valid email address." }, 400);
     }
 
+    const db = context.env.KOPABOOK_DB;
+
+    // Fix 2.6: rate limiting through the existing checkRateLimit helper
+    // (same helper billing/checkout.js uses). 5 registrations per IP
+    // per hour and 3 per email per hour: a public signup must not be a
+    // free account farm.
+    const ip = (context.request.headers.get("CF-Connecting-IP") ||
+      String(context.request.headers.get("X-Forwarded-For") || "").split(",")[0].trim() ||
+      "unknown").replace(/[^0-9a-zA-Z.:-]/g, "").slice(0, 64) || "unknown";
+    if (!(await checkRateLimit(db, `register_ip_${ip}`, 5, 3600000))) {
+      return json({ ok: false, message: "Too many registrations. Please try again later." }, 429);
+    }
+    if (!(await checkRateLimit(db, `register_email_${cleanEmail}`, 3, 3600000))) {
+      return json({ ok: false, message: "Too many registrations. Please try again later." }, 429);
+    }
+
     // FVAVerify human check (skipped until FVAVerify is live and configured).
+    // NOTE (Fix 2.6): "skipped" is literal — verifyHumanToken returns null
+    // when FVA_VERIFY_SECRET is not set in Pages, and the frontend widget
+    // (src/components/HumanCheck.jsx) renders nothing while
+    // FVA_VERIFY_SITEKEY is empty, so no token is ever sent today. The
+    // wiring on both ends is complete and the check enforces itself the
+    // moment the secret + site key land; until then it cannot be switched
+    // on from code alone, because failing closed here would refuse every
+    // new signup while there is no service to verify against. The rate
+    // limit above is the compensating control until FVAVerify goes live.
     const human = await verifyHumanToken(context.env, body.fvaverify_token);
     if (human && !human.ok) {
       return json({ ok: false, message: human.message }, 403);
     }
 
-    const db = context.env.KOPABOOK_DB;
     const taken = await db.prepare(`SELECT id FROM users WHERE email = ? LIMIT 1`).bind(cleanEmail).first();
     if (taken) {
       return json({ ok: false, message: "An account with this email already exists. Please sign in." }, 409);
@@ -117,6 +143,28 @@ export async function onRequestPost(context) {
       `INSERT INTO sessions (user_id, session_token, expires_at, last_seen_at, business_id)
        VALUES (?, ?, ?, ?, ?)`
     ).bind(userId, token, toSqliteDate(expires), now, businessId).run();
+
+    // Fix 2.6: email verification plumbing. Record a single-use token
+    // (hashed, 24 h expiry) in email_verifications so the address can
+    // be proven later at POST /api/auth/verify-email. Deliberately
+    // incomplete by design, not by accident:
+    //   - NO email is sent here — the send step waits on the
+    //     mail-provider decision, so there is no link to deliver yet.
+    //   - Sign-in behaviour is UNCHANGED: the account stays 'active',
+    //     the session above is issued exactly as before, and login
+    //     never requires email_verified_at. Existing users are
+    //     unaffected, and a new user is never locked out by a
+    //     verification email that was never sent.
+    //   - If the table has not landed yet (migration 0063), the token
+    //     insert fails quietly and registration still succeeds.
+    try {
+      const verifyToken = randomToken(32);
+      const verifyHash = await sha256Hex(verifyToken);
+      await db.prepare(
+        `INSERT INTO email_verifications (user_id, token_hash, expires_at)
+         VALUES (?, ?, datetime('now', '+24 hours'))`
+      ).bind(userId, verifyHash).run();
+    } catch { /* verification not armed yet; registration still succeeds */ }
 
     await audit(context,
       { user: { id: Number(userId) }, business: { id: Number(businessId) } },

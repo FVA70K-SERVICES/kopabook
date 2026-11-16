@@ -145,11 +145,30 @@ export async function verifyPassword(password, stored) {
       key,
       256
     );
-    return bytesToHex(bits) === hashHex;
+    // Fix 2.6: constant-time compare. A plain === on the hex strings
+    // leaks, byte by byte, how much of a guessed hash matches, and a
+    // short-circuit compare returns faster the earlier it differs.
+    // XOR-accumulate over the full 32 bytes and decide once, so every
+    // comparison costs the same regardless of where it differs.
+    const derived = new Uint8Array(bits);
+    const expected = hexToBytes(hashHex);
+    if (expected.length !== derived.length) return false;
+    let diff = 0;
+    for (let i = 0; i < derived.length; i++) diff |= derived[i] ^ expected[i];
+    return diff === 0;
   } catch {
     return false;
   }
 }
+
+// Fix 2.6: dummy hash for unknown users. Login runs verifyPassword
+// against this when no account matches, so a login for a nonexistent
+// email costs the same PBKDF2 work as a wrong password on a real
+// account, and timing no longer reveals whether the account exists.
+// The result is always discarded; this hash belongs to no account and
+// can never grant access.
+export const DUMMY_PASSWORD_HASH =
+  "pbkdf2$100000$c442f854f612b5768b8aff103a36cf58$cfe6e3c193dfd023cddcfb3ba31392dddbca1fd197042830e3d51bdc4272ca32";
 
 export function newSessionToken() {
   return bytesToHex(crypto.getRandomValues(new Uint8Array(32)));

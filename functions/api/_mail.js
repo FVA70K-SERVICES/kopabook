@@ -121,6 +121,40 @@ export function resetPasswordEmail({ resetUrl, businessName, userName }) {
   return { subject, text, html };
 }
 
+// Fix 2.6: email verification message (template only — nothing calls
+// sendMail with it yet; the send step waits on the mail-provider
+// decision, exactly like the token plumbing in auth/register.js).
+// Same visual style as resetPasswordEmail.
+export function verifyEmailEmail({ verifyUrl, userName }) {
+  const subject = `Verify your KopaBook email`;
+  const name = userName && String(userName).trim() ? String(userName).trim() : "there";
+  const text =
+    `Hello ${name},\n\n` +
+    `Thanks for creating your KopaBook account. Please confirm this email address:\n${verifyUrl}\n\n` +
+    `This link works once and expires in 24 hours. If you did not create a KopaBook account, just ignore this email.\n\n` +
+    `- KopaBook\nkopabook.com`;
+  const html = `
+    <div style="font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f3f6f3; padding: 32px 16px;">
+      <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e5e7eb;">
+        <div style="padding: 24px 24px 8px; text-align: center; border-bottom: 3px solid #166534;">
+          <img src="https://kopabook.com/logo.png" alt="KopaBook" width="170" style="display: block; margin: 0 auto; max-width: 170px;" />
+        </div>
+        <div style="padding: 24px 28px 8px;">
+          <h2 style="color: #14532d; margin: 0 0 12px; font-size: 20px;">Verify your email</h2>
+          <p style="color: #374151; font-size: 15px; line-height: 1.6; margin: 0 0 12px;">Hello ${escapeHtml(name)},</p>
+          <p style="color: #374151; font-size: 15px; line-height: 1.6; margin: 0 0 20px;">Thanks for creating your KopaBook account. Tap the button below to confirm this email address.</p>
+          <p style="text-align: center; margin: 0 0 20px;"><a href="${verifyUrl}" style="display: inline-block; background: #166534; color: #ffffff; padding: 14px 36px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 16px;">Verify my email</a></p>
+          <p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 10px;">This link works once and expires in 24 hours. If you did not create a KopaBook account, just ignore this email.</p>
+          <p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 20px; word-break: break-all;">Button not working? Copy this link:<br><a href="${verifyUrl}" style="color: #166534;">${verifyUrl}</a></p>
+        </div>
+        <div style="background: #f9fafb; padding: 16px 28px; border-top: 1px solid #e5e7eb;">
+          <p style="color: #9ca3af; font-size: 12px; margin: 0; line-height: 1.6;">KopaBook, the free record book for your business.<br><a href="https://kopabook.com" style="color: #166534;">kopabook.com</a></p>
+        </div>
+      </div>
+    </div>`;
+  return { subject, text, html };
+}
+
 // Receipt email: same visual style as resetPasswordEmail (white card,
 // green header rule, KopaBook footer). Amounts arrive pre-formatted.
 //   receiptEmail({ businessName, saleNumber, date, items, subtotal,
