@@ -47,7 +47,7 @@ export async function onRequestPost(context) {
     const db = context.env.KOPABOOK_DB;
     const now = toSqliteDate();
 
-    // Tier limit: a free account can create 2 businesses, then must upgrade.
+    // Tier limit: a free account can create 1 business, then must upgrade.
     const { tier } = await getAccountTier(db, auth.user.id);
     const maxBiz = LIMITS[tier].businesses;
     if (maxBiz !== null) {
