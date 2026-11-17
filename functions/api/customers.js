@@ -47,33 +47,19 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: "Enter a valid email address, or leave it blank." }, 400);
     }
 
-    let result;
-    try {
-      result = await context.env.KOPABOOK_DB.prepare(
-        `INSERT INTO customers (business_id, name, phone, notes, email) VALUES (?, ?, ?, ?, ?)`
+    // The email column (migration 0061) is relied on directly; live D1
+    // has it.
+    const result = await context.env.KOPABOOK_DB.prepare(
+      `INSERT INTO customers (business_id, name, phone, notes, email) VALUES (?, ?, ?, ?, ?)`
+    )
+      .bind(
+        auth.business.id,
+        String(name).trim(),
+        phone ? String(phone).trim() : null,
+        notes ? String(notes).trim() : null,
+        cleanEmail
       )
-        .bind(
-          auth.business.id,
-          String(name).trim(),
-          phone ? String(phone).trim() : null,
-          notes ? String(notes).trim() : null,
-          cleanEmail
-        )
-        .run();
-    } catch (e) {
-      // Migration 0061 not applied yet: no email column. Create without it.
-      if (!/no such column: .*email/i.test(String(e && e.message))) throw e;
-      result = await context.env.KOPABOOK_DB.prepare(
-        `INSERT INTO customers (business_id, name, phone, notes) VALUES (?, ?, ?, ?)`
-      )
-        .bind(
-          auth.business.id,
-          String(name).trim(),
-          phone ? String(phone).trim() : null,
-          notes ? String(notes).trim() : null
-        )
-        .run();
-    }
+      .run();
 
     await audit(context, auth, "customer.create", "customer", result.meta.last_row_id, { name });
     // WORLD-BEST (merge, History stream §6f).

@@ -26,6 +26,9 @@ export async function onRequestPatch(context) {
     const fields = [];
     const params = [];
 
+    // Phase 7.3: prices and stock levels must be real numbers, zero or
+    // more. The old code pushed Number("abc") — NaN, or a raw string —
+    // straight into the row.
     for (const [key, col] of [
       ["name", "name"],
       ["sku", "sku"],
@@ -35,41 +38,66 @@ export async function onRequestPatch(context) {
       ["category", "category"],
     ]) {
       if (body[key] !== undefined) {
+        if (key === "unitPrice" || key === "costPrice") {
+          const v = Number(body[key]);
+          if (!Number.isFinite(v) || v < 0) {
+            return json({ ok: false, message: `${key === "unitPrice" ? "Unit price" : "Cost price"} must be a valid number, zero or more.` }, 400);
+          }
+        }
+        if (key === "lowStockThreshold") {
+          const v = Number(body[key]);
+          if (!Number.isFinite(v) || v < 0) {
+            return json({ ok: false, message: "Reorder level must be a number, zero or more." }, 400);
+          }
+        }
         fields.push(`${col} = ?`);
         params.push(typeof body[key] === "string" ? body[key].trim() || null : Number(body[key]));
       }
     }
-    // Unit of measure (migration 0042). Falls back gracefully if the
-    // column does not exist yet on the database.
+    // Phase 7.3: SKUs are unique per business (migration 0064). Changing
+    // a SKU to one another product in this business already uses — in any
+    // letter case — is refused. The product itself is excluded.
+    if (body.sku !== undefined && typeof body.sku === "string" && body.sku.trim() !== "") {
+      const clash = await context.env.KOPABOOK_DB.prepare(
+        `SELECT id FROM products WHERE business_id = ? AND sku = ? COLLATE NOCASE AND id != ? LIMIT 1`
+      ).bind(auth.business.id, body.sku.trim(), id).first();
+      if (clash) {
+        return json({ ok: false, message: "Another product in this business already uses that SKU." }, 409);
+      }
+    }
+    // Unit of measure (migration 0042, live D1 has the column): relied on
+    // directly, no fallback for a database without it.
     let unitUpdate = null;
     if (body.unit !== undefined) unitUpdate = normalizeUnit(body.unit);
     if (body.isActive !== undefined) {
       fields.push(`is_active = ?`);
       params.push(body.isActive ? 1 : 0);
     }
-    if (fields.length === 0) {
+    // Phase 7.3: a unit-only update is a real update (the old guard
+    // returned "Nothing to update" because the unit column was not in
+    // `fields`).
+    if (fields.length === 0 && unitUpdate === null) {
       return json({ ok: false, message: "Nothing to update." }, 400);
     }
 
     params.push(id, auth.business.id);
+    // Phase 7.3: single UPDATE against the unit column. A UNIQUE failure
+    // can only be a race against the SKU check above.
+    const unitFields = unitUpdate !== null ? [...fields, "unit = ?"] : fields;
+    const unitParams = unitUpdate !== null
+      ? [...params.slice(0, -2), unitUpdate, ...params.slice(-2)]
+      : params;
     try {
-      const unitFields = unitUpdate !== null ? [...fields, "unit = ?"] : fields;
-      const unitParams = unitUpdate !== null
-        ? [...params.slice(0, -2), unitUpdate, ...params.slice(-2)]
-        : params;
       await context.env.KOPABOOK_DB.prepare(
         `UPDATE products SET ${unitFields.join(", ")} WHERE id = ? AND business_id = ?`
       )
         .bind(...unitParams)
         .run();
     } catch (e) {
-      // Migration 0042 not applied yet: retry without the unit column.
-      if (unitUpdate === null || !/no such column: unit/i.test(String(e && e.message))) throw e;
-      await context.env.KOPABOOK_DB.prepare(
-        `UPDATE products SET ${fields.join(", ")} WHERE id = ? AND business_id = ?`
-      )
-        .bind(...params)
-        .run();
+      if (/UNIQUE constraint failed/i.test(String(e && e.message))) {
+        return json({ ok: false, message: "Another product in this business already uses that SKU." }, 409);
+      }
+      throw e;
     }
 
     if (body.lowStockThreshold !== undefined) {

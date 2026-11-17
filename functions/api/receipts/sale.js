@@ -16,43 +16,23 @@ export async function onRequestGet(context) {
     const id = Number(new URL(context.request.url).searchParams.get("id"));
     if (!id) return json({ ok: false, message: "Sale id is required." }, 400);
 
+    // Phase 7.3: the customer columns (migration 0061) and the product
+    // unit column (migration 0042) are relied on directly; live D1 has them.
     const db = context.env.KOPABOOK_DB;
-    let sale;
-    try {
-      sale = await db.prepare(
-        `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone,
-                c.email AS customer_email, c.telegram AS customer_telegram,
-                c.telegram_chat_id AS customer_telegram_chat_id
-         FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
-         WHERE s.id = ? AND s.business_id = ?`
-      ).bind(id, auth.business.id).first();
-    } catch (e) {
-      // Migration 0061 not applied yet: new customer columns missing.
-      if (!/no such column/i.test(String(e && e.message))) throw e;
-      sale = await db.prepare(
-        `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone
-         FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
-         WHERE s.id = ? AND s.business_id = ?`
-      ).bind(id, auth.business.id).first();
-    }
+    const sale = await db.prepare(
+      `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone,
+              c.email AS customer_email, c.telegram AS customer_telegram,
+              c.telegram_chat_id AS customer_telegram_chat_id
+       FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
+       WHERE s.id = ? AND s.business_id = ?`
+    ).bind(id, auth.business.id).first();
     if (!sale) return json({ ok: false, message: "Sale not found." }, 404);
 
-    let items;
-    try {
-      items = await db.prepare(
-        `SELECT si.quantity, si.unit_price, si.line_total, si.cost_snapshot, p.name AS product_name, p.unit AS product_unit
-         FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
-         WHERE si.sale_id = ? ORDER BY si.id ASC`
-      ).bind(id).all();
-    } catch (e) {
-      // Migration 0042 not applied yet.
-      if (!/no such column: p\.unit/i.test(String(e && e.message))) throw e;
-      items = await db.prepare(
-        `SELECT si.quantity, si.unit_price, si.line_total, si.cost_snapshot, p.name AS product_name
-         FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
-         WHERE si.sale_id = ? ORDER BY si.id ASC`
-      ).bind(id).all();
-    }
+    const items = await db.prepare(
+      `SELECT si.quantity, si.unit_price, si.line_total, si.cost_snapshot, p.name AS product_name, p.unit AS product_unit
+       FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
+       WHERE si.sale_id = ? ORDER BY si.id ASC`
+    ).bind(id).all();
 
     const payments = await db.prepare(
       `SELECT amount, payment_method AS mode, created_at FROM payment_records

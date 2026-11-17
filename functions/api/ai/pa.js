@@ -44,25 +44,15 @@ export async function onRequestGet(context) {
 
       // Low stock: name up to 3 items with the counts left.
       try {
-        let rows;
-        try {
-          const rs = await db.prepare(
-            `SELECT p.name, p.unit, COALESCE(ii.quantity_on_hand,0) AS qty FROM products p
-             LEFT JOIN inventory_items ii ON ii.product_id = p.id
-             WHERE p.business_id = ? AND p.is_active = 1 AND COALESCE(ii.quantity_on_hand,0) <= p.low_stock_threshold
-             ORDER BY qty ASC, p.name ASC LIMIT 3`
-          ).bind(businessId).all();
-          rows = rs.results || [];
-        } catch (e) {
-          if (!/no such column: unit/i.test(String(e && e.message))) throw e;
-          const rs = await db.prepare(
-            `SELECT p.name, COALESCE(ii.quantity_on_hand,0) AS qty FROM products p
-             LEFT JOIN inventory_items ii ON ii.product_id = p.id
-             WHERE p.business_id = ? AND p.is_active = 1 AND COALESCE(ii.quantity_on_hand,0) <= p.low_stock_threshold
-             ORDER BY qty ASC, p.name ASC LIMIT 3`
-          ).bind(businessId).all();
-          rows = (rs.results || []).map((r) => ({ name: r.name, unit: "piece", qty: r.qty }));
-        }
+        // Phase 7.3: the unit column (migration 0042) is relied on
+        // directly; live D1 has it.
+        const rs = await db.prepare(
+          `SELECT p.name, p.unit, COALESCE(ii.quantity_on_hand,0) AS qty FROM products p
+           LEFT JOIN inventory_items ii ON ii.product_id = p.id
+           WHERE p.business_id = ? AND p.is_active = 1 AND COALESCE(ii.quantity_on_hand,0) <= p.low_stock_threshold
+           ORDER BY qty ASC, p.name ASC LIMIT 3`
+        ).bind(businessId).all();
+        const rows = rs.results || [];
         if (rows.length) {
           cards.push({
             type: "low_stock",

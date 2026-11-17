@@ -17,19 +17,10 @@ export const TIER_PRICES = { free: "Free", starter: "NGN 1,000/month", solo: "NG
 
 export async function getAccountTier(db, userId) {
   // pending_tier (Fix 1.9, migration 0062) holds a requested tier without
-  // touching tier/status. If the column is not there yet the endpoint must
-  // keep working, so fall back to the pre-0062 column list.
-  let row;
-  try {
-    row = await db.prepare(
-      `SELECT tier, status, billing_cycle, current_period_end, pending_tier FROM account_subscriptions WHERE user_id = ? LIMIT 1`
-    ).bind(userId).first();
-  } catch (e) {
-    if (!/no such column/i.test(String(e && e.message))) throw e;
-    row = await db.prepare(
-      `SELECT tier, status, billing_cycle, current_period_end FROM account_subscriptions WHERE user_id = ? LIMIT 1`
-    ).bind(userId).first();
-  }
+  // touching tier/status. The column is relied on directly; live D1 has it.
+  const row = await db.prepare(
+    `SELECT tier, status, billing_cycle, current_period_end, pending_tier FROM account_subscriptions WHERE user_id = ? LIMIT 1`
+  ).bind(userId).first();
   const tier = row && LIMITS[row.tier] ? row.tier : "free";
   const pendingTier = row && row.pending_tier && LIMITS[row.pending_tier] ? row.pending_tier : null;
   // A pending upgrade keeps the old tier until payment is confirmed.

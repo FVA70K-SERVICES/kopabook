@@ -97,42 +97,22 @@ export function buildReceiptPlain({ businessName, saleNumber, date, items, subto
 
 // Load a sale with its items, payments, business and customer, scoped to
 // the caller's business. Returns null when the sale is not in this business.
-// Tolerates a database where migration 0061 has not run yet (new customer
-// columns missing) by falling back to the old column list.
+// The customer columns (migration 0061) and the product unit column
+// (migration 0042) are relied on directly; live D1 has them.
 export async function loadSaleForReceipt(db, businessId, saleId) {
-  let sale = null;
-  try {
-    sale = await db.prepare(
-      `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone,
-              c.email AS customer_email, c.telegram AS customer_telegram,
-              c.telegram_chat_id AS customer_telegram_chat_id
-       FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
-       WHERE s.id = ? AND s.business_id = ?`
-    ).bind(saleId, businessId).first();
-  } catch (e) {
-    if (!/no such column/i.test(String(e && e.message))) throw e;
-    sale = await db.prepare(
-      `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone
-       FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
-       WHERE s.id = ? AND s.business_id = ?`
-    ).bind(saleId, businessId).first();
-  }
+  const sale = await db.prepare(
+    `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone,
+            c.email AS customer_email, c.telegram AS customer_telegram,
+            c.telegram_chat_id AS customer_telegram_chat_id
+     FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
+     WHERE s.id = ? AND s.business_id = ?`
+  ).bind(saleId, businessId).first();
   if (!sale) return null;
-  let items;
-  try {
-    items = await db.prepare(
-      `SELECT si.quantity, si.unit_price, si.line_total, p.name AS product_name, p.unit AS product_unit
-       FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
-       WHERE si.sale_id = ? ORDER BY si.id ASC`
-    ).bind(saleId).all();
-  } catch (e) {
-    if (!/no such column: p\.unit/i.test(String(e && e.message))) throw e;
-    items = await db.prepare(
-      `SELECT si.quantity, si.unit_price, si.line_total, p.name AS product_name
-       FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
-       WHERE si.sale_id = ? ORDER BY si.id ASC`
-    ).bind(saleId).all();
-  }
+  const items = await db.prepare(
+    `SELECT si.quantity, si.unit_price, si.line_total, p.name AS product_name, p.unit AS product_unit
+     FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
+     WHERE si.sale_id = ? ORDER BY si.id ASC`
+  ).bind(saleId).all();
   const payments = await db.prepare(
     `SELECT amount, payment_method AS mode, created_at FROM payment_records
      WHERE sale_id = ? ORDER BY id ASC`

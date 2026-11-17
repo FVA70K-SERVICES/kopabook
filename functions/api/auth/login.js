@@ -84,22 +84,13 @@ export async function onRequestPost(context) {
       return json({ ok: false, message: TOO_MANY }, 429);
     }
 
-    // Try email-or-username match. Falls back to email-only when the
-    // username column does not exist yet (migration 0049 not applied).
-    let user = null;
-    try {
-      user = await db.prepare(
-        `SELECT id, full_name, email, username, password_hash, role, status, last_login_at FROM users WHERE email = ? OR username = ? LIMIT 1`
-      )
-        .bind(idLower, idLower)
-        .first();
-    } catch (e) {
-      user = await db.prepare(
-        `SELECT id, full_name, email, password_hash, role, status, last_login_at FROM users WHERE email = ? LIMIT 1`
-      )
-        .bind(idLower)
-        .first();
-    }
+    // Try email-or-username match. The username column (migration 0049)
+    // is relied on directly; live D1 has it.
+    const user = await db.prepare(
+      `SELECT id, full_name, email, username, password_hash, role, status, last_login_at FROM users WHERE email = ? OR username = ? LIMIT 1`
+    )
+      .bind(idLower, idLower)
+      .first();
 
     // Unknown account: pay the PBKDF2 cost against the dummy hash so
     // this path times like a wrong password, then answer generically.

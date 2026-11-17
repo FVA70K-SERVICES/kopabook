@@ -84,11 +84,20 @@ export default function SalesPage({ session }) {
     });
   }, []);
 
-  async function loadHistory() {
+  // Phase 7.3: sales history loads 100 rows at a time and pages older
+  // sales in with `offset`, so a shop doing 100+ sales a day can reach
+  // the rest of the day. A full page means there may be more.
+  const HIST_PAGE = 100;
+  const [histHasMore, setHistHasMore] = useState(false);
+
+  async function loadHistory(append = false) {
     setHistLoading(true);
     try {
-      const d = await api.get(`/api/sales?from=${dateFilter}&to=${dateFilter}&limit=100`);
-      setHistory(d.sales);
+      const offset = append ? history.length : 0;
+      const d = await api.get(`/api/sales?from=${dateFilter}&to=${dateFilter}&limit=${HIST_PAGE}&offset=${offset}`);
+      const rows = d.sales || [];
+      setHistory(append ? [...history, ...rows] : rows);
+      setHistHasMore(rows.length === HIST_PAGE);
     } catch (e) { setError(e.message); }
     setHistLoading(false);
   }
@@ -520,6 +529,11 @@ export default function SalesPage({ session }) {
               </tbody>
             </table>
             {histLoading ? <ListSkeleton rows={3} label="Loading sales..." /> : history.length === 0 && <p className="empty">No sales on this date.</p>}
+            {histHasMore && (
+              <button className="btn btn-secondary" style={{ marginTop: 12 }} onClick={() => loadHistory(true)} disabled={histLoading}>
+                {histLoading ? "Loading…" : "Load more sales"}
+              </button>
+            )}
           </div>
             <div className="print-only">
               <StatementPrint

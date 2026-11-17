@@ -34,6 +34,11 @@ export async function onRequestGet(context) {
 
     const url = new URL(context.request.url);
     const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200);
+    // Phase 7.3: load-more for sales history. The history view caps at
+    // 100 rows a day; `offset` pages older sales in (same ORDER BY, so a
+    // page is stable while no new sale lands mid-scroll). Clamped to a
+    // non-negative integer; an invalid value behaves as 0.
+    const offset = Math.max(0, Math.floor(Number(url.searchParams.get("offset") || 0)) || 0);
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
     // WORLD-BEST (merge, soft void): voided sales are corrections, not
@@ -50,8 +55,8 @@ export async function onRequestGet(context) {
     if (!includeVoided) sql += ` AND (s.status IS NULL OR s.status != 'voided')`;
     if (from) { sql += ` AND date(s.created_at) >= ?`; params.push(from); }
     if (to) { sql += ` AND date(s.created_at) <= ?`; params.push(to); }
-    sql += ` ORDER BY s.id DESC LIMIT ?`;
-    params.push(limit);
+    sql += ` ORDER BY s.id DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
 
     const result = await context.env.KOPABOOK_DB.prepare(sql).bind(...params).all();
     return json({ ok: true, sales: result.results || [] });

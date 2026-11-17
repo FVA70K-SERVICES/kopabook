@@ -87,13 +87,12 @@ export async function onRequestPost(context) {
       if (!/^[a-z0-9_]{3,20}$/.test(username)) {
         return json({ ok: false, message: "Username must be 3 to 20 characters: letters, numbers and underscore only." }, 400);
       }
-      try {
-        const takenU = await db.prepare(`SELECT id FROM users WHERE username = ? LIMIT 1`).bind(username).first();
-        if (takenU) {
-          return json({ ok: false, message: "That username is taken. Try another." }, 409);
-        }
-      } catch (e) {
-        username = ""; // username column not migrated yet: register without it
+      // The username column (migration 0049) is relied on directly; live
+      // D1 has it. A database error here fails registration instead of
+      // silently registering without the username the user chose.
+      const takenU = await db.prepare(`SELECT id FROM users WHERE username = ? LIMIT 1`).bind(username).first();
+      if (takenU) {
+        return json({ ok: false, message: "That username is taken. Try another." }, 409);
       }
     }
 
