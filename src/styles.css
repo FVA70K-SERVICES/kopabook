@@ -594,15 +594,21 @@ a:focus-visible, button:focus-visible {
   background: var(--brand-soft); border-radius: 999px; padding: 4px 10px;
 }
 /* In the signed-in app the chat button and panel sit clear of the
-   mobile bottom bar, on every screen size. */
-body.kb-in-app #fva-chat-btn { bottom: 84px; }
+   mobile bottom bar, on every screen size. Round 10 (23 Nov 2026):
+   the launcher lift is calc(95px + the bottom safe-area inset), not
+   a fixed 84px: the nav is 77px tall before its own inset padding,
+   so 84px cleared it by only 7px with no inset and overlapped it on
+   any iPhone with a home indicator. 95px = 77px nav + 18px daylight,
+   scaled by the same inset the nav adds. Same value in the widget's
+   own sheet (public/fvachat.css); the two must agree. */
+body.kb-in-app #fva-chat-btn { bottom: calc(95px + env(safe-area-inset-bottom, 0px)); }
 body.kb-in-app #fva-chat-window {
   bottom: 156px;
   max-height: calc(100vh - 180px);
   max-height: calc(100dvh - 180px);
 }
 @media (max-width: 480px) {
-  body.kb-in-app #fva-chat-btn { bottom: 84px; right: 16px; }
+  body.kb-in-app #fva-chat-btn { bottom: calc(95px + env(safe-area-inset-bottom, 0px)); right: 16px; }
   body.kb-in-app #fva-chat-window { bottom: 152px; right: 16px; }
 }
 

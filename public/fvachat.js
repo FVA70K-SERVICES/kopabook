@@ -518,11 +518,17 @@
   // the sheet is guaranteed at 480px and below. Cleared on close and
   // whenever the viewport is wider, so the desktop floating card is
   // untouched.
+  // Round 10 (23 Nov 2026): the sheet bottom is calc(95px + the
+  // bottom safe-area inset), not a fixed 88px. The mobile nav is
+  // 77px tall before its own inset padding, so 88px cleared it by
+  // only 11px with no inset and sat on/inside it on a real iPhone.
+  // 95px = 77px nav + 18px daylight, scaled by the same inset the
+  // nav adds, so the clearance is 18px at any inset.
   function applyNarrowSheet() {
     try {
       if (window.innerWidth <= 480) {
         win.style.left = "0"; win.style.right = "0";
-        win.style.top = "env(safe-area-inset-top, 0px)"; win.style.bottom = "88px";
+        win.style.top = "env(safe-area-inset-top, 0px)"; win.style.bottom = "calc(95px + env(safe-area-inset-bottom, 0px))";
         win.style.width = "auto"; win.style.maxWidth = "none";
         win.style.height = "auto"; win.style.maxHeight = "none";
         win.style.borderRadius = "0";
@@ -534,7 +540,7 @@
             const vv = window.visualViewport;
             const covered = window.innerHeight - vv.height - (vv.offsetTop || 0);
             if (covered > 80) {
-              win.style.bottom = (88 + covered) + "px";
+              win.style.bottom = "calc(95px + env(safe-area-inset-bottom, 0px) + " + covered + "px)";
               win.style.top = Math.max(0, vv.offsetTop || 0) + "px";
             }
           } catch (e) {}
@@ -584,7 +590,9 @@
       if (covered > 80) {
         keyboardOpen = true;
         win.classList.add("fva-keyboard");
-        win.style.bottom = (88 + covered) + "px";
+        // Round 10: same 95px + inset base as applyNarrowSheet, plus
+        // the keypad-covered height (was a fixed 88px + covered).
+        win.style.bottom = "calc(95px + env(safe-area-inset-bottom, 0px) + " + covered + "px)";
         win.style.top = Math.max(0, vv.offsetTop || 0) + "px";
       } else if (keyboardOpen) {
         keyboardOpen = false;

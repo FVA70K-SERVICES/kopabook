@@ -73,8 +73,16 @@ html[data-theme="dark"] #fva-chat-invite {
    only in the app stylesheet, so it applies whenever the widget is in
    the app even if the app sheet is stale or the class arrives late.
    (Round 3 put this rule only in src/styles.css, gated on the same
-   body class the widget adds.) */
-body.kb-in-app #fva-chat-btn { bottom: 84px; }
+   body class the widget adds.)
+   Round 10 (23 Nov 2026): the lift is calc(95px + the bottom safe-area
+   inset), not a fixed 84px. The mobile bottom nav is 77px tall BEFORE
+   its own safe-area padding, so a fixed 84px cleared it by only 7px
+   with no inset and overlapped it by (inset - 7px) on any iPhone with
+   a home indicator (live: the bubble sat on the nav's top-right
+   corner, over More). 95px = 77px nav + 18px daylight, and the inset
+   term scales both sides together, so the clearance is 18px at any
+   inset. Same value in src/styles.css; the two sheets must agree. */
+body.kb-in-app #fva-chat-btn { bottom: calc(95px + env(safe-area-inset-bottom, 0px)); }
 #fva-chat-badge {
   position: absolute; top: -4px; right: -4px;
   background: #e53935; color: white; font-size: 12px; font-weight: 700;
@@ -113,7 +121,13 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
    the card tracks the visible height where the keypad opens. */
 @media (max-height: 560px) {
   #fva-chat-window.open { max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); }
-  body.kb-in-app #fva-chat-window.open { bottom: 96px; max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); }
+  /* Round 10: bottom is calc(95px + the bottom safe-area inset), not
+     a fixed 96px, for the same reason as the narrow sheet: at
+     481-860px wide the mobile nav is showing, and a fixed 96px sat
+     inside it once the inset passed 19px. Same 95px = 77px nav +
+     18px daylight, so the short card clears the nav at any inset
+     and sits no lower than before with no inset. */
+  body.kb-in-app #fva-chat-window.open { bottom: calc(95px + env(safe-area-inset-bottom, 0px)); max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); }
 }
 #fva-chat-header {
   background: var(--navy, #1a2b49); color: white; padding: 16px 20px;
@@ -180,17 +194,25 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
 #fva-chat-name-prompt p { color: var(--fv-muted); }
 #fva-chat-name-prompt input { width: 100%; padding: 12px; border: 1px solid var(--fv-line); border-radius: 8px; margin: 12px 0; font-size: 15px; background: var(--fv-input-bg); color: var(--fv-ink); }
 @media (max-width: 480px) {
-  #fva-chat-window { right: 16px; bottom: 88px; }
+  #fva-chat-window { right: 16px; bottom: calc(95px + env(safe-area-inset-bottom, 0px)); }
   #fva-chat-btn { right: 16px; bottom: 16px; }
-  body.kb-in-app #fva-chat-btn { bottom: 84px; right: 16px; }
+  body.kb-in-app #fva-chat-btn { bottom: calc(95px + env(safe-area-inset-bottom, 0px)); right: 16px; }
   /* Open on a narrow phone: the window becomes a full sheet, so no page
      behind it can show sliced through it and the launcher (hidden while
      open) cannot cover the bottom navigation. The window ends above the
      nav; the header × is the close control. The body.kb-in-app selector
-     outranks the app shell's own #fva-chat-window offsets. */
+     outranks the app shell's own #fva-chat-window offsets.
+     Round 10 (23 Nov 2026): the sheet bottom is calc(95px + the bottom
+     safe-area inset), not a fixed 88px. The nav is 77px tall before its
+     own inset padding, so 88px cleared it by only 11px with no inset
+     and sat on/inside it on a real iPhone (live: the sheet's bottom
+     edge was exactly the nav's top edge, so the clipped composer and
+     the picker's second row were cut at the nav). 95px = 77px nav +
+     18px daylight, scaled by the same inset the nav adds, so the
+     clearance is 18px at any inset. */
   #fva-chat-window.open,
   body.kb-in-app #fva-chat-window.open {
-    left: 0; right: 0; top: env(safe-area-inset-top, 0px); bottom: 88px;
+    left: 0; right: 0; top: env(safe-area-inset-top, 0px); bottom: calc(95px + env(safe-area-inset-bottom, 0px));
     width: auto; max-width: none; height: auto; max-height: none; border-radius: 0;
   }
   /* Narrow phones: the AI composer carries voice, speech, emoji and send
@@ -293,9 +315,33 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
 #fva-chat-menu-dropdown button:hover { background: var(--fv-panel); }
 #fva-chat-menu-dropdown button:last-child { border-bottom: none; }
 
+/* Round 10 (23 Nov 2026): the emoji picker is an overlay above the
+   composer, not an in-flow row. In-flow, it was one more
+   flex-shrink: 0 child in a column whose other non-shrinking children
+   (header, tabs, door picker, quick chips, composer) already filled
+   the sheet in the door-picker state, so the column overflowed and
+   the window's overflow: hidden clipped the picker (second row cut)
+   and the composer (invisible) at the sheet's bottom edge, exactly
+   where the bottom nav sits. As an overlay it can never be pushed
+   below the clip: it anchors to the composer's top edge (the composer
+   is 65px tall on desktop, 61px on a narrow phone, plus the same
+   bottom safe-area inset its own padding adds, so the anchor matches
+   the composer at any inset), sits above the messages column
+   (z-index 6, above the tab row's 5), and every row is visible:
+   max-height 140px fits all three rows of the 20 emojis at 320px and
+   up, with the internal scroll as a backstop for anything narrower.
+   While open it covers the quick chips, as an emoji panel does in
+   every chat app; tapping the emoji button again closes it and the
+   chips are back. The composer stays visible and tappable under it. */
 #fva-emoji-picker {
+  position: absolute; left: 0; right: 0; bottom: calc(65px + env(safe-area-inset-bottom, 0px)); z-index: 6;
   display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 16px;
-  background: var(--fv-panel); border-top: 1px solid var(--fv-line); max-height: 120px; overflow-y: auto;
+  background: var(--fv-panel); border-top: 1px solid var(--fv-line);
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.12);
+  max-height: 140px; overflow-y: auto;
+}
+@media (max-width: 480px) {
+  #fva-emoji-picker { bottom: calc(61px + env(safe-area-inset-bottom, 0px)); }
 }
 .fva-emoji { background: none; border: none; font-size: 22px; cursor: pointer; padding: 4px; border-radius: 8px; }
 .fva-emoji:hover { background: var(--fv-hover); }
@@ -372,7 +418,19 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
 #fva-chat-window.fva-tabs-on #fva-chat-messages,
 #fva-chat-window.fva-tabs-on #fva-case-history,
 #fva-chat-window.fva-tabs-on #fva-owner-inbox { margin-top: 48px; }
-#fva-support-status, #fva-support-tools, #fva-door-picker { flex: 0 0 auto; }
+#fva-support-status, #fva-support-tools { flex: 0 0 auto; }
+/* Round 10: the door picker is the one large block in the sheet that
+   can shrink. It used to be flex: 0 0 auto with the status/tools rows,
+   so in the door-picker state the non-shrinking stack (header, tabs,
+   door picker, quick chips, composer) could exceed the sheet height
+   on a short phone and the window's overflow: hidden clipped the
+   composer at the sheet's bottom edge (live: no composer visible at
+   all under the picker). Now the door picker takes the free space
+   (flex: 1 1 auto, min-height: 0) and scrolls internally when its
+   cards need more room, so the composer stays pinned and fully
+   visible at any height. In AI/Support mode it is display: none, so
+   this changes nothing there. */
+#fva-door-picker { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 #fva-mode-tabs button {
   flex: 1; padding: 9px 6px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--fv-brand); background: var(--fv-agent-bg);
