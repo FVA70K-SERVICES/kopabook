@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCachedList, setCachedList } from "../lib/listCache";
 import { ListSkeleton, UpdatedNote, LoadError } from "../components/ListState";
+import SalesDistribution from "../components/SalesDistribution";
 import { api, fmt, todayISO } from "../lib/api";
 
 function csvCell(value) {
@@ -149,6 +150,20 @@ export default function ReportsPage() {
                 </div>
               )}
             </div>
+
+            {/* Sales distribution: histogram + density + box plot of the
+                real sale amounts in this range (data.saleAmounts). It
+                sits inside the data branch, so the Starter gate above
+                hides it exactly like the rest of the report. When the
+                server predates this field (saleAmounts undefined) the
+                card is omitted rather than showing an empty chart. */}
+            {data.saleAmounts !== undefined && (
+              <SalesDistribution
+                amounts={data.saleAmounts}
+                truncated={data.saleAmountsTruncated}
+                totalCount={data.totals.salesCount}
+              />
+            )}
 
             <div className="card list-card">
               <h3>Top products</h3>

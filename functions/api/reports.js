@@ -119,6 +119,26 @@ export async function onRequestGet(context) {
        GROUP BY payment_method ORDER BY total DESC`
     ).bind(bid, from, to).all();
 
+    // Sale amounts for the distribution charts (histogram + kernel
+    // density + box plot). Same business, same range, same voided-sale
+    // exclusion as every query above; business_id comes from the
+    // authenticated session and from/to are bound parameters, so no
+    // new input the client can abuse. One capped query — the client
+    // must NOT page through /api/sales history for this. The cap is a
+    // literal in the SQL (not a bound value) and the newest sales come
+    // first, so a truncated set is the most recent sales; the client
+    // says so when it happens. No migration: total_amount already
+    // exists on sales.
+    const SALE_AMOUNTS_LIMIT = 5000;
+    const saleAmountsRows = await db.prepare(
+      `SELECT total_amount FROM sales
+       WHERE business_id = ? AND (status IS NULL OR status != 'voided') AND date(created_at) BETWEEN ? AND ?
+       ORDER BY created_at DESC LIMIT 5000`
+    ).bind(bid, from, to).all();
+    const saleAmounts = (saleAmountsRows.results || [])
+      .map((r) => Number(r.total_amount))
+      .filter((n) => Number.isFinite(n) && n >= 0);
+
     const trend = (profitTrend.results || []).map((r) => {
       const revenue = Number(r.revenue || 0);
       const cost = Number(r.cost || 0);
@@ -153,6 +173,11 @@ export async function onRequestGet(context) {
       },
       slowMovers: slowMovers.results || [],
       paymentBreakdown: paymentBreakdown.results || [],
+      // Distribution data (additive; existing fields unchanged).
+      // saleAmountsTruncated is true only when the range holds more
+      // sales than the cap, so the client can say so honestly.
+      saleAmounts,
+      saleAmountsTruncated: saleAmounts.length >= SALE_AMOUNTS_LIMIT && Number(totals?.sales_count || 0) > SALE_AMOUNTS_LIMIT,
     });
   } catch (error) {
     return json({ ok: false, message: "Could not load reports.", error: String(error) }, 500);

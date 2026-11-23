@@ -626,3 +626,23 @@ body.kb-in-app #fva-chat-window {
 .kb-install-actions { display: flex; flex-direction: column; gap: 10px; }
 .kb-install-btn { min-height: 44px; width: 100%; }
 @media (min-width: 640px) { .kb-install-actions { flex-direction: row; } .kb-install-btn { width: auto; flex: 1; } }
+
+/* ---------- Sales distribution (Reports) ----------
+   Histogram + density + box plot card. Plain colours, no animation:
+   KopaBook tooling stays clean, and reduced motion needs nothing
+   switched off. Tabs are 44px tall; the SVG scales to the card width
+   (max-width 100%, height auto) so 320px never overflows; axis
+   labels are HTML under the SVG so they stay readable when small. */
+.dist-card .dist-tabs { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+.dist-tab { min-height: 44px; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 15px; font-weight: 600; cursor: pointer; }
+.dist-tab[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+[data-theme="dark"] .dist-tab[aria-selected="true"] { background: #15803d; border-color: #15803d; }
+.dist-tab:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.dist-svg { width: 100%; height: auto; display: block; max-width: 100%; }
+.dist-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
+.dist-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--muted); margin-top: 12px; }
+.dist-stats strong { color: var(--ink); }
+.dist-note { margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .dist-tab, .dist-svg * { transition: none !important; animation: none !important; }
+}
