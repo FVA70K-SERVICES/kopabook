@@ -49,6 +49,7 @@
   let unread = 0;
   let soundOn = safeStoreGet(localStorage, 'fva_chat_sound') !== 'off';
   let rated = false;
+  let pickerOutsideWired = false;
   let proactiveShown = safeStoreGet(sessionStorage, 'fva_proactive_' + SITE_ID) === '1';
 
   // Merged in-app chat (KopaBook only): one thread, two doors.
@@ -651,6 +652,8 @@
   function setChatMode(mode, silent) {
     if (mode !== 'ai' && mode !== 'support') return;
     chatMode = mode;
+    hideEmojiPicker();
+    hideChatRating();
     try { localStorage.setItem('fva_chat_mode_kopabook', mode); } catch (e) {}
     updateHeaderPersona();
     renderModeTabs();
@@ -658,6 +661,26 @@
       appendModeNote('You are now talking to ' + modeName(mode) + '. Your conversation stays here.');
       showInitialQuickReplies();
     }
+  }
+
+  // Reaction-panel fix (23 Nov 2026): the emoji picker and the rating
+  // panel are overlays, not part of the message thread, so every path
+  // that changes what the panel shows must hide them explicitly. The
+  // picker used to strand open once its only toggle (the composer
+  // emoji button) disappeared with the input area at chat end, and the
+  // "Thanks for your feedback!" text was never hidden by any code.
+  function hideEmojiPicker() {
+    try {
+      const p = body.querySelector('#fva-emoji-picker');
+      if (p) p.style.display = 'none';
+    } catch {}
+  }
+
+  function hideChatRating() {
+    try {
+      const r = body.querySelector('#fva-chat-rating');
+      if (r) r.style.display = 'none';
+    } catch {}
   }
 
   function switchMode(mode) {
@@ -1484,6 +1507,7 @@
   }
 
   function setLiveVisible(v) {
+    if (!v) { hideEmojiPicker(); hideChatRating(); }
     ['#fva-chat-messages', '#fva-chat-input-area', '#fva-chat-quick'].forEach(sel => {
       const el = body.querySelector(sel);
       if (el) el.style.display = v ? '' : 'none';
@@ -1730,9 +1754,10 @@
     if (reset) list.innerHTML = '<p class="fva-history-empty">Loading support cases...</p>';
     try {
       const url = API + '/admin/cases?limit=25' + (inboxListCursor ? '&cursor=' + encodeURIComponent(inboxListCursor) : '');
-      const res = await fetch(url);
+      const fetchOpts = (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function')
+        ? { signal: AbortSignal.timeout(10000) } : {};
+      const res = await fetch(url, fetchOpts);
       if (res.status === 401) {
-        inboxListLoading = false;
         handleInboxAuthFailure();
         return;
       }
@@ -1780,9 +1805,15 @@
         list.appendChild(more);
       }
     } catch (e) {
-      if (reset) list.innerHTML = '<p class="fva-history-empty">Could not load the support inbox. Please try again.</p>';
+      if (reset) {
+        list.innerHTML = '<p class="fva-history-empty">Could not load the support inbox. Please try again.</p>' +
+          '<button class="fva-case-more fva-inbox-retry" type="button">Try again</button>';
+        const retry = list.querySelector('.fva-inbox-retry');
+        if (retry) retry.addEventListener('click', () => loadInboxList(true));
+      }
+    } finally {
+      inboxListLoading = false;
     }
-    inboxListLoading = false;
   }
 
   function refreshInboxDetailHead(detail, c) {
@@ -1949,6 +1980,8 @@
   function closeChat() {
     stopVoiceMode();
     hideBotTyping();
+    hideEmojiPicker();
+    hideChatRating();
     // Round 9: closing the panel ends the thread. Fortune (2026-11-11):
     // close and reopen must show a fresh chat, never the old thread.
     // Until now close only hid the panel: the session id stayed in
@@ -2083,6 +2116,7 @@
       '<div id="fva-chat-quick"></div>' +
       '<div id="fva-voice-chip" style="display:none;"></div>' +
       '<div id="fva-emoji-picker" style="display:none;">' +
+        '<button class="fva-emoji-close" type="button" aria-label="Close emoji picker">✕</button>' +
         EMOJIS.map(e => '<button class="fva-emoji">' + e + '</button>').join('') +
       '</div>' +
       '<div id="fva-chat-input-area">' +
@@ -2105,6 +2139,23 @@
     emojiPicker.querySelectorAll('.fva-emoji').forEach(b => {
       b.addEventListener('click', () => { input.value += b.textContent; input.focus(); });
     });
+    const pickerClose = emojiPicker.querySelector('.fva-emoji-close');
+    if (pickerClose) pickerClose.addEventListener('click', () => { emojiPicker.style.display = 'none'; });
+    // Tap outside the picker dismisses it (top-app behaviour). Wired
+    // once on the stable body container: showChatUI rebuilds the
+    // picker's children, never the body itself.
+    if (!pickerOutsideWired) {
+      pickerOutsideWired = true;
+      body.addEventListener('click', (e) => {
+        try {
+          const p = body.querySelector('#fva-emoji-picker');
+          if (!p || p.style.display === 'none') return;
+          const t = e.target;
+          if (t && t.closest && (t.closest('#fva-emoji-picker') || t.closest('#fva-emoji-btn'))) return;
+          p.style.display = 'none';
+        } catch {}
+      });
+    }
 
     body.querySelectorAll('.fva-star').forEach(s => {
       s.addEventListener('click', () => submitRating(parseInt(s.getAttribute('data-v'))));
@@ -2175,6 +2226,8 @@
     let detailId = null;
     try { detailId = (event && event.detail && event.detail.sessionId) || null; } catch (e) {}
     const targetId = detailId || sessionId;
+    hideEmojiPicker();
+    hideChatRating();
     // 1. Empty the visible thread SYNCHRONOUSLY, before any paint can
     // show old questions. This covers the panel-open-across-lock case:
     // the lock engaged while the panel was open, and the Dashboard is
@@ -2746,6 +2799,7 @@
   }
 
   function showRating() {
+    hideEmojiPicker();
     const r = body.querySelector('#fva-chat-rating');
     if (r) r.style.display = 'block';
   }
@@ -2780,6 +2834,7 @@
 
   async function endChat() {
     if (!confirm('End this chat?')) return;
+    hideEmojiPicker();
     try {
       await fetch(API + '/end', {
         method: 'POST',

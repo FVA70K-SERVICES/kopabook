@@ -328,8 +328,12 @@ body.kb-in-app #fva-chat-btn { bottom: calc(95px + env(safe-area-inset-bottom, 0
    bottom safe-area inset its own padding adds, so the anchor matches
    the composer at any inset), sits above the messages column
    (z-index 6, above the tab row's 5), and every row is visible:
-   max-height 140px fits all three rows of the 20 emojis at 320px and
-   up, with the internal scroll as a backstop for anything narrower.
+   max-height 142px fits all three rows of the 20 emojis plus the 44px
+   close button at 320px and up, with the internal scroll as a backstop
+   for anything narrower. (142, not 140: the close button makes the
+   first row 44px tall, so the content is 140px; with the 1px top
+   border the client area at 140px is only 139px and the panel
+   scrolled by 1px.)
    While open it covers the quick chips, as an emoji panel does in
    every chat app; tapping the emoji button again closes it and the
    chips are back. The composer stays visible and tappable under it. */
@@ -338,13 +342,14 @@ body.kb-in-app #fva-chat-btn { bottom: calc(95px + env(safe-area-inset-bottom, 0
   display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 16px;
   background: var(--fv-panel); border-top: 1px solid var(--fv-line);
   box-shadow: 0 -4px 16px rgba(0,0,0,0.12);
-  max-height: 140px; overflow-y: auto;
+  max-height: 142px; overflow-y: auto;
 }
 @media (max-width: 480px) {
   #fva-emoji-picker { bottom: calc(61px + env(safe-area-inset-bottom, 0px)); }
 }
 .fva-emoji { background: none; border: none; font-size: 22px; cursor: pointer; padding: 4px; border-radius: 8px; }
 .fva-emoji:hover { background: var(--fv-hover); }
+.fva-emoji-close { background: var(--fv-hover); border: 1px solid var(--fv-line); border-radius: 50%; width: 44px; height: 44px; min-width: 44px; min-height: 44px; font-size: 18px; line-height: 1; cursor: pointer; color: var(--fv-ink); display: flex; align-items: center; justify-content: center; padding: 0; flex-shrink: 0; }
 #fva-emoji-btn { background: none; border: none; font-size: 22px; cursor: pointer; flex-shrink: 0; }
 
 .read-receipt { font-size: 11px; margin-left: 4px; }
