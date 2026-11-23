@@ -17,8 +17,10 @@
 // redirect ("Response served by service worker has redirections"), which
 // is the error Fortune saw on his phone. The shell key is now "/"
 // (200 clean, no redirect), and no handler ever caches or serves a
-// redirected response again.)
-const SHELL_CACHE = "kopabook-shell-v9";
+// redirected response again. v10: animated entrance gate + Ask Kopa AI
+// open hardening, so installed apps drop the v9 shell and pick up the
+// current bundle instead of serving the old gate-less build.)
+const SHELL_CACHE = "kopabook-shell-v10";
 const API_CACHE = "kopabook-api-v1";
 const API_MAX_ENTRIES = 50;
 

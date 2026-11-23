@@ -56,8 +56,30 @@ import { NAV_MODULES, modulesForRole, modulesForType } from "./lib/businessTypes
 import { AppLockGate } from "./components/AppLock";
 import { applyRouteSeo } from "./lib/seo";
 
+import EntranceGate, { GATE_MIN_MS } from "./components/EntranceGate";
+
+// The gate's small branded fallback for lazily loaded pages. The old
+// fallback was the bare ".loading" spinner over live content; a chunk
+// load after the gate is a short, honest wait, so it shows the logo
+// and a line of text and no spinner.
+function PageFallback({ label }) {
+  return (
+    <div className="kb-page-loading" role="status" aria-live="polite">
+      <img src="/logo.png" alt="" className="kb-page-loading-logo" />
+      <p>{label}</p>
+    </div>
+  );
+}
+
 function useSession() {
-  const [state, setState] = useState({ loading: true, session: null });
+  // status: "ok" (signed in), "signed-out" (the server said 401 — a
+  // definite signed-out), "unknown" (any other failure: network blip,
+  // timeout, 5xx). Only a definite 401 ever routes to sign-in. An
+  // ambiguous failure holds the gate with a retry instead of dumping
+  // a signed-in user to the sign-in screen and, on the next sign-in,
+  // into a different business's books.
+  const [state, setState] = useState({ loading: true, session: null, status: "unknown" });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     // Warm the app-lock state in parallel with the session fetch: the
@@ -70,7 +92,7 @@ function useSession() {
       .then((d) => {
         if (active) {
           setCurrency(d.business?.currency);
-          setState({ loading: false, session: d });
+          setState({ loading: false, session: d, status: "ok" });
           // Tell Kopa Bot who is logged in (business copilot mode)
           try {
             if (d.user && d.business && window.setFVAChatOwner) {
@@ -85,10 +107,15 @@ function useSession() {
           } catch (e) {}
         }
       })
-      .catch(() => { if (active) setState({ loading: false, session: null }); });
+      .catch((err) => {
+        if (active) {
+          const signedOut = !!(err && err.status === 401);
+          setState({ loading: false, session: null, status: signedOut ? "signed-out" : "unknown" });
+        }
+      });
     return () => { active = false; };
-  }, []);
-  return state;
+  }, [attempt]);
+  return { ...state, retry: () => { setState({ loading: true, session: null, status: "unknown" }); setAttempt((a) => a + 1); } };
 }
 
 function AppRoute({ session }) {
@@ -98,7 +125,14 @@ function AppRoute({ session }) {
   // alone, and unknown paths get the not-found title.
   useEffect(() => { applyRouteSeo(path); }, [path]);
 
-  if (path === "/") return <LandingPage />;
+  // A signed-in cold start at "/" goes straight to the Dashboard.
+  // Before this fix AppRoute returned the marketing landing page for
+  // "/" regardless of session, so a signed-in user opening the app
+  // cold saw the landing page first (the 23 Nov video, ~42s).
+  if (path === "/") {
+    if (session) { nav("/app/dashboard"); return null; }
+    return <LandingPage />;
+  }
   if (path === "/features") return <FeaturesPage />;
   if (path === "/pricing") return <PricingPage />;
   if (path === "/about") return <AboutPage />;
@@ -151,7 +185,7 @@ function AppRoute({ session }) {
   if (path.startsWith("/app/projects/join/")) {
     const token = path.split("/")[4] || "";
     return (
-      <Suspense fallback={<div className="loading">Loading invite...</div>}>
+      <Suspense fallback={<PageFallback label="Opening invite…" />}>
         <ProjectJoinPage token={token} session={session} />
       </Suspense>
     );
@@ -209,7 +243,7 @@ function AppRoute({ session }) {
     return (
       <AppLockGate session={session}>
         <Layout session={session}>
-          <Suspense fallback={<div className="loading">Loading section...</div>}>
+          <Suspense fallback={<PageFallback label="Loading section…" />}>
             <div id="main">{page}</div>
           </Suspense>
         </Layout>
@@ -220,15 +254,59 @@ function AppRoute({ session }) {
   return <NotFoundPage />;
 }
 
+function gateReducedMotion() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
-  const { loading, session } = useSession();
-  if (loading) return <div className="loading">Loading KopaBook...</div>;
+  const { loading, session, status, retry } = useSession();
+  // Gate pacing, from first render (near navigation start). The gate
+  // shows until BOTH the session check has settled AND the 1400ms
+  // minimum has run — unless the check itself is slow, in which case
+  // the gate adds zero delay, or reduced motion is on, in which case
+  // there is no wait at all. An ambiguous failure never auto-advances:
+  // the gate holds with Try again (retry() re-runs the check; the
+  // minimum is already spent by then, so a good retry exits at once).
+  const [gateT0] = useState(() => {
+    try { return performance.now(); } catch { return 0; }
+  });
+  const [gateDone, setGateDone] = useState(false);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!loading) return;
+    const t = setTimeout(() => setSlow(true), GATE_MIN_MS);
+    return () => clearTimeout(t);
+  }, [loading]);
+  useEffect(() => {
+    if (loading) return;
+    if (status === "unknown") return;
+    if (gateReducedMotion()) { setGateDone(true); return; }
+    let remain = 0;
+    try { remain = GATE_MIN_MS - (performance.now() - gateT0); } catch { remain = 0; }
+    if (remain <= 0) { setGateDone(true); return; }
+    const t = setTimeout(() => setGateDone(true), remain);
+    return () => clearTimeout(t);
+  }, [loading, status, gateT0]);
+  const failed = !loading && status === "unknown";
+  if (loading || !gateDone) {
+    return (
+      <EntranceGate
+        slow={slow && loading}
+        failed={failed}
+        onRetry={() => { setGateDone(false); setSlow(false); retry(); }}
+      />
+    );
+  }
   // One Suspense boundary for the lazily loaded pages (public routes
   // and receipts); the /app branch has its own below. The install
   // prompt mounts here, outside the route, so it can appear on the
   // landing page as well as inside the app.
   return (
-    <Suspense fallback={<div className="loading">Loading KopaBook...</div>}>
+    <Suspense fallback={<PageFallback label="Loading KopaBook…" />}>
       <AppRoute session={session} />
       <InstallPrompt />
     </Suspense>

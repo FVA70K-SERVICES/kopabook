@@ -8,9 +8,26 @@
   const BOT_NAME = (scriptTag && scriptTag.getAttribute('data-bot-name')) || 'FVA Bot';
   const ACCENT = (scriptTag && scriptTag.getAttribute('data-color')) || '#1a6b3c';
 
-  let sessionId = localStorage.getItem('fva_chat_session_' + SITE_ID);
-  let visitorName = localStorage.getItem('fva_chat_name') || '';
-  let visitorEmail = localStorage.getItem('fva_chat_email') || '';
+  // ---- Safe storage (Nov 2026) ----
+  // Every storage read/write in this file goes through these helpers.
+  // A bare localStorage/sessionStorage access throws in browsers where
+  // storage is blocked (private mode, storage disabled), and the reads
+  // at the top of this IIFE used to be bare: one throw there killed
+  // the whole script before window.FVAChat was ever assigned, so the
+  // launcher never appeared and the Chat page sat on "Opening chat..."
+  // forever — the Ask Kopa AI failure on Fortune's phone. Storage is
+  // a nice-to-have here (session id, name, sound, mode); a failure
+  // degrades to in-memory defaults, never to a dead widget.
+  function safeStoreGet(store, key) {
+    try { return store.getItem(key); } catch (e) { return null; }
+  }
+  function safeStoreSet(store, key, value) {
+    try { store.setItem(key, value); } catch (e) {}
+  }
+
+  let sessionId = safeStoreGet(localStorage, 'fva_chat_session_' + SITE_ID);
+  let visitorName = safeStoreGet(localStorage, 'fva_chat_name') || '';
+  let visitorEmail = safeStoreGet(localStorage, 'fva_chat_email') || '';
   let lastMsgId = 0;
   let pollTimer = null;
   // ---- Clear on login (round 6) ----
@@ -30,9 +47,9 @@
   let keyboardOpen = false;
   let isOpen = false;
   let unread = 0;
-  let soundOn = localStorage.getItem('fva_chat_sound') !== 'off';
+  let soundOn = safeStoreGet(localStorage, 'fva_chat_sound') !== 'off';
   let rated = false;
-  let proactiveShown = sessionStorage.getItem('fva_proactive_' + SITE_ID) === '1';
+  let proactiveShown = safeStoreGet(sessionStorage, 'fva_proactive_' + SITE_ID) === '1';
 
   // Merged in-app chat (KopaBook only): one thread, two doors.
   // 'ai' = Ask Kopa AI (the shop's AI assistant), 'support' = Kopa Support
@@ -119,7 +136,7 @@
     }
   } catch (e) {}
   let chatMode = '';
-  try { chatMode = localStorage.getItem('fva_chat_mode_kopabook') || ''; } catch (e) {}
+  try { chatMode = safeStoreGet(localStorage, 'fva_chat_mode_kopabook') || ''; } catch (e) {}
   if (chatMode !== 'ai' && chatMode !== 'support') chatMode = '';
   let supportState = null;
   let ownerInboxAuthFailed = false;
@@ -477,7 +494,7 @@
 
   function toggleSound() {
     soundOn = !soundOn;
-    localStorage.setItem('fva_chat_sound', soundOn ? 'on' : 'off');
+    safeStoreSet(localStorage, 'fva_chat_sound', soundOn ? 'on' : 'off');
     win.querySelector('#fva-chat-sound').textContent = soundOn ? '🔔' : '🔕';
   }
   if (!soundOn) win.querySelector('#fva-chat-sound').textContent = '🔕';
@@ -577,7 +594,14 @@
     } catch (e) {}
   }
 
+  // Returns true when the panel is open, false when opening failed.
+  // Callers (Chat.jsx) treat false as not-ready and keep polling with
+  // a visible retry; openChat never throws synchronously any more, so
+  // one failure can never kill the caller's wait loop. On an unexpected
+  // failure the panel is still marked open, so the user sees the panel
+  // instead of nothing, and the next open attempt rebuilds its body.
   function openChat(requestedMode) {
+    try {
     // Opening the chat inside the app always re-marks the shell, so the
     // launcher and panel sit clear of the bottom nav even if the page
     // was reached by an SPA navigation the load-time check never saw.
@@ -609,6 +633,11 @@
       else { showNamePrompt(); }
     }
     else { showChatUI(); startPolling(); }
+    return true;
+    } catch (e) {
+      try { isOpen = true; win.classList.add('open'); } catch (e2) {}
+      return false;
+    }
   }
 
   function setChatMode(mode, silent) {
@@ -1968,8 +1997,8 @@
     const go = () => {
       visitorName = nameInput.value.trim() || 'Visitor';
       visitorEmail = emailInput.value.trim();
-      localStorage.setItem('fva_chat_name', visitorName);
-      localStorage.setItem('fva_chat_email', visitorEmail);
+      safeStoreSet(localStorage, 'fva_chat_name', visitorName);
+      safeStoreSet(localStorage, 'fva_chat_email', visitorEmail);
       startSession();
     };
     body.querySelector('#fva-name-go').addEventListener('click', go);
@@ -1991,7 +2020,7 @@
       });
       const data = await res.json();
       sessionId = data.sessionId;
-      localStorage.setItem('fva_chat_session_' + SITE_ID, sessionId);
+      safeStoreSet(localStorage, 'fva_chat_session_' + SITE_ID, sessionId);
       lastMsgId = 0; rated = false;
       showChatUI();
       startPolling();
@@ -2766,7 +2795,12 @@
     }
   }
   if ('Notification' in window && Notification.permission === 'default') {
-    setTimeout(() => Notification.requestPermission().catch(() => {}), 5000);
+    setTimeout(() => {
+      try {
+        const p = Notification.requestPermission();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (e) {}
+    }, 5000);
   }
 
   // Proactive invite: show after 30s if visitor hasn't chatted
@@ -2775,7 +2809,7 @@
       if (IS_KOPABOOK && isOwnerMode()) return;
       if (!isOpen && !sessionId) {
         invite.style.display = 'block';
-        sessionStorage.setItem('fva_proactive_' + SITE_ID, '1');
+        safeStoreSet(sessionStorage, 'fva_proactive_' + SITE_ID, '1');
         playSound();
       }
     }, 30000);
@@ -2792,19 +2826,26 @@
 
   // Clean routes: /app/chat/ai and /app/chat/support land on their side.
   // The owner context arrives a moment after the app session loads, so
-  // wait briefly for it before opening.
+  // wait briefly for it before opening. The wait is 18s (90 x 200ms):
+  // on a slow phone the session check can still be running when the
+  // old 6s window expired, and the auto-open then never fired. A throw
+  // inside one tick never kills the wait.
   (function autoOpenFromRoute() {
     const side = routeSide();
     if (!IS_KOPABOOK || (side !== 'ai' && side !== 'support')) return;
     let tries = 0;
     const t = setInterval(() => {
       tries++;
-      if (isOwnerMode()) {
-        clearInterval(t);
-        setChatMode(side, true);
-        openChat(side);
-      } else if (tries > 30) {
-        clearInterval(t);
+      try {
+        if (isOwnerMode()) {
+          clearInterval(t);
+          setChatMode(side, true);
+          openChat(side);
+        } else if (tries > 90) {
+          clearInterval(t);
+        }
+      } catch (e) {
+        if (tries > 90) clearInterval(t);
       }
     }, 200);
   })();

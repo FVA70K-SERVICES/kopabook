@@ -66,7 +66,7 @@ a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* ---------- layout ---------- */
-.page { min-height: 100vh; display: flex; flex-direction: column; }
+.page { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 .wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 20px; }
 .narrow { max-width: 640px; }
 
@@ -197,10 +197,10 @@ a:hover { text-decoration: underline; }
 .alert-ok { background: var(--brand-soft); color: var(--brand-dark); }
 
 /* ---------- app shell ---------- */
-.app { display: flex; min-height: 100vh; }
+.app { display: flex; min-height: 100vh; min-height: 100dvh; }
 .sidebar {
   width: 240px; flex-shrink: 0; background: #0f1f14; color: #d7e3da;
-  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; height: 100dvh;
   transition: width 0.2s ease;
 }
 .brand-row { display: flex; align-items: center; justify-content: space-between; padding: 22px 14px 6px 22px; }
@@ -373,6 +373,76 @@ table.data tr:first-child td { border-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   .loading::before { animation: none; }
 }
+
+/* ---------- animated entrance gate ---------- */
+/* Full-screen gate, KopaBook green. Logo draws in, one green halo ring
+   expands and fades once behind it, "Opening KopaBook…" with three calm
+   dots. dvh/svh, never fixed 100vh (iOS Safari's dynamic toolbar), and
+   the safe-area insets are honoured top and bottom. Reduced motion:
+   everything is drawn at once, no animation, no wait (the wait itself
+   is skipped in App.jsx). */
+.kb-gate {
+  min-height: 100vh;
+  min-height: 100dvh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+  background: var(--bg);
+  color: var(--ink);
+  text-align: center;
+}
+.kb-gate-halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  border: 2px solid var(--brand);
+  opacity: 0;
+  animation: kb-gate-halo 1.4s ease-out both;
+  pointer-events: none;
+}
+@keyframes kb-gate-halo {
+  from { transform: translate(-50%, -50%) scale(0.6); opacity: 0.55; }
+  to { transform: translate(-50%, -50%) scale(1.35); opacity: 0; }
+}
+.kb-gate-logo { position: relative; animation: kb-gate-in 0.9s ease both; }
+.kb-gate-logo .brand-logo { height: 64px; width: auto; }
+@keyframes kb-gate-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.kb-gate-msg { margin: 0; font-size: 17px; font-weight: 600; color: var(--muted); animation: kb-gate-in 0.9s ease 0.15s both; }
+.kb-gate-dots { display: flex; gap: 8px; }
+.kb-gate-dots span {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--brand);
+  animation: kb-gate-dot 1.2s ease-in-out infinite;
+}
+.kb-gate-dots span:nth-child(2) { animation-delay: 0.15s; }
+.kb-gate-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes kb-gate-dot {
+  0%, 100% { opacity: 0.3; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-4px); }
+}
+.kb-gate-retry { min-height: 48px; min-width: 160px; }
+.kb-gate-retry:active { transform: scale(0.97); }
+.kb-gate-hint { margin: 0; font-size: 14px; color: var(--muted); max-width: 320px; }
+@media (prefers-reduced-motion: reduce) {
+  .kb-gate-halo, .kb-gate-logo, .kb-gate-msg { animation: none; }
+  .kb-gate-dots span { animation: none; opacity: 1; }
+}
+
+/* ---------- lazy-page fallback (after the gate) ---------- */
+/* Short branded wait while a page chunk loads: logo + one line, no
+   spinner over live content. */
+.kb-page-loading { padding: 60px 20px; text-align: center; color: var(--muted); }
+.kb-page-loading-logo { height: 32px; width: auto; }
+.kb-page-loading p { margin: 14px 0 0; font-size: 15px; }
 .debt-amt { color: var(--danger); }
 .steps { display: grid; gap: 14px; margin: 30px 0; }
 .step { display: flex; gap: 16px; align-items: flex-start; }
@@ -384,7 +454,7 @@ table.data tr:first-child td { border-top: 0; }
 .section-band { background: #fff; }
 
 /* ---------- Printable receipts (thermal printers) ---------- */
-.receipt-screen { background: #e5e7eb; min-height: 100vh; padding: 16px 12px 40px; }
+.receipt-screen { background: #e5e7eb; min-height: 100vh; min-height: 100dvh; padding: 16px 12px 40px; }
 .receipt-toolbar { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; position: sticky; top: 0; padding: 8px 0; }
 .receipt-paper { background: #fff; color: #111; margin: 0 auto; padding: 12px 10px; font-family: "Courier New", Courier, monospace; font-size: 13px; line-height: 1.45; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
 .receipt-paper.paper-80 { width: 80mm; max-width: 100%; }
@@ -529,6 +599,7 @@ body.kb-in-app #fva-chat-btn { bottom: 84px; }
 body.kb-in-app #fva-chat-window {
   bottom: 156px;
   max-height: calc(100vh - 180px);
+  max-height: calc(100dvh - 180px);
 }
 @media (max-width: 480px) {
   body.kb-in-app #fva-chat-btn { bottom: 84px; right: 16px; }

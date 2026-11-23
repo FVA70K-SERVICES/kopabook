@@ -19,30 +19,100 @@ export default function ChatPage({ side, session }) {
   // shows a clear opening state and a retry instead of silence.
   const [chatReady, setChatReady] = useState(false);
   const [chatWaited, setChatWaited] = useState(false);
+  const [chatError, setChatError] = useState("");
+  // Bump to restart the open wait (manual Open tap, Retry tap). The
+  // effect below owns every open attempt, so a tap can never leave the
+  // page waiting on a dead attempt.
+  const [openAttempt, setOpenAttempt] = useState(0);
+
+  // Ask Kopa AI open hardening (Nov 2026). The live failure was the
+  // page sitting on "Opening chat..." forever with no retry: the old
+  // poll called window.FVAChat.open() with no try/catch, so a throw
+  // inside openChat killed the effect before any interval existed, and
+  // the 6s window could expire before the idle-loaded widget script
+  // arrived on a slow phone. Every open attempt is now guarded, a
+  // throw counts as not-ready (never as opened), the page loads the
+  // widget itself when the lazy loader has not delivered it yet, the
+  // wait is 15s, and a failure always ends on a visible retry.
+  const CHAT_WAIT_MS = 15000;
+  const CHAT_POLL_MS = 300;
+
+  function ensureChatScript() {
+    try {
+      if (window.FVAChat && window.FVAChat.open) return true;
+      if (document.getElementById("fva-chat-loader")) return false;
+      const s = document.createElement("script");
+      s.id = "fva-chat-loader";
+      s.src = "/fvachat.js";
+      s.setAttribute("data-site-id", "kopabook");
+      s.setAttribute("data-business", "Kopa Support");
+      s.setAttribute("data-bot-name", "Kopa Bot");
+      s.setAttribute("data-color", "#15803d");
+      s.onerror = () => {
+        setChatError("Chat could not load. Check your connection and try again.");
+        setChatWaited(true);
+      };
+      document.body.appendChild(s);
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  function panelOpen() {
+    try {
+      const w = document.getElementById("fva-chat-window");
+      return !!(w && w.classList.contains("open"));
+    } catch {
+      return false;
+    }
+  }
+
+  // One guarded open attempt: a throw inside the widget is not-ready,
+  // never a dead page. openChat returns false when it caught its own
+  // failure; an older cached widget returns undefined, so the panel's
+  // own "open" class is the proof either way.
+  function tryOpen() {
+    try {
+      if (window.FVAChat && window.FVAChat.open) {
+        const ok = window.FVAChat.open(active);
+        if (ok === false) return false;
+        return panelOpen();
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
 
   useEffect(() => {
     if (!active) return;
     if (active === "admin") return;
-    let tries = 0;
-    const openIt = () => {
-      if (window.FVAChat && window.FVAChat.open) {
-        window.FVAChat.open(active);
-        return true;
+    let stopped = false;
+    let timer = null;
+    const startedAt = Date.now();
+    const tick = () => {
+      if (stopped) return;
+      ensureChatScript();
+      if (tryOpen()) { setChatReady(true); return; }
+      if (Date.now() - startedAt >= CHAT_WAIT_MS) {
+        setChatError("Chat did not open. Check your connection and try again.");
+        setChatWaited(true);
+        return;
       }
-      return false;
+      timer = setTimeout(tick, CHAT_POLL_MS);
     };
-    if (openIt()) { setChatReady(true); return; }
-    const t = setInterval(() => {
-      tries++;
-      const ok = openIt();
-      if (ok) { setChatReady(true); clearInterval(t); }
-      else if (tries > 20) { setChatWaited(true); clearInterval(t); }
-    }, 300);
-    return () => clearInterval(t);
-  }, [active]);
+    tick();
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
+  }, [active, openAttempt]);
 
   const openPanel = () => {
-    if (window.FVAChat && window.FVAChat.open) window.FVAChat.open(active || undefined);
+    setChatError("");
+    setChatWaited(false);
+    if (tryOpen()) { setChatReady(true); return; }
+    // Widget not ready yet (still loading, or the last attempt threw):
+    // restart the guarded wait instead of leaving the tap unanswered.
+    setOpenAttempt((a) => a + 1);
   };
 
   return (
@@ -108,9 +178,9 @@ export default function ChatPage({ side, session }) {
                 : "You are on the Kopa Support side. A person from the FVA70K team can join this same chat when you need one."}
           </p>
           {!chatReady && (
-            <p className="hint">
+            <p className="hint" aria-live="polite">
               {chatWaited
-                ? "Chat did not open. Check your connection and try again."
+                ? (chatError || "Chat did not open. Check your connection and try again.")
                 : "Opening chat..."}
             </p>
           )}
