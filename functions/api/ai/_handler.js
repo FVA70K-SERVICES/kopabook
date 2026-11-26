@@ -14,6 +14,7 @@ import { AI_TIER_LIMITS, FREE_PROJECT_ACTIONS_PER_DAY, FREE_PROJECT_CAP_MSG, PRO
 import { matchCustomer } from "./_matchers.js";
 import { CANCEL_RE, CHAT_CONFIRM_WORDS_RE, PROPOSAL_TTL_MS, STAFF_ACTIVITY_NO_DATA, WRITE_TOOLS, callWriteExecutor, clearPendingWarnings, countProjectActionsToday, createAiProposal, debtorBalanceChanged, ensurePendingProposals, formatWarning, instructionGateRefusal, intentMatches, loadBusinessMemory, loadPendingProposal, loadPendingProposalById, loadPendingWarning, normalizeIntentText, outOfScopeRefusal, parseWarningAnswer, runGuardrailChecks, sanitizeTone, staffActivityAnswer, storePendingWarning, updateProposalStatus } from "./_proposals.js";
 import { MODEL_UNAVAILABLE_LINE, aiProviderAvailable, generateText } from "./_providers.js";
+import { isShadowPilotOn, runLlamaShadow } from "./_shadow.js";
 import { buildSnapshot, systemPrompt } from "./_snapshot.js";
 
 const HISTORY_LIMIT = 20;
@@ -523,7 +524,24 @@ export async function runKopaAiChat(context, auth, body) {
         const messages = [{ role: "system", content: sys }];
         for (const h of history.slice(-8)) messages.push({ role: h.role, content: h.content.slice(0, 500) });
         messages.push({ role: "user", content: message });
+        // Llama shadow pilot (26 Nov 2026): on the one flagged business,
+        // run Llama beside Gemini on the same messages. Gemini's answer
+        // is served; Llama's is only logged (see ./_shadow.js). The
+        // shadow never changes the reply, the proposal flow, or any other
+        // business: the flag is off everywhere except FVA70K STORE, and
+        // a missing flag row reads as off. The shadow call is awaited so
+        // its log row is written before the reply returns; it is a single
+        // attempt with the provider's own 15s ceiling, so the pilot
+        // business can wait up to ~15s longer on a slow Llama call
+        // (typically 1-3s). If Gemini fails, the shadow is left to finish
+        // in the background and the reply is the usual one-line
+        // unavailable message — Llama is never served as a fallback.
+        let llamaPromise = null;
+        if (await isShadowPilotOn(db, businessId)) {
+          llamaPromise = runLlamaShadow(context.env, db, businessId, message, messages, day, sys);
+        }
         modelText = await generateText(context.env, messages);
+        if (llamaPromise) await llamaPromise;
       } catch (e) {
         const reply = MODEL_UNAVAILABLE_LINE;
         return { status: 200, body: { ok: true, reply, answer: reply, actions_taken: [], fallback: true, usage: { used_today: newUsed, daily_limit: tierCfg.questionsPerDay, actions_today: actionsToday, actions_limit: tierCfg.actionsPerDay } } };

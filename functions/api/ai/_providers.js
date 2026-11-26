@@ -116,6 +116,81 @@ const AI_PROVIDERS = {
   "gemini-existing": providerGeminiExisting,
 };
 
+// Llama provider (shadow pilot only, 26 Nov 2026): served through
+// Cloudflare Workers AI, which hosts Meta's Llama models inside the same
+// Workers backend KopaBook already runs on. No key, no secret, no new
+// vendor: the only requirement is the `ai` binding on the Pages project
+// (dashboard: Settings -> Functions -> Bindings -> Workers AI, variable
+// name `AI`), which surfaces as env.AI. Do NOT declare it in
+// wrangler.toml: Cloudflare's own docs say a Pages Function AI binding
+// must be configured in the dashboard, and a wrangler.toml [ai] section
+// can make the Git integration deploy with the Workers command instead.
+// This provider is NEVER in the generateText order below: Gemini stays
+// the only served provider. Llama is called only by the shadow pilot in
+// ./_shadow.js, and its text is logged, never served. Workers AI returns
+// { response, usage: { prompt_tokens, completion_tokens, total_tokens } }
+// for text generation; usage may be absent on some models, so callers
+// must treat it as optional.
+const LLAMA_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
+// Workers AI Neuron rates for Scout (fit note, Cloudflare pricing):
+// 24,545 neurons per 1M input tokens, 77,273 per 1M output tokens.
+// The free allowance is 10,000 Neurons/day account-wide; the pilot's
+// budget guard stops its own logged use at ~9,000/day.
+const LLAMA_NEURONS_PER_M_INPUT = 24545;
+const LLAMA_NEURONS_PER_M_OUTPUT = 77273;
+
+export function llamaAvailable(env) {
+  return !!(env && env.AI && typeof env.AI.run === "function");
+}
+
+// Neuron estimate from token usage. The API does not return a neuron
+// count per call, so this is an estimate from Cloudflare's published
+// per-token Neuron rates, rounded up. Logged as an estimate, never
+// presented as a metered figure.
+export function estimateLlamaNeurons(promptTokens, completionTokens) {
+  const p = Number(promptTokens) || 0;
+  const c = Number(completionTokens) || 0;
+  return Math.ceil((p * LLAMA_NEURONS_PER_M_INPUT + c * LLAMA_NEURONS_PER_M_OUTPUT) / 1000000);
+}
+
+// One Llama call, same shape as the Gemini providers: (env, messages,
+// opts) => { text, usage }, throws when it cannot answer. Plain text
+// only, no JSON mode: the shadow mirrors the served Gemini call exactly
+// (same messages, same temperature, same output cap), so what is measured
+// is what Llama does on the real prompt. Single attempt, no retry: this
+// is measurement, not serving — a failed shadow call is logged as failed
+// and the next question tries again. The timeout is a race, because
+// env.AI.run takes no abort signal: the underlying call may finish
+// server-side, but the pilot stops waiting after PROVIDER_TIMEOUT_MS.
+export async function generateLlamaText(env, messages, opts) {
+  if (!llamaAvailable(env)) throw new Error("llama not configured");
+  const o = opts || {};
+  const maxTokens = typeof o.maxOutputTokens === "number" ? o.maxOutputTokens : STANDARD_MAX_OUTPUT_TOKENS;
+  const payload = {
+    messages: (messages || []).map((m) => ({ role: String((m && m.role) || "user"), content: String((m && m.content) || "") })).filter((m) => m.content),
+    max_tokens: maxTokens,
+    temperature: typeof o.temperature === "number" ? o.temperature : 0.7,
+  };
+  let timer = null;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Llama timeout")), PROVIDER_TIMEOUT_MS); });
+  try {
+    const res = await Promise.race([env.AI.run(LLAMA_MODEL, payload), timeout]);
+    const text = String((res && res.response) || "").trim();
+    if (!text) throw new Error("empty response from llama");
+    const usage = (res && res.usage) || {};
+    return {
+      text,
+      usage: {
+        prompt_tokens: Number(usage.prompt_tokens) || 0,
+        completion_tokens: Number(usage.completion_tokens) || 0,
+        total_tokens: Number(usage.total_tokens) || 0,
+      },
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function aiProviderAvailable(env) {
   return !!((env && env.GEMINI_PAID_API_KEY) || (env && env.GEMINI_API_KEY));
 }

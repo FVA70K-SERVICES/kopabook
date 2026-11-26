@@ -1,4 +1,7 @@
 // POST /api/ai/chat: Kopa, the KopaBook business assistant (paid Gemini keys only, no free chain).
+// Llama shadow pilot (26 Nov 2026): on one business (FVA70K STORE) Llama
+// runs beside Gemini and its answers are logged, never served. See
+// functions/api/ai/_shadow.js. Gemini stays the only served provider.
 //
 // One live chatbot that answers EVERYTHING about the business from real,
 // live store data. The LLM never writes SQL and never invents numbers: every
